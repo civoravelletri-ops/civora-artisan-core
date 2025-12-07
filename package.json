@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "description": "Backend per gestione personalizzazioni e automazione ordini Civora",
   "engines": {
-    "node": "22.x"
+     "node": "20.x"
   },
   "dependencies": {
-    "firebase-admin": "^11.11.0",
-    "resend": "^2.0.0",
+    "firebase-admin": "^12.1.0",
+    "resend": "^3.2.0",
     "date-fns": "^2.30.0"
   }
 }
