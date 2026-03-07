@@ -135,7 +135,7 @@ async function handleBazarFinalizeOrder(req, res) {
 
         // ⚠️ INSERISCI QUI IL TUO ID MACRODROID! ⚠️
         // Questo è il lungo codice alfanumerico che trovi nel link del Webhook di MacroDroid.
-        const TUO_ID_MACRODROID = "INSERISCI_QUI_IL_TUO_ID";
+        const TUO_ID_MACRODROID = "https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms";
 
         // Costruisco il link per il Webhook di MacroDroid
         // NOTA BENE: I nomi dei parametri nel link devono corrispondere alle variabili locali di MacroDroid!
