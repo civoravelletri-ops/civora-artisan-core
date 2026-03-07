@@ -44,7 +44,7 @@ async function handleBazarCalculateAndPay(req, res) {
     const item = cartItems[0];
     const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(item.docId);
     const snap = await productRef.get();
-    
+
     if (!snap.exists) throw new Error("Prodotto non trovato.");
     const data = snap.data();
 
@@ -74,7 +74,8 @@ async function handleBazarCalculateAndPay(req, res) {
 }
 
 async function handleBazarFinalizeOrder(req, res) {
-    const { paymentIntentId, vendorId, customerShippingData, orderNotes } = req.body;
+    // ABBIAMO AGGIUNTO purchasedItem e totalPaid
+    const { paymentIntentId, vendorId, customerShippingData, orderNotes, purchasedItem, totalPaid } = req.body;
     
     // Finalizzazione ordine in Firebase
     const orderRef = db.collection('orders').doc();
@@ -85,12 +86,13 @@ async function handleBazarFinalizeOrder(req, res) {
         status: 'pending',
         vendorId,
         shippingAddress: customerShippingData,
-        orderNotes,
+        orderNotes: orderNotes || '',
         paymentIntentId,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        orderCategory: 'product'
+        orderCategory: 'bazar', // Modificato per distinguere dal food
+        totalAmount: totalPaid || 0, // ORA SALVA IL TOTALE
+        cartItems: purchasedItem ? [purchasedItem] : [] // ORA SALVA L'OGGETTO COMPRATO
     });
     
-
     return res.status(200).json({ orderId: orderRef.id, orderNumber });
 }
