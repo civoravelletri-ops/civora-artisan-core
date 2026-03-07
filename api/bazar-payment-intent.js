@@ -119,7 +119,8 @@ async function handleBazarFinalizeOrder(req, res) {
         const macrodroidUrl = `https://trigger.macrodroid.com/${TUO_ID_MACRODROID}/bazar_sms?numero=${encodeURIComponent(numeroCliente)}&messaggio=${encodeURIComponent(messaggioSms)}`;
 
         // Spedisco il comando al telefono (senza aspettare la risposta per non rallentare il sito)
-        fetch(macrodroidUrl).catch(e => console.log("Errore di rete invio webhook:", e));
+        // Spedisco il comando al telefono (ORA VERCEL ASPETTA CHE L'IMPULSO PARTA)
+        await fetch(macrodroidUrl).catch(e => console.log("Errore di rete invio webhook:", e));
 
     } catch (smsError) {
         console.error("Errore generale invio SMS MacroDroid:", smsError);
