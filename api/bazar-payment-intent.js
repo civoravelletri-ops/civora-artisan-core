@@ -45,7 +45,7 @@ async function handleBazarCalculateAndPay(req, res) {
     const item = cartItems[0]; // Per il Bazar Lampo, c'è sempre un solo articolo
     const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(item.docId);
     const snap = await productRef.get();
-    
+
     if (!snap.exists) {
         throw new Error("Prodotto non trovato o non più disponibile.");
     }
@@ -76,8 +76,8 @@ async function handleBazarCalculateAndPay(req, res) {
         currency: 'eur',
         application_fee_amount: Math.round(commission * 100), // Commissione Civora
         transfer_data: { destination: vendorData.stripeAccountId }, // Trasferisce al venditore
-        metadata: { 
-            vendorId, 
+        metadata: {
+            vendorId,
             productId: item.docId,
             bazarPriceNetto: netPrice.toString(),
             commissionCivora: commission.toString(),
@@ -90,7 +90,7 @@ async function handleBazarCalculateAndPay(req, res) {
 
 async function handleBazarFinalizeOrder(req, res) {
     const { paymentIntentId, vendorId, customerShippingData, orderNotes, purchasedItem } = req.body;
-    
+
     // VERIFICA DI SICUREZZA FINALE: Chiediamo a Stripe l'importo effettivamente pagato
     const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
     if (!intent || intent.status !== 'succeeded') {
@@ -129,13 +129,13 @@ async function handleBazarFinalizeOrder(req, res) {
         if (!numeroCliente.startsWith('+')) {
             numeroCliente = '+39' + numeroCliente; // Aggiunge il prefisso italiano se manca
         }
-        
+
         // Creo il messaggio SMS
         const messaggioSms = `Ciao da ${nomeNegozio}, grazie per l'acquisto! Il tuo ordine e' in elaborazione. Preparati alla chiamata del corriere per ricevere l'ordine.`;
 
         // ⚠️ INSERISCI QUI IL TUO ID MACRODROID! ⚠️
         // Questo è il lungo codice alfanumerico che trovi nel link del Webhook di MacroDroid.
-        const TUO_ID_MACRODROID = "INSERISCI_QUI_IL_TUO_ID"; 
+        const TUO_ID_MACRODROID = "INSERISCI_QUI_IL_TUO_ID";
 
         // Costruisco il link per il Webhook di MacroDroid
         // NOTA BENE: I nomi dei parametri nel link devono corrispondere alle variabili locali di MacroDroid!
@@ -159,6 +159,6 @@ async function handleBazarFinalizeOrder(req, res) {
         // Continua comunque il flusso di risposta al cliente, l'ordine è già salvato.
     }
     // =======================================================================
-    
+
     return res.status(200).json({ orderId: orderRef.id, orderNumber });
 }
