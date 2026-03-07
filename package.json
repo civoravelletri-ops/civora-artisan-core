@@ -1,6 +1,6 @@
 {
   "name": "civora-artisan-core",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Backend per gestione personalizzazioni e automazione ordini Civora",
   "scripts": {
     "start": "vercel dev"
