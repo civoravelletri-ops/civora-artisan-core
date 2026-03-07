@@ -75,15 +75,15 @@ async function handleBazarCalculateAndPay(req, res) {
 
 async function handleBazarFinalizeOrder(req, res) {
     const { paymentIntentId, vendorId, customerShippingData, orderNotes, purchasedItem } = req.body;
-    
-    // IL VERO GUARDIANO: Chiediamo alla Banca (Stripe) quanto ha EFFETTIVAMENTE pagato il cliente
+
+    // Chiediamo alla Banca (Stripe) quanto ha EFFETTIVAMENTE pagato il cliente
     const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
-    const soldiVeriPagati = intent.amount / 100; // Stripe ragiona in centesimi, quindi dividiamo per 100
-    
+    const soldiVeriPagati = intent.amount / 100;
+
     // Creazione dell'ordine in Firebase
     const orderRef = db.collection('orders').doc();
     const orderNumber = `B-${new Date().getTime().toString().slice(-8)}`;
-    
+
     await orderRef.set({
         orderNumber,
         status: 'pending',
@@ -93,9 +93,38 @@ async function handleBazarFinalizeOrder(req, res) {
         paymentIntentId,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         orderCategory: 'bazar',
-        totalAmount: soldiVeriPagati, // <--- IL PREZZO VIENE DALLA BANCA, NON DAL BROWSER! HACKER BLOCCATO.
+        totalAmount: soldiVeriPagati,
         cartItems: purchasedItem ? [purchasedItem] : []
     });
-    
+
+    // ==========================================
+    // NOVITÀ: INVIO SMS TRAMITE MACRODROID
+    // ==========================================
+    try {
+        // Recupero il nome del negozio dal database
+        const vendorDoc = await db.collection('vendors').doc(vendorId).get();
+        const nomeNegozio = vendorDoc.exists ? (vendorDoc.data().store_name || 'Bazar') : 'Bazar';
+
+        // Prendo il numero di telefono del cliente
+        const numeroCliente = customerShippingData.phone;
+
+        // Creo il messaggio esatto che volevi tu
+        const messaggioSms = `Ciao da ${nomeNegozio}, grazie per l'acquisto! Il tuo ordine e' in elaborazione. Preparati alla chiamata del corriere per ricevere l'ordine.`;
+
+        // ⚠️ INSERISCI QUI IL TUO ID MACRODROID! ⚠️
+        // Guarda il link che ti ha dato MacroDroid al Passo 1 e copia la parte con i numeri/lettere strane
+        const TUO_ID_MACRODROID = "https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms";
+
+        // Costruisco il link per svegliare MacroDroid
+        const macrodroidUrl = `https://trigger.macrodroid.com/${TUO_ID_MACRODROID}/bazar_sms?numero=${encodeURIComponent(numeroCliente)}&messaggio=${encodeURIComponent(messaggioSms)}`;
+
+        // Spedisco il comando al telefono (senza aspettare la risposta per non rallentare il sito)
+        fetch(macrodroidUrl).catch(e => console.log("Errore di rete invio webhook:", e));
+
+    } catch (smsError) {
+        console.error("Errore generale invio SMS MacroDroid:", smsError);
+    }
+    // ==========================================
+
     return res.status(200).json({ orderId: orderRef.id, orderNumber });
 }
