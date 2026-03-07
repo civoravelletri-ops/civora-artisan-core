@@ -133,14 +133,14 @@ async function handleBazarFinalizeOrder(req, res) {
         // Creo il messaggio SMS
         const messaggioSms = `Ciao da ${nomeNegozio}, grazie per l'acquisto! Il tuo ordine e' in elaborazione. Preparati alla chiamata del corriere per ricevere l'ordine.`;
 
-        // ⚠️ INSERISCI QUI IL TUO ID MACRODROID! ⚠️
-        // Questo è il lungo codice alfanumerico che trovi nel link del Webhook di MacroDroid.
-        const TUO_ID_MACRODROID = "https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms";
+        // ⚠️ CORREZIONE QUI ⚠️
+        // Incolla l'URL COMPLETO del tuo webhook MacroDroid QUI
+        // ESEMPIO: "https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms"
+        const MACRODROID_WEBHOOK_URL_BASE = "https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms";
 
         // Costruisco il link per il Webhook di MacroDroid
-        // NOTA BENE: I nomi dei parametri nel link devono corrispondere alle variabili locali di MacroDroid!
-        // Per le tue macro, i nomi sono 'phone' e 'message', come da screenshot.
-        const macrodroidUrl = `https://trigger.macrodroid.com/${TUO_ID_MACRODROID}/bazar_sms?phone=${encodeURIComponent(numeroCliente)}&message=${encodeURIComponent(messaggioSms)}`;
+        // Ora appendiamo i parametri all'URL BASE
+        const macrodroidUrl = `${MACRODROID_WEBHOOK_URL_BASE}?phone=${encodeURIComponent(numeroCliente)}&message=${encodeURIComponent(messaggioSms)}`;
 
         // Spedisco il comando al telefono.
         // Usiamo 'await' per assicurarci che Vercel abbia inviato l'impulso prima di terminare la funzione,
@@ -148,7 +148,7 @@ async function handleBazarFinalizeOrder(req, res) {
         await fetch(macrodroidUrl)
             .then(response => {
                 if (!response.ok) {
-                    console.warn(`Webhook MacroDroid fallito con status: ${response.status}`);
+                    console.warn(`Webhook MacroDroid fallito con status: ${response.status} - ${response.statusText}`);
                     // Puoi leggere la risposta per dettagli: return response.text().then(text => console.warn(text));
                 }
             })
