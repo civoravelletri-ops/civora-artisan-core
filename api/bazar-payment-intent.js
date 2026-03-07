@@ -74,10 +74,13 @@ async function handleBazarCalculateAndPay(req, res) {
 }
 
 async function handleBazarFinalizeOrder(req, res) {
-    // ABBIAMO AGGIUNTO purchasedItem e totalPaid
-    const { paymentIntentId, vendorId, customerShippingData, orderNotes, purchasedItem, totalPaid } = req.body;
+    const { paymentIntentId, vendorId, customerShippingData, orderNotes, purchasedItem } = req.body;
     
-    // Finalizzazione ordine in Firebase
+    // IL VERO GUARDIANO: Chiediamo alla Banca (Stripe) quanto ha EFFETTIVAMENTE pagato il cliente
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const soldiVeriPagati = intent.amount / 100; // Stripe ragiona in centesimi, quindi dividiamo per 100
+    
+    // Creazione dell'ordine in Firebase
     const orderRef = db.collection('orders').doc();
     const orderNumber = `B-${new Date().getTime().toString().slice(-8)}`;
     
@@ -89,9 +92,9 @@ async function handleBazarFinalizeOrder(req, res) {
         orderNotes: orderNotes || '',
         paymentIntentId,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        orderCategory: 'bazar', // Modificato per distinguere dal food
-        totalAmount: totalPaid || 0, // ORA SALVA IL TOTALE
-        cartItems: purchasedItem ? [purchasedItem] : [] // ORA SALVA L'OGGETTO COMPRATO
+        orderCategory: 'bazar',
+        totalAmount: soldiVeriPagati, // <--- IL PREZZO VIENE DALLA BANCA, NON DAL BROWSER! HACKER BLOCCATO.
+        cartItems: purchasedItem ? [purchasedItem] : []
     });
     
     return res.status(200).json({ orderId: orderRef.id, orderNumber });
