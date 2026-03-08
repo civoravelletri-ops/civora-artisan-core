@@ -36,22 +36,22 @@ module.exports = async (req, res) => {
 };
 
 async function handleBazarCalculateAndPay(req, res) {
-    const { cartItems, vendorId, clientClaimedTotal, userId } = req.body; 
-    const CIVORA_COMMISSION = 0.03;
+    const { cartItems, vendorId, clientClaimedTotal, userId } = req.body;
+    const CIVORA_COMMISSION = 0.07;
 
     if (!userId) throw new Error("Utente non identificato. Ricarica la pagina per favore.");
 
-    const item = cartItems[0]; 
+    const item = cartItems[0];
     const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(item.docId);
 
     let productData;
     await db.runTransaction(async (transaction) => {
         const productDoc = await transaction.get(productRef);
         if (!productDoc.exists) throw new Error("Prodotto non trovato.");
-        
+
         productData = productDoc.data();
         const now = admin.firestore.Timestamp.now().toMillis();
-        
+
         if (productData.status === 'sold' || productData.quantity <= 0) {
             throw new Error("Prodotto esaurito.");
         }
@@ -132,7 +132,7 @@ async function handleBazarFinalizeOrder(req, res) {
         };
 
         if (newQuantity <= 0) {
-            updateFields.status = 'sold'; 
+            updateFields.status = 'sold';
             updateFields.activeLocks = {}; // Svuota tutti i lucchetti rimasti (ormai inutili)
         }
 
@@ -187,13 +187,13 @@ async function handleBazarFinalizeOrder(req, res) {
 
         const messaggioSmsCliente = `Ciao da ${nomeNegozio}, grazie per l'acquisto! Il tuo ordine #${orderNumber} e' in elaborazione. Preparati alla chiamata del corriere per ricevere l'ordine.`;
         const macrodroidUrlCliente = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroCliente)}&message=${encodeURIComponent(messaggioSmsCliente)}`;
-        
+
         // Aggiunto l'AWAIT qui: Obbliga Vercel ad aspettare che MacroDroid riceva il comando
         await fetch(macrodroidUrlCliente);
         console.log("SMS inviato a Macrodroid con successo.");
-        
-    } catch (smsError) { 
-        console.error("Errore invio SMS:", smsError); 
+
+    } catch (smsError) {
+        console.error("Errore invio SMS:", smsError);
     }
     // ==========================================
 
@@ -211,7 +211,7 @@ async function handleBazarReleaseLock(req, res) {
         if (productDoc.exists) {
             const data = productDoc.data();
             let activeLocks = data.activeLocks || {};
-            
+
             if (activeLocks[userId] && data.status !== 'sold') {
                 delete activeLocks[userId];
                 transaction.update(productRef, { activeLocks: activeLocks });
