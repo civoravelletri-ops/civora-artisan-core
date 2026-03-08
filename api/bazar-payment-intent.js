@@ -23,12 +23,14 @@ module.exports = async (req, res) => {
     const { action } = req.body;
 
     try {
-        if (action === 'CALCULATE_AND_PAY') {
-            return await handleBazarCalculateAndPay(req, res);
-        } else if (action === 'FINALIZE_ORDER') {
-            return await handleBazarFinalizeOrder(req, res);
-        }
-        return res.status(400).json({ error: 'Azione sconosciuta' });
+            if (action === 'CALCULATE_AND_PAY') {
+                return await handleBazarCalculateAndPay(req, res);
+            } else if (action === 'FINALIZE_ORDER') {
+                return await handleBazarFinalizeOrder(req, res);
+            } else if (action === 'RELEASE_LOCK') {  // <--- NUOVA RIGA AGGIUNTA
+                return await handleBazarReleaseLock(req, res);
+            }
+            return res.status(400).json({ error: 'Azione sconosciuta' });
     } catch (error) {
         console.error("❌ ERRORE BAZAR:", error);
         // Rispondo 400 così il browser sa che è un errore logico e non blocca per CORS
@@ -37,14 +39,14 @@ module.exports = async (req, res) => {
 };
 
 async function handleBazarCalculateAndPay(req, res) {
-    const { cartItems, vendorId, clientClaimedTotal, userId } = req.body; 
+    const { cartItems, vendorId, clientClaimedTotal, userId } = req.body;
     const CIVORA_COMMISSION = 0.03;
 
     if (!userId) {
         throw new Error("Utente non identificato. Ricarica la pagina per favore.");
     }
 
-    const item = cartItems[0]; 
+    const item = cartItems[0];
     const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(item.docId);
 
     let productData;
@@ -139,8 +141,8 @@ async function handleBazarFinalizeOrder(req, res) {
         };
 
         if (newQuantity <= 0) {
-            updateFields.status = 'sold'; 
-            updateFields.quantity = 0; 
+            updateFields.status = 'sold';
+            updateFields.quantity = 0;
         }
 
         transaction.update(productRef, updateFields);
@@ -213,4 +215,27 @@ async function handleBazarFinalizeOrder(req, res) {
 
     // MANDIAMO LA RISPOSTA FINALE CORRETTA AL CLIENTE
     return res.status(200).json({ success: true, orderId: orderRef.id, orderNumber });
+}
+async function handleBazarReleaseLock(req, res) {
+    const { vendorId, productId, userId } = req.body;
+    if (!vendorId || !productId || !userId) return res.status(400).json({ error: 'Dati mancanti' });
+
+    const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
+
+    await db.runTransaction(async (transaction) => {
+        const productDoc = await transaction.get(productRef);
+        if (productDoc.exists) {
+            const data = productDoc.data();
+            // Sblocca SOLO se è ancora bloccato da questo utente e NON è già stato venduto
+            if (data.lockedBy === userId && data.status !== 'sold') {
+                transaction.update(productRef, {
+                    lockedBy: null,
+                    lockedUntil: null,
+                    waitingList: admin.firestore.FieldValue.delete()
+                });
+            }
+        }
+    });
+
+    return res.status(200).json({ success: true });
 }
