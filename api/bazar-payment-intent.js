@@ -1,14 +1,12 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const admin = require('firebase-admin');
 
-// Inizializzazione Firebase Admin
 if (!admin.apps.length) {
     const firebaseConfig = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8'));
     admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
 }
 const db = admin.firestore();
 
-// Funzione per gestire i permessi (CORS)
 function setCorsHeaders(res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -58,20 +56,13 @@ async function handleBazarCalculateAndPay(req, res) {
         productData = productDoc.data();
 
         const now = admin.firestore.Timestamp.now().toMillis();
-        let activeLocks = productData.activeLocks || {};
+        const lockedUntilMs = productData.lockedUntil ? productData.lockedUntil.toMillis() : 0;
 
-        // Controlla se l'utente ha un lucchetto attivo e non scaduto
-        if (!activeLocks[userId] || activeLocks[userId] <= now) {
-            throw new Error("La tua priorità su questo prodotto è scaduta o è stata persa.");
-        }
-        
-        // Controlla la quantità disponibile
-        const currentlyLockedCount = Object.keys(activeLocks).length;
-        if (productData.quantity <= 0 || productData.quantity < currentlyLockedCount) {
-             throw new Error("Prodotto esaurito o non più disponibile.");
-        }
-        if (productData.status === 'sold') { // Doppia verifica per sicurezza
+        if (productData.status === 'sold') {
             throw new Error("Prodotto già venduto definitivamente.");
+        }
+        if (productData.lockedBy !== userId || lockedUntilMs <= now) {
+            throw new Error("La tua priorità su questo prodotto è scaduta o è stata persa.");
         }
     });
 
@@ -124,32 +115,24 @@ async function handleBazarFinalizeOrder(req, res) {
 
         finalProductData = productDoc.data();
         const now = admin.firestore.Timestamp.now().toMillis();
-        let activeLocks = productData.activeLocks || {};
-        let waitingList = productData.waitingList || {};
+        const lockedUntilMs = finalProductData.lockedUntil ? finalProductData.lockedUntil.toMillis() : 0;
 
         if (finalProductData.status === 'sold') {
             await stripe.refunds.create({ payment_intent: paymentIntentId });
             throw new Error("Prodotto già venduto. Rimborso avviato.");
         }
-        
-        // Verifica ancora la validità del lucchetto prima di finalizzare
-        if (!activeLocks[userId] || activeLocks[userId] <= now) {
+
+        if (finalProductData.lockedBy !== userId || lockedUntilMs <= now) {
             await stripe.refunds.create({ payment_intent: paymentIntentId });
             throw new Error("La tua priorità è scaduta. Rimborso avviato.");
         }
 
-        // Rimuovi il lucchetto di questo utente
-        delete activeLocks[userId];
-        if (waitingList[userId]) { // Rimuovi anche dalla waiting list se era lì per qualche motivo
-            delete waitingList[userId];
-        }
-
-        // Decrementa la quantità
         let newQuantity = finalProductData.quantity - 1;
 
         const updateFields = {
-            activeLocks: activeLocks,
-            waitingList: waitingList,
+            lockedBy: null,
+            lockedUntil: null,
+            waitingList: admin.firestore.FieldValue.delete(),
             quantity: newQuantity
         };
 
@@ -220,7 +203,7 @@ async function handleBazarFinalizeOrder(req, res) {
     return res.status(200).json({ success: true, orderId: orderRef.id, orderNumber });
 }
 
-// FUNZIONE PER SBLOCCARE IMMEDIATAMENTE IL PRODOTTO (ora gestisce activeLocks)
+// LA NUOVA FUNZIONE PER SBLOCCARE IMMEDIATAMENTE IL PRODOTTO
 async function handleBazarReleaseLock(req, res) {
     const { vendorId, productId, userId } = req.body;
     
@@ -234,22 +217,15 @@ async function handleBazarReleaseLock(req, res) {
         const productDoc = await transaction.get(productRef);
         if (productDoc.exists) {
             const data = productDoc.data();
-            let activeLocks = data.activeLocks || {};
-            let waitingList = data.waitingList || {};
             
-            // Rimuovi il lucchetto di questo utente e dalla waitingList se esiste
-            if (activeLocks[userId]) {
-                delete activeLocks[userId];
+            // Sblocca solo se il lucchetto era di questo utente e non l'ha ancora comprato nessuno
+            if (data.lockedBy === userId && data.status !== 'sold') {
+                transaction.update(productRef, {
+                    lockedBy: null,
+                    lockedUntil: null,
+                    waitingList: admin.firestore.FieldValue.delete()
+                });
             }
-            if (waitingList[userId]) {
-                delete waitingList[userId];
-            }
-
-            // Aggiorna il documento con i lucchetti e le liste d'attesa aggiornate
-            transaction.update(productRef, {
-                activeLocks: activeLocks,
-                waitingList: waitingList
-            });
         }
     });
 
