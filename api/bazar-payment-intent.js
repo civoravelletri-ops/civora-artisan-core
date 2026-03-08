@@ -176,16 +176,26 @@ async function handleBazarFinalizeOrder(req, res) {
         buyerUserId: userId
     });
 
+    // ==========================================
+    // INVIO SMS MACRODROID BLINDATO
+    // ==========================================
     try {
         const vendorDoc = await db.collection('vendors').doc(vendorId).get();
         const nomeNegozio = vendorDoc.exists ? (vendorDoc.data().store_name || 'Bazar') : 'Bazar';
         let numeroCliente = customerShippingData.phone.replace(/\s+/g, '');
         if (!numeroCliente.startsWith('+')) numeroCliente = '+39' + numeroCliente;
 
-        const messaggioSmsCliente = `Ciao da ${nomeNegozio}, grazie per l'acquisto! Il tuo ordine #${orderNumber} e' in elaborazione.`;
+        const messaggioSmsCliente = `Ciao da ${nomeNegozio}, grazie per l'acquisto! Il tuo ordine #${orderNumber} e' in elaborazione. Preparati alla chiamata del corriere per ricevere l'ordine.`;
         const macrodroidUrlCliente = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroCliente)}&message=${encodeURIComponent(messaggioSmsCliente)}`;
-        fetch(macrodroidUrlCliente).catch(e => console.error(e));
-    } catch (smsError) { console.error(smsError); }
+        
+        // Aggiunto l'AWAIT qui: Obbliga Vercel ad aspettare che MacroDroid riceva il comando
+        await fetch(macrodroidUrlCliente);
+        console.log("SMS inviato a Macrodroid con successo.");
+        
+    } catch (smsError) { 
+        console.error("Errore invio SMS:", smsError); 
+    }
+    // ==========================================
 
     return res.status(200).json({ success: true, orderId: orderRef.id, orderNumber });
 }
