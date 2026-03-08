@@ -39,9 +39,7 @@ async function handleBazarCalculateAndPay(req, res) {
     const { cartItems, vendorId, clientClaimedTotal, userId } = req.body; 
     const CIVORA_COMMISSION = 0.03;
 
-    if (!userId) {
-        throw new Error("Utente non identificato. Ricarica la pagina per favore.");
-    }
+    if (!userId) throw new Error("Utente non identificato. Ricarica la pagina per favore.");
 
     const item = cartItems[0]; 
     const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(item.docId);
@@ -49,20 +47,18 @@ async function handleBazarCalculateAndPay(req, res) {
     let productData;
     await db.runTransaction(async (transaction) => {
         const productDoc = await transaction.get(productRef);
-
-        if (!productDoc.exists) {
-            throw new Error("Prodotto non trovato o non più disponibile.");
-        }
+        if (!productDoc.exists) throw new Error("Prodotto non trovato.");
+        
         productData = productDoc.data();
-
         const now = admin.firestore.Timestamp.now().toMillis();
-        const lockedUntilMs = productData.lockedUntil ? productData.lockedUntil.toMillis() : 0;
-
-        if (productData.status === 'sold') {
-            throw new Error("Prodotto già venduto definitivamente.");
+        
+        if (productData.status === 'sold' || productData.quantity <= 0) {
+            throw new Error("Prodotto esaurito.");
         }
-        if (productData.lockedBy !== userId || lockedUntilMs <= now) {
-            throw new Error("La tua priorità su questo prodotto è scaduta o è stata persa.");
+
+        const activeLocks = productData.activeLocks || {};
+        if (!activeLocks[userId] || activeLocks[userId] <= now) {
+            throw new Error("La tua priorità su questo prodotto è scaduta. Riprova dalla vetrina.");
         }
     });
 
@@ -107,7 +103,6 @@ async function handleBazarFinalizeOrder(req, res) {
 
     await db.runTransaction(async (transaction) => {
         const productDoc = await transaction.get(productRef);
-
         if (!productDoc.exists) {
             await stripe.refunds.create({ payment_intent: paymentIntentId });
             throw new Error("Prodotto non trovato. Rimborso avviato.");
@@ -115,30 +110,30 @@ async function handleBazarFinalizeOrder(req, res) {
 
         finalProductData = productDoc.data();
         const now = admin.firestore.Timestamp.now().toMillis();
-        const lockedUntilMs = finalProductData.lockedUntil ? finalProductData.lockedUntil.toMillis() : 0;
 
-        if (finalProductData.status === 'sold') {
+        if (finalProductData.status === 'sold' || finalProductData.quantity <= 0) {
             await stripe.refunds.create({ payment_intent: paymentIntentId });
             throw new Error("Prodotto già venduto. Rimborso avviato.");
         }
 
-        if (finalProductData.lockedBy !== userId || lockedUntilMs <= now) {
+        let activeLocks = finalProductData.activeLocks || {};
+        if (!activeLocks[userId] || activeLocks[userId] <= now) {
             await stripe.refunds.create({ payment_intent: paymentIntentId });
             throw new Error("La tua priorità è scaduta. Rimborso avviato.");
         }
 
+        // Rimuovi il lucchetto di questo utente
+        delete activeLocks[userId];
         let newQuantity = finalProductData.quantity - 1;
 
         const updateFields = {
-            lockedBy: null,
-            lockedUntil: null,
-            waitingList: admin.firestore.FieldValue.delete(),
+            activeLocks: activeLocks,
             quantity: newQuantity
         };
 
         if (newQuantity <= 0) {
             updateFields.status = 'sold'; 
-            updateFields.quantity = 0; 
+            updateFields.activeLocks = {}; // Svuota tutti i lucchetti rimasti (ormai inutili)
         }
 
         transaction.update(productRef, updateFields);
@@ -184,32 +179,20 @@ async function handleBazarFinalizeOrder(req, res) {
     try {
         const vendorDoc = await db.collection('vendors').doc(vendorId).get();
         const nomeNegozio = vendorDoc.exists ? (vendorDoc.data().store_name || 'Bazar') : 'Bazar';
-
         let numeroCliente = customerShippingData.phone.replace(/\s+/g, '');
-        if (!numeroCliente.startsWith('+')) {
-            numeroCliente = '+39' + numeroCliente;
-        }
+        if (!numeroCliente.startsWith('+')) numeroCliente = '+39' + numeroCliente;
 
-        const messaggioSmsCliente = `Ciao da ${nomeNegozio}, grazie per l'acquisto! Il tuo ordine #${orderNumber} e' in elaborazione. Preparati alla chiamata del corriere per ricevere l'ordine.`;
-
-        const MACRODROID_WEBHOOK_URL_BASE = "https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms";
-        const macrodroidUrlCliente = `${MACRODROID_WEBHOOK_URL_BASE}?phone=${encodeURIComponent(numeroCliente)}&message=${encodeURIComponent(messaggioSmsCliente)}`;
-
-        fetch(macrodroidUrlCliente).catch(e => console.error("Errore SMS MacroDroid:", e));
-    } catch (smsError) {
-        console.error("Errore SMS MacroDroid:", smsError);
-    }
+        const messaggioSmsCliente = `Ciao da ${nomeNegozio}, grazie per l'acquisto! Il tuo ordine #${orderNumber} e' in elaborazione.`;
+        const macrodroidUrlCliente = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroCliente)}&message=${encodeURIComponent(messaggioSmsCliente)}`;
+        fetch(macrodroidUrlCliente).catch(e => console.error(e));
+    } catch (smsError) { console.error(smsError); }
 
     return res.status(200).json({ success: true, orderId: orderRef.id, orderNumber });
 }
 
-// LA NUOVA FUNZIONE PER SBLOCCARE IMMEDIATAMENTE IL PRODOTTO
 async function handleBazarReleaseLock(req, res) {
     const { vendorId, productId, userId } = req.body;
-    
-    if (!vendorId || !productId || !userId) {
-        return res.status(400).json({ error: 'Dati mancanti per lo sblocco' });
-    }
+    if (!vendorId || !productId || !userId) return res.status(400).json({ error: 'Dati mancanti' });
 
     const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
 
@@ -217,14 +200,11 @@ async function handleBazarReleaseLock(req, res) {
         const productDoc = await transaction.get(productRef);
         if (productDoc.exists) {
             const data = productDoc.data();
+            let activeLocks = data.activeLocks || {};
             
-            // Sblocca solo se il lucchetto era di questo utente e non l'ha ancora comprato nessuno
-            if (data.lockedBy === userId && data.status !== 'sold') {
-                transaction.update(productRef, {
-                    lockedBy: null,
-                    lockedUntil: null,
-                    waitingList: admin.firestore.FieldValue.delete()
-                });
+            if (activeLocks[userId] && data.status !== 'sold') {
+                delete activeLocks[userId];
+                transaction.update(productRef, { activeLocks: activeLocks });
             }
         }
     });
