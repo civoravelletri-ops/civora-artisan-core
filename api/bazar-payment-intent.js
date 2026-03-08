@@ -1,12 +1,14 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const admin = require('firebase-admin');
 
+// Inizializzazione Firebase Admin
 if (!admin.apps.length) {
     const firebaseConfig = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8'));
     admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
 }
 const db = admin.firestore();
 
+// Funzione per gestire i permessi (CORS)
 function setCorsHeaders(res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -21,12 +23,17 @@ module.exports = async (req, res) => {
     const { action } = req.body;
 
     try {
-        if (action === 'CALCULATE_AND_PAY') return await handleBazarCalculateAndPay(req, res);
-        else if (action === 'FINALIZE_ORDER') return await handleBazarFinalizeOrder(req, res);
-        else if (action === 'RELEASE_LOCK') return await handleBazarReleaseLock(req, res);
+        if (action === 'CALCULATE_AND_PAY') {
+            return await handleBazarCalculateAndPay(req, res);
+        } else if (action === 'FINALIZE_ORDER') {
+            return await handleBazarFinalizeOrder(req, res);
+        } else if (action === 'RELEASE_LOCK') {
+            return await handleBazarReleaseLock(req, res);
+        }
         return res.status(400).json({ error: 'Azione sconosciuta' });
     } catch (error) {
-        return res.status(400).json({ error: error.message || 'Errore interno.' });
+        console.error("❌ ERRORE BAZAR:", error);
+        return res.status(400).json({ error: error.message || 'Errore interno del server.' });
     }
 };
 
@@ -34,7 +41,9 @@ async function handleBazarCalculateAndPay(req, res) {
     const { cartItems, vendorId, clientClaimedTotal, userId } = req.body; 
     const CIVORA_COMMISSION = 0.03;
 
-    if (!userId) throw new Error("Utente non identificato.");
+    if (!userId) {
+        throw new Error("Utente non identificato. Ricarica la pagina per favore.");
+    }
 
     const item = cartItems[0]; 
     const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(item.docId);
@@ -42,30 +51,58 @@ async function handleBazarCalculateAndPay(req, res) {
     let productData;
     await db.runTransaction(async (transaction) => {
         const productDoc = await transaction.get(productRef);
-        if (!productDoc.exists) throw new Error("Prodotto non trovato.");
+
+        if (!productDoc.exists) {
+            throw new Error("Prodotto non trovato o non più disponibile.");
+        }
         productData = productDoc.data();
 
-        const now = Date.now();
-        const activeLocks = productData.activeLocks || [];
-        const userLock = activeLocks.find(l => l.uid === userId && l.expiresAt > now);
+        const now = admin.firestore.Timestamp.now().toMillis();
+        let activeLocks = productData.activeLocks || {};
 
-        if (productData.status === 'sold' || productData.quantity <= 0) throw new Error("Prodotto esaurito.");
-        if (!userLock) throw new Error("La tua priorità è scaduta.");
+        // Controlla se l'utente ha un lucchetto attivo e non scaduto
+        if (!activeLocks[userId] || activeLocks[userId] <= now) {
+            throw new Error("La tua priorità su questo prodotto è scaduta o è stata persa.");
+        }
+        
+        // Controlla la quantità disponibile
+        const currentlyLockedCount = Object.keys(activeLocks).length;
+        if (productData.quantity <= 0 || productData.quantity < currentlyLockedCount) {
+             throw new Error("Prodotto esaurito o non più disponibile.");
+        }
+        if (productData.status === 'sold') { // Doppia verifica per sicurezza
+            throw new Error("Prodotto già venduto definitivamente.");
+        }
     });
 
     const netPrice = parseFloat(productData.priceNettoVendor || productData.price);
     const deliveryCost = parseFloat(productData.deliveryCost || 0);
     const commission = parseFloat((netPrice * CIVORA_COMMISSION).toFixed(2));
-    const totalToPay = parseFloat((netPrice + commission + deliveryCost).toFixed(2));
+    const priceCliente = parseFloat((netPrice + commission).toFixed(2));
+    const totalToPay = parseFloat((priceCliente + deliveryCost).toFixed(2));
+
+    if (Math.abs(totalToPay * 100 - clientClaimedTotal) > 100) {
+        throw new Error("Discrepanza nei prezzi rilevata. Riprova l'acquisto.");
+    }
 
     const vendorData = (await db.collection('vendors').doc(vendorId).get()).data();
-    
+    if (!vendorData || !vendorData.stripeAccountId) {
+        throw new Error("Il venditore non ha un account Stripe configurato.");
+    }
+
     const paymentIntent = await stripe.paymentIntents.create({
         amount: Math.round(totalToPay * 100),
         currency: 'eur',
         application_fee_amount: Math.round(commission * 100),
         transfer_data: { destination: vendorData.stripeAccountId },
-        metadata: { vendorId, productId: item.docId, buyerUserId: userId, deliveryCost: deliveryCost.toString(), bazarPriceNetto: netPrice.toString() }
+        metadata: {
+            vendorId,
+            productId: item.docId,
+            bazarPriceNetto: netPrice.toString(),
+            commissionCivora: commission.toString(),
+            deliveryCost: deliveryCost.toString(),
+            buyerUserId: userId
+        }
     });
 
     return res.status(200).json({ clientSecret: paymentIntent.client_secret, summary: { realTotal: totalToPay } });
@@ -73,34 +110,63 @@ async function handleBazarCalculateAndPay(req, res) {
 
 async function handleBazarFinalizeOrder(req, res) {
     const { paymentIntentId, vendorId, productId, userId, customerShippingData, orderNotes, deliveryNotesForRider } = req.body;
+
     let productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
     let finalProductData;
 
     await db.runTransaction(async (transaction) => {
         const productDoc = await transaction.get(productRef);
-        if (!productDoc.exists) { await stripe.refunds.create({ payment_intent: paymentIntentId }); throw new Error("Errore."); }
-        
-        finalProductData = productDoc.data();
-        const now = Date.now();
-        let activeLocks = finalProductData.activeLocks || [];
-        const userLock = activeLocks.find(l => l.uid === userId && l.expiresAt > now);
 
-        if (finalProductData.status === 'sold' || finalProductData.quantity <= 0 || !userLock) {
+        if (!productDoc.exists) {
             await stripe.refunds.create({ payment_intent: paymentIntentId });
-            throw new Error("Troppo tardi, rimborso avviato.");
+            throw new Error("Prodotto non trovato. Rimborso avviato.");
         }
 
-        // Togliamo il lucchetto dell'utente e abbassiamo la quantità di 1
-        activeLocks = activeLocks.filter(l => l.uid !== userId);
+        finalProductData = productDoc.data();
+        const now = admin.firestore.Timestamp.now().toMillis();
+        let activeLocks = productData.activeLocks || {};
+        let waitingList = productData.waitingList || {};
+
+        if (finalProductData.status === 'sold') {
+            await stripe.refunds.create({ payment_intent: paymentIntentId });
+            throw new Error("Prodotto già venduto. Rimborso avviato.");
+        }
+        
+        // Verifica ancora la validità del lucchetto prima di finalizzare
+        if (!activeLocks[userId] || activeLocks[userId] <= now) {
+            await stripe.refunds.create({ payment_intent: paymentIntentId });
+            throw new Error("La tua priorità è scaduta. Rimborso avviato.");
+        }
+
+        // Rimuovi il lucchetto di questo utente
+        delete activeLocks[userId];
+        if (waitingList[userId]) { // Rimuovi anche dalla waiting list se era lì per qualche motivo
+            delete waitingList[userId];
+        }
+
+        // Decrementa la quantità
         let newQuantity = finalProductData.quantity - 1;
 
-        const updateFields = { activeLocks, quantity: newQuantity };
-        if (newQuantity <= 0) { updateFields.status = 'sold'; updateFields.quantity = 0; }
-        
+        const updateFields = {
+            activeLocks: activeLocks,
+            waitingList: waitingList,
+            quantity: newQuantity
+        };
+
+        if (newQuantity <= 0) {
+            updateFields.status = 'sold'; 
+            updateFields.quantity = 0; 
+        }
+
         transaction.update(productRef, updateFields);
     });
 
     const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    if (!intent || intent.status !== 'succeeded') {
+        throw new Error("Il Payment Intent non è riuscito.");
+    }
+    const soldiVeriPagati = intent.amount / 100;
+
     const orderRef = db.collection('orders').doc();
     const orderNumber = `B-${new Date().getTime().toString().slice(-8)}`;
 
@@ -109,6 +175,8 @@ async function handleBazarFinalizeOrder(req, res) {
         quantity: 1,
         type: 'bazar_product',
         price: parseFloat(intent.amount / 100 - intent.application_fee_amount / 100).toFixed(2),
+        priceNettoVendor: parseFloat(intent.metadata.bazarPriceNetto),
+        commissionCivoraPercentage: parseFloat(intent.application_fee_amount / 100) / parseFloat(intent.amount / 100 - intent.application_fee_amount / 100),
         productName: finalProductData.name,
         vendorId: intent.metadata.vendorId,
         imageUrl: finalProductData.imageUrls?.[0] || null,
@@ -116,35 +184,72 @@ async function handleBazarFinalizeOrder(req, res) {
     };
 
     await orderRef.set({
-        orderNumber, status: 'pending', vendorId, shippingAddress: customerShippingData,
-        paymentIntentId, createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        orderCategory: 'bazar', totalAmount: intent.amount / 100, cartItems: [purchasedItem], buyerUserId: userId
+        orderNumber,
+        status: 'pending',
+        vendorId,
+        shippingAddress: customerShippingData,
+        orderNotes: orderNotes || '',
+        deliveryNotesForRider: deliveryNotesForRider || '',
+        paymentIntentId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        orderCategory: 'bazar',
+        totalAmount: soldiVeriPagati,
+        cartItems: [purchasedItem],
+        buyerUserId: userId
     });
 
-    // SMS MACRODROID
     try {
-        let phone = customerShippingData.phone.replace(/\s+/g, '');
-        if (!phone.startsWith('+')) phone = '+39' + phone;
-        const msg = `Grazie per l'acquisto! Ordine #${orderNumber} in elaborazione.`;
-        fetch(`https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(phone)}&message=${encodeURIComponent(msg)}`).catch(e=>{});
-    } catch (e) {}
+        const vendorDoc = await db.collection('vendors').doc(vendorId).get();
+        const nomeNegozio = vendorDoc.exists ? (vendorDoc.data().store_name || 'Bazar') : 'Bazar';
+
+        let numeroCliente = customerShippingData.phone.replace(/\s+/g, '');
+        if (!numeroCliente.startsWith('+')) {
+            numeroCliente = '+39' + numeroCliente;
+        }
+
+        const messaggioSmsCliente = `Ciao da ${nomeNegozio}, grazie per l'acquisto! Il tuo ordine #${orderNumber} e' in elaborazione. Preparati alla chiamata del corriere per ricevere l'ordine.`;
+
+        const MACRODROID_WEBHOOK_URL_BASE = "https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms";
+        const macrodroidUrlCliente = `${MACRODROID_WEBHOOK_URL_BASE}?phone=${encodeURIComponent(numeroCliente)}&message=${encodeURIComponent(messaggioSmsCliente)}`;
+
+        fetch(macrodroidUrlCliente).catch(e => console.error("Errore SMS MacroDroid:", e));
+    } catch (smsError) {
+        console.error("Errore SMS MacroDroid:", smsError);
+    }
 
     return res.status(200).json({ success: true, orderId: orderRef.id, orderNumber });
 }
 
+// FUNZIONE PER SBLOCCARE IMMEDIATAMENTE IL PRODOTTO (ora gestisce activeLocks)
 async function handleBazarReleaseLock(req, res) {
     const { vendorId, productId, userId } = req.body;
-    if (!vendorId || !productId || !userId) return res.status(400).json({ error: 'Dati mancanti' });
+    
+    if (!vendorId || !productId || !userId) {
+        return res.status(400).json({ error: 'Dati mancanti per lo sblocco' });
+    }
 
     const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
 
     await db.runTransaction(async (transaction) => {
         const productDoc = await transaction.get(productRef);
         if (productDoc.exists) {
-            let activeLocks = productDoc.data().activeLocks || [];
-            // Rimuoviamo SOLO il lucchetto di questo utente, lasciando intatti quelli degli altri!
-            const newLocks = activeLocks.filter(l => l.uid !== userId);
-            transaction.update(productRef, { activeLocks: newLocks });
+            const data = productDoc.data();
+            let activeLocks = data.activeLocks || {};
+            let waitingList = data.waitingList || {};
+            
+            // Rimuovi il lucchetto di questo utente e dalla waitingList se esiste
+            if (activeLocks[userId]) {
+                delete activeLocks[userId];
+            }
+            if (waitingList[userId]) {
+                delete waitingList[userId];
+            }
+
+            // Aggiorna il documento con i lucchetti e le liste d'attesa aggiornate
+            transaction.update(productRef, {
+                activeLocks: activeLocks,
+                waitingList: waitingList
+            });
         }
     });
 
