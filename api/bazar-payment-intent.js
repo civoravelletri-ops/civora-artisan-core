@@ -164,7 +164,7 @@ async function handleBazarFinalizeOrder(req, res) {
     }
     const soldiVeriPagati = intent.amount / 100;
 
-    const orderRef = db.collection('orders').doc();
+    const orderRef = db.collection('vendors').doc(vendorId).collection('orders').doc();
     const orderNumber = `B-${new Date().getTime().toString().slice(-8)}`;
 
     const purchasedItem = {
