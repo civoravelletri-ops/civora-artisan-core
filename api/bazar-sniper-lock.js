@@ -36,21 +36,39 @@ module.exports = async (req, res) => {
             const productData = productDoc.data();
             const now = admin.firestore.Timestamp.now().toMillis();
             
-            if (productData.status === 'sold' || productData.quantity <= 0) {
-                return { status: 'SOLD' };
-            }
+            // Inizializza activeLocks e waitingQueue se non esistono
+            let activeLocks = productData.activeLocks || {};
+            let waitingQueue = productData.waitingQueue || []; // NUOVO: La coda di attesa
 
             // Pulisce i lucchetti vecchi e tiene solo quelli attivi
-            let activeLocks = productData.activeLocks || {};
             let validLocks = {};
             for (let uid in activeLocks) {
                 if (activeLocks[uid] > now) {
                     validLocks[uid] = activeLocks[uid];
                 }
             }
+            
+            // --- Logica per la Coda di Ripescaggio ---
+            
+            // Rimuovi l'utente dalla coda se ha già un lucchetto attivo (non deve più aspettare)
+            if (validLocks[userId] && waitingQueue.includes(userId)) {
+                waitingQueue = waitingQueue.filter(uid => uid !== userId);
+            }
+            // Rimuovi l'utente dalla coda se è "scaduto" e non ha un blocco attivo.
+            // Questo aiuta a pulire la coda da utenti che hanno abbandonato.
+            // Non lo facciamo qui, perché se l'utente non ha un blocco ma è in coda, deve RIMANERE.
+            // La pulizia avverrà se ottiene un blocco o se esce manualmente.
+
+            // --- Fine Logica Coda di Ripescaggio ---
+
 
             // 1. Controlla se TU hai già un lucchetto valido
             if (validLocks[userId]) {
+                // Se l'utente ha già un blocco, assicurati che non sia in coda e aggiorna il DB se necessario
+                if (waitingQueue.includes(userId)) {
+                    waitingQueue = waitingQueue.filter(uid => uid !== userId);
+                    transaction.update(productRef, { waitingQueue: waitingQueue });
+                }
                 return { status: 'LOCKED_BY_YOU', lockedUntil: validLocks[userId] };
             }
 
@@ -60,31 +78,55 @@ module.exports = async (req, res) => {
 
             // 3. Se c'è spazio, ti diamo il lucchetto!
             if (availableQuantity > 0) {
-                const newLockedUntil = now + LOCK_DURATION_MS;
-                validLocks[userId] = newLockedUntil; // Aggiunge il tuo lucchetto
-                
-                transaction.update(productRef, {
-                    activeLocks: validLocks,
-                    // Puliamo i vecchi campi per sicurezza
-                    lockedBy: admin.firestore.FieldValue.delete(),
-                    lockedUntil: admin.firestore.FieldValue.delete()
-                });
+                // Prima di dare un lucchetto diretto, controlliamo se l'utente è il primo in coda.
+                // Questo è cruciale per la priorità di ripescaggio.
+                const isFirstInQueue = waitingQueue.length > 0 && waitingQueue[0] === userId;
 
-                return { status: 'LOCKED_BY_YOU', lockedUntil: newLockedUntil };
+                if (isFirstInQueue || !waitingQueue.includes(userId)) { // Se è il primo in coda O non è in coda
+                    const newLockedUntil = now + LOCK_DURATION_MS;
+                    validLocks[userId] = newLockedUntil; // Aggiunge il tuo lucchetto
+                    
+                    // Rimuovi l'utente dalla coda, perché ha appena ottenuto un blocco
+                    waitingQueue = waitingQueue.filter(uid => uid !== userId);
+
+                    transaction.update(productRef, {
+                        activeLocks: validLocks,
+                        waitingQueue: waitingQueue, // AGGIORNATO: Salva la coda pulita
+                        lockedBy: admin.firestore.FieldValue.delete(), // Puliamo i vecchi campi per sicurezza
+                        lockedUntil: admin.firestore.FieldValue.delete()
+                    });
+
+                    // Indica se il blocco è stato ottenuto direttamente o tramite ripescaggio
+                    return { status: isFirstInQueue ? 'LOCKED_BY_YOU_FROM_QUEUE' : 'LOCKED_BY_YOU', lockedUntil: newLockedUntil };
+                } else {
+                    // C'è un pezzo disponibile, ma NON È IL TUO TURNO in coda.
+                    // Non possiamo darti il pezzo.
+                    // Puoi solo entrare in coda o aspettare il tuo turno.
+                    // Se l'utente non è il primo in coda ma c'è disponibilità,
+                    // significa che qualcuno davanti a lui può prenderlo, o l'utente non ha la priorità.
+                    // Lo trattiamo come "bloccato da altri" per forzarlo ad aspettare il suo turno.
+                    const minExpiry = Math.min(...Object.values(validLocks)); // Questo può essere 0 se non ci sono lucchetti attivi
+                    return { status: 'LOCKED_BY_OTHER', lockedUntil: minExpiry, queuePosition: waitingQueue.indexOf(userId) + 1 };
+                }
             } 
-            // 4. Se non c'è spazio, cerchiamo il lucchetto che scade prima per il timer
+            // 4. Se non c'è spazio (availableQuantity <= 0), ti aggiungiamo alla coda (se non ci sei già)
             else {
+                if (!waitingQueue.includes(userId)) {
+                    waitingQueue.push(userId);
+                    transaction.update(productRef, { waitingQueue: waitingQueue }); // AGGIORNATO: Salva la coda
+                }
                 const minExpiry = Math.min(...Object.values(validLocks));
-                return { status: 'LOCKED_BY_OTHER', lockedUntil: minExpiry };
+                return { status: 'LOCKED_BY_OTHER', lockedUntil: minExpiry, queuePosition: waitingQueue.indexOf(userId) + 1 }; // Ritorna la posizione in coda
             }
         });
 
+        // Risposte API modificate per gestire i nuovi stati e dati
         if (result.status === 'SOLD') {
             return res.status(200).json({ success: false, message: 'Prodotto già venduto o esaurito.', status: 'SOLD' });
         } else if (result.status === 'LOCKED_BY_OTHER') {
-            return res.status(200).json({ success: false, message: 'Tutti i pezzi sono momentaneamente bloccati, entra in coda!', status: 'LOCKED_BY_OTHER', lockedUntil: result.lockedUntil });
-        } else if (result.status === 'LOCKED_BY_YOU') {
-            return res.status(200).json({ success: true, message: 'Prodotto bloccato per te!', status: 'LOCKED_BY_YOU', lockedUntil: result.lockedUntil });
+            return res.status(200).json({ success: false, message: 'Tutti i pezzi sono momentaneamente bloccati o non è il tuo turno in coda, entra in attesa!', status: 'LOCKED_BY_OTHER', lockedUntil: result.lockedUntil, queuePosition: result.queuePosition });
+        } else if (result.status === 'LOCKED_BY_YOU' || result.status === 'LOCKED_BY_YOU_FROM_QUEUE') {
+            return res.status(200).json({ success: true, message: 'Prodotto bloccato per te!', status: result.status, lockedUntil: result.lockedUntil });
         }
 
     } catch (error) {
