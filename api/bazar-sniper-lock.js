@@ -17,7 +17,7 @@ module.exports = async (req, res) => {
     if (req.method === 'OPTIONS') return res.status(200).end();
     if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method Not Allowed' });
 
-    const { vendorId, productId, userId } = req.body;
+    const { vendorId, productId, userId, action } = req.body; // Aggiunto 'action'
     const LOCK_DURATION_MS = 120 * 1000; // 2 minuti
 
     if (!vendorId || !productId || !userId) {
@@ -30,41 +30,87 @@ module.exports = async (req, res) => {
             const productDoc = await transaction.get(productRef);
 
             if (!productDoc.exists) {
+                // Se il prodotto non esiste, non c'è nulla da bloccare o sbloccare
                 throw new Error('Prodotto non trovato o rimosso.');
             }
 
             const productData = productDoc.data();
             const now = admin.firestore.Timestamp.now().toMillis();
             
-            // Inizializza activeLocks e waitingQueue se non esistono
             let activeLocks = productData.activeLocks || {};
-            let waitingQueue = productData.waitingQueue || []; // NUOVO: La coda di attesa
+            let waitingQueue = productData.waitingQueue || [];
 
-            // Pulisce i lucchetti vecchi e tiene solo quelli attivi
+            // Pulisce tutti i lucchetti scaduti all'inizio di ogni transazione
             let validLocks = {};
             for (let uid in activeLocks) {
                 if (activeLocks[uid] > now) {
                     validLocks[uid] = activeLocks[uid];
                 }
             }
-            
-            // --- Logica per la Coda di Ripescaggio ---
-            
-            // Rimuovi l'utente dalla coda se ha già un lucchetto attivo (non deve più aspettare)
-            if (validLocks[userId] && waitingQueue.includes(userId)) {
+
+            // Rimuovi dalla coda gli utenti che non hanno un lock valido ma sono stati bloccati o hanno lasciato il checkout
+            // (questa logica è più complessa da implementare in modo robusto qui senza race conditions,
+            // si preferisce pulire la coda quando un utente ottiene un lock o esplicitamente abbandona.
+            // La pulizia più semplice è fatta rimuovendo l'utente dalla coda quando ottiene un lock valido).
+            // Per ora, ci concentriamo sull'avanzamento della coda con 'RELEASE_LOCK'.
+
+            // --- GESTIONE RILASCIO LOCK ---
+            if (action === 'RELEASE_LOCK') {
+                console.log(`[SniperLock] Richiesta RELEASE_LOCK per prodotto ${productId}, utente ${userId}`);
+
+                let lockWasRemoved = false;
+                if (validLocks[userId]) {
+                    delete validLocks[userId];
+                    lockWasRemoved = true;
+                    console.log(`[SniperLock] Lock di ${userId} rimosso.`);
+                } else {
+                    console.log(`[SniperLock] Utente ${userId} non aveva un lock attivo.`);
+                }
+
+                // Rimuovi l'utente dalla coda, anche se non aveva un lock, ha esplicitamente abbandonato
+                const initialQueueLength = waitingQueue.length;
                 waitingQueue = waitingQueue.filter(uid => uid !== userId);
+                if (waitingQueue.length < initialQueueLength) {
+                    console.log(`[SniperLock] Utente ${userId} rimosso dalla waitingQueue.`);
+                }
+
+                // Prova a ripescare il prossimo utente in coda se c'è disponibilità
+                if (waitingQueue.length > 0) {
+                    // Controlla se c'è un posto libero (anche se il rilascio ne crea uno)
+                    const currentLockedCount = Object.keys(validLocks).length;
+                    const currentAvailableQuantity = productData.quantity - currentLockedCount;
+
+                    if (currentAvailableQuantity > 0) { // Se ora c'è disponibilità
+                        const nextUserIdInQueue = waitingQueue.shift(); // Prendi il primo e rimuovilo dalla coda
+                        const newLockedUntil = now + LOCK_DURATION_MS;
+                        validLocks[nextUserIdInQueue] = newLockedUntil; // Assegna il lock al ripescato
+                        console.log(`[SniperLock] Utente ${nextUserIdInQueue} ripescato e bloccato fino a ${newLockedUntil}.`);
+                        
+                        transaction.update(productRef, {
+                            activeLocks: validLocks,
+                            waitingQueue: waitingQueue,
+                            // Puoi anche aggiornare un campo 'lastRescuedUser' se vuoi tracciare chi è stato ripescato
+                        });
+                        return { status: 'LOCK_RELEASED_AND_RESCUED', rescuedUser: nextUserIdInQueue };
+                    }
+                }
+                
+                // Se nessun utente è stato ripescato o non c'è più coda
+                transaction.update(productRef, {
+                    activeLocks: validLocks,
+                    waitingQueue: waitingQueue,
+                });
+                return { status: 'LOCK_RELEASED' };
             }
-            // Rimuovi l'utente dalla coda se è "scaduto" e non ha un blocco attivo.
-            // Questo aiuta a pulire la coda da utenti che hanno abbandonato.
-            // Non lo facciamo qui, perché se l'utente non ha un blocco ma è in coda, deve RIMANERE.
-            // La pulizia avverrà se ottiene un blocco o se esce manualmente.
 
-            // --- Fine Logica Coda di Ripescaggio ---
+            // --- FINE GESTIONE RILASCIO LOCK ---
 
 
-            // 1. Controlla se TU hai già un lucchetto valido
+            // --- LOGICA STANDARD DI BLOCCO (dal codice originale) ---
+            
+            // Se l'utente ha già un lucchetto valido (ma l'azione NON è RELEASE_LOCK)
             if (validLocks[userId]) {
-                // Se l'utente ha già un blocco, assicurati che non sia in coda e aggiorna il DB se necessario
+                // Se l'utente ha già un blocco, assicurati che non sia in coda
                 if (waitingQueue.includes(userId)) {
                     waitingQueue = waitingQueue.filter(uid => uid !== userId);
                     transaction.update(productRef, { waitingQueue: waitingQueue });
@@ -72,14 +118,13 @@ module.exports = async (req, res) => {
                 return { status: 'LOCKED_BY_YOU', lockedUntil: validLocks[userId] };
             }
 
-            // 2. Calcola le quantità ancora disponibili per essere bloccate
+            // Calcola le quantità ancora disponibili per essere bloccate
             const lockedCount = Object.keys(validLocks).length;
             const availableQuantity = productData.quantity - lockedCount;
 
-            // 3. Se c'è spazio, ti diamo il lucchetto!
+            // Se c'è spazio, ti diamo il lucchetto!
             if (availableQuantity > 0) {
                 // Prima di dare un lucchetto diretto, controlliamo se l'utente è il primo in coda.
-                // Questo è cruciale per la priorità di ripescaggio.
                 const isFirstInQueue = waitingQueue.length > 0 && waitingQueue[0] === userId;
 
                 if (isFirstInQueue || !waitingQueue.includes(userId)) { // Se è il primo in coda O non è in coda
@@ -91,37 +136,34 @@ module.exports = async (req, res) => {
 
                     transaction.update(productRef, {
                         activeLocks: validLocks,
-                        waitingQueue: waitingQueue, // AGGIORNATO: Salva la coda pulita
+                        waitingQueue: waitingQueue,
                         lockedBy: admin.firestore.FieldValue.delete(), // Puliamo i vecchi campi per sicurezza
                         lockedUntil: admin.firestore.FieldValue.delete()
                     });
 
-                    // Indica se il blocco è stato ottenuto direttamente o tramite ripescaggio
                     return { status: isFirstInQueue ? 'LOCKED_BY_YOU_FROM_QUEUE' : 'LOCKED_BY_YOU', lockedUntil: newLockedUntil };
                 } else {
                     // C'è un pezzo disponibile, ma NON È IL TUO TURNO in coda.
-                    // Non possiamo darti il pezzo.
-                    // Puoi solo entrare in coda o aspettare il tuo turno.
-                    // Se l'utente non è il primo in coda ma c'è disponibilità,
-                    // significa che qualcuno davanti a lui può prenderlo, o l'utente non ha la priorità.
                     // Lo trattiamo come "bloccato da altri" per forzarlo ad aspettare il suo turno.
-                    const minExpiry = Math.min(...Object.values(validLocks)); // Questo può essere 0 se non ci sono lucchetti attivi
+                    const minExpiry = Object.keys(validLocks).length > 0 ? Math.min(...Object.values(validLocks)) : now + LOCK_DURATION_MS;
                     return { status: 'LOCKED_BY_OTHER', lockedUntil: minExpiry, queuePosition: waitingQueue.indexOf(userId) + 1 };
                 }
             } 
-            // 4. Se non c'è spazio (availableQuantity <= 0), ti aggiungiamo alla coda (se non ci sei già)
+            // Se non c'è spazio (availableQuantity <= 0), ti aggiungiamo alla coda (se non ci sei già)
             else {
                 if (!waitingQueue.includes(userId)) {
                     waitingQueue.push(userId);
-                    transaction.update(productRef, { waitingQueue: waitingQueue }); // AGGIORNATO: Salva la coda
+                    transaction.update(productRef, { waitingQueue: waitingQueue });
                 }
-                const minExpiry = Math.min(...Object.values(validLocks));
-                return { status: 'LOCKED_BY_OTHER', lockedUntil: minExpiry, queuePosition: waitingQueue.indexOf(userId) + 1 }; // Ritorna la posizione in coda
+                const minExpiry = Object.keys(validLocks).length > 0 ? Math.min(...Object.values(validLocks)) : now + LOCK_DURATION_MS;
+                return { status: 'LOCKED_BY_OTHER', lockedUntil: minExpiry, queuePosition: waitingQueue.indexOf(userId) + 1 };
             }
         });
 
-        // Risposte API modificate per gestire i nuovi stati e dati
-        if (result.status === 'SOLD') {
+        // Risposte API (aggiunti nuovi stati)
+        if (result.status === 'LOCK_RELEASED' || result.status === 'LOCK_RELEASED_AND_RESCUED') {
+            return res.status(200).json({ success: true, message: 'Lock rilasciato con successo.', status: result.status, rescuedUser: result.rescuedUser });
+        } else if (result.status === 'SOLD') {
             return res.status(200).json({ success: false, message: 'Prodotto già venduto o esaurito.', status: 'SOLD' });
         } else if (result.status === 'LOCKED_BY_OTHER') {
             return res.status(200).json({ success: false, message: 'Tutti i pezzi sono momentaneamente bloccati o non è il tuo turno in coda, entra in attesa!', status: 'LOCKED_BY_OTHER', lockedUntil: result.lockedUntil, queuePosition: result.queuePosition });
