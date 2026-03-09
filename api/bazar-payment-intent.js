@@ -7,34 +7,6 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
-let civoraBazarCommission = 0.07; // Valore di default in caso di errore nel caricamento
-
-async function loadBazarCommission() {
-    try {
-        const docRef = db.collection('app_settings').doc('main_config');
-        const docSnap = await docRef.get();
-        if (docSnap.exists) {
-            const data = docSnap.data();
-            const feeString = data?.baraz_occasioni_fee; // 'baraz_occasioni_fee' come specificato
-            if (feeString && !isNaN(parseFloat(feeString))) {
-                civoraBazarCommission = parseFloat(feeString);
-                console.log(`Bazar Commission loaded: ${civoraBazarCommission}`);
-            } else {
-                console.warn('Firebase document exists but baraz_occasioni_fee is missing or invalid. Using default.');
-            }
-        } else {
-            console.warn('Firebase document app_settings/main_config does not exist. Using default.');
-        }
-    } catch (error) {
-        console.error('Error loading Bazar commission from Firebase:', error);
-    }
-}
-
-// Carica la commissione all'avvio della funzione (solo una volta)
-// Se la funzione Vercel è "hot" (già in memoria), non si ricarica ad ogni richiesta.
-// Se è "cold" (avviata da zero), si ricarica.
-loadBazarCommission();
-
 function setCorsHeaders(res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -42,11 +14,6 @@ function setCorsHeaders(res) {
 }
 
 module.exports = async (req, res) => {
-    // Ogni volta che la funzione viene chiamata, ci assicuriamo che la commissione sia caricata
-    // Questo è un fallback, loadBazarCommission() viene chiamato all'avvio, ma Vercel a volte può resettare
-    if (civoraBazarCommission === 0.07) { // Se è ancora il default, prova a ricaricare
-        await loadBazarCommission();
-    }
     setCorsHeaders(res);
     if (req.method === 'OPTIONS') return res.status(200).end();
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
@@ -70,9 +37,27 @@ module.exports = async (req, res) => {
 
 async function handleBazarCalculateAndPay(req, res) {
     const { cartItems, vendorId, clientClaimedTotal, userId } = req.body;
-    const CIVORA_COMMISSION = civoraBazarCommission; // Usa la variabile caricata da Firebase
 
     if (!userId) throw new Error("Utente non identificato. Ricarica la pagina per favore.");
+
+    // =========================================================
+    // MODIFICA: RECUPERO LA FEE DINAMICA DA FIREBASE
+    // =========================================================
+    let CIVORA_COMMISSION = 0.07; // Paracadute di sicurezza base
+    try {
+        const configDoc = await db.collection('app_settings').doc('main_config').get();
+        if (configDoc.exists) {
+            const configData = configDoc.data();
+            if (configData.baraz_occasioni_fee !== undefined) {
+                // Prende la stringa "0.05" e la fa diventare numero
+                CIVORA_COMMISSION = parseFloat(configData.baraz_occasioni_fee);
+                console.log(`Fee recuperata da Firebase: ${CIVORA_COMMISSION}`);
+            }
+        }
+    } catch (err) {
+        console.error("Errore recupero fee da Firebase, uso default 0.07:", err);
+    }
+    // =========================================================
 
     const item = cartItems[0];
     const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(item.docId);
@@ -97,6 +82,7 @@ async function handleBazarCalculateAndPay(req, res) {
 
     const netPrice = parseFloat(productData.priceNettoVendor || productData.price);
     const deliveryCost = parseFloat(productData.deliveryCost || 0);
+    // Ora usa la commissione scaricata da Firebase!
     const commission = parseFloat((netPrice * CIVORA_COMMISSION).toFixed(2));
     const priceCliente = parseFloat((netPrice + commission).toFixed(2));
     const totalToPay = parseFloat((priceCliente + deliveryCost).toFixed(2));
