@@ -21,11 +21,18 @@ module.exports = async (req, res) => {
     const LOCK_DURATION_MS = 120 * 1000; // 2 minuti
 
     if (!vendorId || !productId || !userId) {
-        return res.status(400).json({ success: false, error: 'Dati mancanti: vendorId, productId o userId.' });
-    }
-
-    try {
-        const result = await db.runTransaction(async (transaction) => {
+            return res.status(400).json({ success: false, error: 'Dati mancanti: vendorId, productId o userId.' });
+        }
+    
+        try {
+            // NUOVO: Se l'azione è solo incrementare la vista, lo fa l'Admin in sicurezza e si ferma qui
+            if (action === 'INCREMENT_VIEW') {
+                const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
+                await productRef.update({ viewsCount: admin.firestore.FieldValue.increment(1) });
+                return res.status(200).json({ success: true });
+            }
+    
+            const result = await db.runTransaction(async (transaction) => {
             const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
             const productDoc = await transaction.get(productRef);
 
