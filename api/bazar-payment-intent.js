@@ -181,19 +181,27 @@ async function handleBazarFinalizeOrder(req, res) {
     };
 
     await orderRef.set({
-        orderNumber,
-        status: 'pending',
-        vendorId,
-        shippingAddress: customerShippingData,
-        orderNotes: orderNotes || '',
-        deliveryNotesForRider: deliveryNotesForRider || '',
-        paymentIntentId,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        orderCategory: 'bazar',
-        totalAmount: soldiVeriPagati,
-        cartItems: [purchasedItem],
-        buyerUserId: userId
-    });
+            orderNumber,
+            status: 'pending',
+            vendorId,
+            shippingAddress: customerShippingData,
+            orderNotes: orderNotes || '',
+            deliveryNotesForRider: deliveryNotesForRider || '',
+            paymentIntentId,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            orderCategory: 'bazar',
+            totalAmount: soldiVeriPagati,
+            cartItems: [purchasedItem],
+            buyerUserId: userId
+        });
+    
+        // ==========================================
+        // AUMENTA LA CODA DEL NEGOZIO DI 1
+        // ==========================================
+        await db.collection('vendors').doc(vendorId).update({
+            pending_orders_count: admin.firestore.FieldValue.increment(1)
+        });
+        // ==========================================
 
     // ==========================================
     // INVIO SMS MACRODROID BLINDATO
