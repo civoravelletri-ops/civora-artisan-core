@@ -24,20 +24,42 @@ export default async function handler(req, res) {
         NON usare virgolette all'inizio e alla fine del testo generato.
         Il testo deve essere direttamente il contenuto da inserire nel campo.`;
 
-        let userPromptContent = `Il prodotto si chiama "${contesto.nome}".
-        Si trova nella categoria "${contesto.categoria}".
-        La marca è "${contesto.marca}".
-        Il prezzo è "${contesto.prezzo}€".`;
-
-        if (campo === "descrizione_breve") {
-            userPromptContent += `\nGenera uno slogan accattivante e conciso di massimo 150 caratteri per la "Descrizione Breve".`;
-        } else if (campo === "descrizione_completa") {
-            userPromptContent += `\nGenera una descrizione emozionante e dettagliata, lunga circa 3-4 paragrafi, per la "Descrizione Completa". Il testo deve essere ricco di informazioni ma scorrevole.`;
-        } else if (campo === "tags") {
-            userPromptContent += `\nGenera 5-7 parole chiave pertinenti, separate da virgola, per il campo "Tags".`;
-        } else if (campo === "keywords") {
-            userPromptContent += `\nGenera 7-10 termini di ricerca aggiuntivi, separati da virgola, per il campo "Keywords".`;
-        }
+        let userPromptContent = '';
+        
+            // Contesto per PRODOTTI
+            if (campo.includes("descrizione_breve") || campo.includes("descrizione_completa") || campo.includes("tags") || campo.includes("keywords")) {
+                userPromptContent = `Il prodotto si chiama "${contesto.nome}". 
+                Si trova nella categoria "${contesto.categoria}". 
+                La marca è "${contesto.marca}". 
+                Il prezzo è "${contesto.prezzo}€".`;
+        
+                if (campo === "descrizione_breve") {
+                    userPromptContent += `\nGenera uno slogan accattivante e conciso di massimo 150 caratteri per la "Descrizione Breve".`;
+                } else if (campo === "descrizione_completa") {
+                    userPromptContent += `\nGenera una descrizione emozionante e dettagliata, lunga circa 3-4 paragrafi, per la "Descrizione Completa". Il testo deve essere ricco di informazioni ma scorrevole.`;
+                } else if (campo === "tags") {
+                    userPromptContent += `\nGenera 5-7 parole chiave pertinenti, separate da virgola, per il campo "Tags".`;
+                } else if (campo === "keywords") {
+                    userPromptContent += `\nGenera 7-10 termini di ricerca aggiuntivi, separati da virgola, per il campo "Keywords".`;
+                }
+            } 
+            // Contesto per SERVIZI
+            else if (campo.includes("servizio") || campo.includes("tags_servizio")) {
+                userPromptContent = `Il servizio si chiama "${contesto.nome}". 
+                Si trova nella categoria "${contesto.categoria}". 
+                ${contesto.priceContext ? contesto.priceContext : 'Il prezzo non è specificato o variabile.'}`;
+        
+                if (campo === "descrizione_breve_servizio") {
+                    userPromptContent += `\nGenera uno slogan accattivante e conciso di massimo 150 caratteri per la "Descrizione Breve" del servizio.`;
+                } else if (campo === "descrizione_completa_servizio") {
+                    userPromptContent += `\nGenera una descrizione emozionante e dettagliata, lunga circa 3-4 paragrafi, per la "Descrizione Completa" del servizio. Il testo deve essere ricco di informazioni ma scorrevole.`;
+                } else if (campo === "tags_servizio") {
+                    userPromptContent += `\nGenera 5-7 parole chiave pertinenti, separate da virgola, per il campo "Tags" del servizio.`;
+                }
+            } else {
+                // Fallback per campi non riconosciuti
+                userPromptContent = `Genera un contenuto per il campo "${campo}" relativo a "${contesto.nome}" della categoria "${contesto.categoria}".`;
+            }
 
         const messages = [
             { role: "system", content: systemPrompt },
