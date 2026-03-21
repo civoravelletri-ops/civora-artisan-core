@@ -63,26 +63,48 @@ export default async function handler(req, res) {
                 userPromptContent = `Genera un contenuto per il campo "${campo}" relativo a "${contesto.nome}" della categoria "${contesto.categoria}".`;
             }
 
-        const messages = [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPromptContent }
-        ];
-
-    try {
-        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${GROQ_API_KEY}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                            model: "llama-3.1-8b-instant",
-                            messages: messages, // Ora usiamo la variabile 'messages' che abbiamo creato sopra
-                                            temperature: 0.7
-            })
-        });
-
-        const data = await response.json();
+        let messages = [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPromptContent }
+                ];
+                
+                let aiModel = "llama-3.1-8b-instant"; // Modello standard per il testo
+        
+                // NUOVO: SE È UNA RICHIESTA VISIVA (FOTO)
+                if (campo === "visione_immagine") {
+                    aiModel = "llama-3.2-11b-vision-preview"; // Modello speciale che ha gli occhi
+                    messages = [
+                        {
+                            role: "user",
+                            content: [
+                                {
+                                    type: "text",
+                                    text: "Guarda questa immagine di un prodotto in vendita. Crea un titolo commerciale acchiappa-click (max 60 caratteri) e una descrizione persuasiva (3-4 righe). RISPONDI SOLO ED ESCLUSIVAMENTE con un oggetto JSON valido con questa struttura esatta: {\"titolo\": \"Il tuo titolo\", \"descrizione\": \"La tua descrizione\"}. Non aggiungere nessun altro testo prima o dopo."
+                                },
+                                {
+                                    type: "image_url",
+                                    image_url: { url: contesto.imageUrl }
+                                }
+                            ]
+                        }
+                    ];
+                }
+        
+            try {
+                const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${GROQ_API_KEY}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                                    model: aiModel,
+                                    messages: messages, 
+                                    temperature: 0.7
+                    })
+                });
+        
+                const data = await response.json();
 
                 // Se Groq ci manda un errore, leggiamolo!
                 if (data.error) {
