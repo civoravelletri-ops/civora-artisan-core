@@ -39,8 +39,8 @@ export default async function handler(req, res) {
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "llama3-8b-8192",
-                messages: [
+                            model: "llama-3.1-8b-instant",
+                            messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPrompt }
                 ],
@@ -49,17 +49,17 @@ export default async function handler(req, res) {
         });
 
         const data = await response.json();
-        
+
                 // Se Groq ci manda un errore, leggiamolo!
                 if (data.error) {
                     return res.status(500).json({ errore: "Errore da Groq: " + data.error.message });
                 }
-        
+
                 // Se non ci sono 'choices', qualcosa è andato storto
                 if (!data.choices || data.choices.length === 0) {
                     return res.status(500).json({ errore: "L'IA non ha restituito risultati. Riprova." });
                 }
-        
+
                 const testoGenerato = data.choices[0].message.content.trim();
                 res.status(200).json({ risultato: testoGenerato });
     } catch (error) {
