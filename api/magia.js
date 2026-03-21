@@ -71,38 +71,47 @@ export default async function handler(req, res) {
                 let aiModel = "llama-3.1-8b-instant"; // Modello standard per il testo
 
                 // NUOVO: SE È UNA RICHIESTA VISIVA (FOTO)
+                        let responseFormat = null;
                         if (campo === "visione_immagine") {
-                            aiModel = "llama-4-scout-17b"; // IL NUOVISSIMO MODELLO LLAMA 4 VISION
+                            aiModel = "meta-llama/llama-4-scout-17b-16e-instruct"; // ID ESATTO DAI DOCS
+                            responseFormat = { "type": "json_object" }; // ATTIVA MODALITÀ JSON
                             messages = [
-                        {
-                            role: "user",
-                            content: [
                                 {
-                                    type: "text",
-                                    text: "Guarda questa immagine di un prodotto in vendita. Crea un titolo commerciale acchiappa-click (max 60 caratteri) e una descrizione persuasiva (3-4 righe). RISPONDI SOLO ED ESCLUSIVAMENTE con un oggetto JSON valido con questa struttura esatta: {\"titolo\": \"Il tuo titolo\", \"descrizione\": \"La tua descrizione\"}. Non aggiungere nessun altro testo prima o dopo."
-                                },
-                                {
-                                    type: "image_url",
-                                    image_url: { url: contesto.imageUrl }
+                                    role: "user",
+                                    content: [
+                                        {
+                                            type: "text",
+                                            text: "Analizza questa immagine di un prodotto. Crea un titolo (max 60 caratteri) e una descrizione (3-4 righe). Rispondi in formato JSON con chiavi 'titolo' e 'descrizione'."
+                                        },
+                                        {
+                                            type: "image_url",
+                                            image_url: { url: contesto.imageUrl }
+                                        }
+                                    ]
                                 }
-                            ]
+                            ];
                         }
-                    ];
-                }
-
-            try {
-                const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${GROQ_API_KEY}`,
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                                    model: aiModel,
-                                    messages: messages,
-                                    temperature: 0.7
-                    })
-                });
+                
+                    try {
+                        const bodyRequest = {
+                            model: aiModel,
+                            messages: messages,
+                            temperature: 0.7
+                        };
+                        
+                        // Aggiunge il formato JSON solo se necessario
+                        if (responseFormat) {
+                            bodyRequest.response_format = responseFormat;
+                        }
+                
+                        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                            method: "POST",
+                            headers: {
+                                "Authorization": `Bearer ${GROQ_API_KEY}`,
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify(bodyRequest)
+                        });
 
                 const data = await response.json();
 
