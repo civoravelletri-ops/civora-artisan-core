@@ -67,13 +67,13 @@ export default async function handler(req, res) {
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPromptContent }
                 ];
-                
+
                 let aiModel = "llama-3.1-8b-instant"; // Modello standard per il testo
-        
+
                 // NUOVO: SE È UNA RICHIESTA VISIVA (FOTO)
-                if (campo === "visione_immagine") {
-                    aiModel = "llama-3.2-11b-vision-preview"; // Modello speciale che ha gli occhi
-                    messages = [
+                        if (campo === "visione_immagine") {
+                            aiModel = "llama-3.2-90b-vision-preview"; // NUOVO MODELLO ATTIVO
+                            messages = [
                         {
                             role: "user",
                             content: [
@@ -89,7 +89,7 @@ export default async function handler(req, res) {
                         }
                     ];
                 }
-        
+
             try {
                 const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                     method: "POST",
@@ -99,11 +99,11 @@ export default async function handler(req, res) {
                     },
                     body: JSON.stringify({
                                     model: aiModel,
-                                    messages: messages, 
+                                    messages: messages,
                                     temperature: 0.7
                     })
                 });
-        
+
                 const data = await response.json();
 
                 // Se Groq ci manda un errore, leggiamolo!
