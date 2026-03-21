@@ -72,7 +72,7 @@ export default async function handler(req, res) {
 
                 // NUOVO: SE È UNA RICHIESTA VISIVA (FOTO)
                         if (campo === "visione_immagine") {
-                            aiModel = "llama-3.2-90b-vision-preview"; // NUOVO MODELLO ATTIVO
+                            aiModel = "pixtral-12b-2409"; // MODELLO STABILE PER LA VISIONE
                             messages = [
                         {
                             role: "user",
