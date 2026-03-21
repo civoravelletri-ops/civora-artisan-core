@@ -17,8 +17,12 @@ export default async function handler(req, res) {
 
     // Prepariamo il messaggio per l'IA
     const systemPrompt = `Sei un esperto di marketing per negozi locali. 
-    Il tuo compito è aiutare un commerciante a compilare i dati di un prodotto. 
-    Sii creativo, persuasivo ma usa un linguaggio semplice. Rispondi SOLO con il testo richiesto, senza commenti.`;
+        Il tuo compito è aiutare un commerciante a compilare i dati di un prodotto. 
+        Sii creativo, persuasivo ma usa un linguaggio semplice. 
+        REGOLA FONDAMENTALE: Rispondi SOLO E UNICAMENTE con il testo per il campo richiesto. 
+        NON scrivere "Ecco la descrizione:" o "Descrizione breve:" o "Slogan:". 
+        NON usare virgolette all'inizio e alla fine. 
+        Scrivi direttamente il contenuto e basta.`;
 
     const userPrompt = `Il prodotto si chiama "${contesto.nome}". 
     Si trova nella categoria "${contesto.categoria}". 
