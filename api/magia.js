@@ -16,24 +16,33 @@ export default async function handler(req, res) {
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
     // Prepariamo il messaggio per l'IA
-    const systemPrompt = `Sei un esperto di marketing per negozi locali. 
-        Il tuo compito è aiutare un commerciante a compilare i dati di un prodotto. 
-        Sii creativo, persuasivo ma usa un linguaggio semplice. 
-        REGOLA FONDAMENTALE: Rispondi SOLO E UNICAMENTE con il testo per il campo richiesto. 
-        NON scrivere "Ecco la descrizione:" o "Descrizione breve:" o "Slogan:". 
-        NON usare virgolette all'inizio e alla fine. 
-        Scrivi direttamente il contenuto e basta.`;
+    const systemPrompt = `Sei un esperto di marketing per negozi locali e il tuo compito è generare contenuti specifici per campi di un prodotto.
+        Utilizza un linguaggio semplice, persuasivo e adatto a un pubblico locale.
 
-    const userPrompt = `Il prodotto si chiama "${contesto.nome}". 
-    Si trova nella categoria "${contesto.categoria}". 
-    La marca è "${contesto.marca}". 
-    Il prezzo è "${contesto.prezzo}€".
-    
-    Genera per favore il contenuto per il campo "${campo}".
-    - Se il campo è "descrizione_breve", scrivi uno slogan accattivante di max 150 caratteri.
-    - Se il campo è "descrizione_completa", scrivi una descrizione emozionante di circa 3-4 frasi che invogli all'acquisto.
-    - Se il campo è "tags", scrivi 5-6 parole chiave separate da virgola.
-    - Se il campo è "keywords", scrivi termini di ricerca extra separati da virgola.`;
+        REGOLA FONDAMENTALE: Rispondi SOLO E UNICAMENTE con il testo richiesto per il campo specificato.
+        NON includere etichette come "Descrizione breve:", "Tags:", ecc.
+        NON usare virgolette all'inizio e alla fine del testo generato.
+        Il testo deve essere direttamente il contenuto da inserire nel campo.`;
+
+        let userPromptContent = `Il prodotto si chiama "${contesto.nome}".
+        Si trova nella categoria "${contesto.categoria}".
+        La marca è "${contesto.marca}".
+        Il prezzo è "${contesto.prezzo}€".`;
+
+        if (campo === "descrizione_breve") {
+            userPromptContent += `\nGenera uno slogan accattivante e conciso di massimo 150 caratteri per la "Descrizione Breve".`;
+        } else if (campo === "descrizione_completa") {
+            userPromptContent += `\nGenera una descrizione emozionante e dettagliata, lunga circa 3-4 paragrafi, per la "Descrizione Completa". Il testo deve essere ricco di informazioni ma scorrevole.`;
+        } else if (campo === "tags") {
+            userPromptContent += `\nGenera 5-7 parole chiave pertinenti, separate da virgola, per il campo "Tags".`;
+        } else if (campo === "keywords") {
+            userPromptContent += `\nGenera 7-10 termini di ricerca aggiuntivi, separati da virgola, per il campo "Keywords".`;
+        }
+
+        const messages = [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPromptContent }
+        ];
 
     try {
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -44,11 +53,8 @@ export default async function handler(req, res) {
             },
             body: JSON.stringify({
                             model: "llama-3.1-8b-instant",
-                            messages: [
-                    { role: "system", content: systemPrompt },
-                    { role: "user", content: userPrompt }
-                ],
-                temperature: 0.7
+                            messages: messages, // Ora usiamo la variabile 'messages' che abbiamo creato sopra
+                                            temperature: 0.7
             })
         });
 
