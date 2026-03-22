@@ -21,7 +21,7 @@ export default async function handler(req, res) {
     1. Usa un tono energico, amichevole e professionale.
     2. Usa molte emoji pertinenti per rendere il post visivamente accattivante.
     3. Usa elenchi puntati per i vantaggi del prodotto/servizio.
-    4. Includi sempre una "Call to Action" (Invito all'azione) chiara verso Civora.
+    4. Includi sempre una "Call to Action" (Invito all'azione) chiara verso Il nostro Shop.
     5. Aggiungi 5-8 hashtag strategici alla fine (incluso #Civora e hashtag locali).
     
     REGOLA FONDAMENTALE: Rispondi SOLO con il testo del post pronto per essere copiato e incollato.
@@ -33,11 +33,11 @@ export default async function handler(req, res) {
         Prodotto: "${contesto.nome}"
         Prezzo: "${contesto.prezzo}€"
         Descrizione: "${contesto.descrizione || 'Qualità garantita'}"
-        LINK DA INSERIRE NEL POST: "${contesto.link_prodotto}"
+        LINK DA INSERIRE NEL POST: "${contesto.link_shop}"
         `;
 
     const userPromptContent = `Crea un post social coinvolgente basandoti su queste info: ${infoBase}. 
-        IMPORTANTE: Alla fine del post, scrivi una frase tipo "Scopri di più qui:" seguita esattamente dal LINK DA INSERIRE NEL POST che ti ho fornito. Non inventare altri link.`;
+        IMPORTANTE: Alla fine del post, scrivi una frase tipo "Scopri il nostro shop qui:" seguita esattamente dal LINK DA INSERIRE NEL POST che ti ho fornito. Non inventare altri link.`;
 
     try {
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
