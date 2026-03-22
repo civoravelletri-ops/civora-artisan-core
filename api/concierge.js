@@ -46,40 +46,86 @@ export default async function handler(req, res) {
             headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({
                 model: "llama-3.1-8b-instant",
-                messages: [
-                    { role: "system", content: "Sei un router logico. Analizza la domanda e rispondi SOLO con una di queste parole: INFO_PIATTAFORMA, RICERCA_PRODOTTI, RICERCA_SERVIZI, PROFILO_AMICIZIA." },
-                    { role: "user", content: query }
-                ]
+                                messages: [
+                                    { role: "system", content: `Sei un router di intenti. Analizza la richiesta dell'utente e classificala in una e una sola delle seguenti categorie. Rispondi SOLO con il nome della categoria, senza spiegazioni o punteggiatura.
+                                        CATEGORIE:
+                                        - INFO_PIATTAFORMA: Domande su Civora, la sua missione, come funziona, la sua storia, i suoi valori.
+                                        - RICERCA_PRODOTTI: Domande per trovare prodotti specifici (es. "scarpe", "pane", "regalo").
+                                        - RICERCA_SERVIZI: Domande per trovare servizi specifici (es. "parrucchiere", "massaggio", "dentista").
+                                        - PROFILO_AMICIZIA: L'utente si presenta, chiede di essere chiamato per nome, o interagisce a livello personale.
+
+                                        Esempio:
+                                        Utente: Chi sei?
+                                        Risposta: INFO_PIATTAFORMA
+                                        Utente: Vorrei un massaggio rilassante.
+                                        Risposta: RICERCA_SERVIZI
+                                        Utente: Mi chiamo Andrea.
+                                        Risposta: PROFILO_AMICIZIA
+                                        Utente: Dove trovo delle mele?
+                                        Risposta: RICERCA_PRODOTTI
+                                        `
+                                    },
+                                    { role: "user", content: query }
+                                ]
             })
         });
         const routingData = await routingResponse.json();
-        const intent = routingData.choices[0].message.content.trim();
+                let intent = "INFO_PIATTAFORMA"; // Default a INFO_PIATTAFORMA se l'AI non risponde
+
+                if (routingData.choices && routingData.choices.length > 0) {
+                    intent = routingData.choices[0].message.content.trim();
+                } else {
+                    console.warn("Groq non ha restituito un intento valido per la query:", query, "Usando default INFO_PIATTAFORMA.");
+                }
 
         let contextData = "";
 
         // 2. RECUPERO DATI DAI CASSETTI (Routing)
         if (intent === "INFO_PIATTAFORMA") {
-            contextData = "Ecco la nostra filosofia: " + platformManifesto;
-        }
-        else if (intent === "RICERCA_PRODOTTI" || intent === "RICERCA_SERVIZI") {
-            // Qui cerchiamo nel tuo Catalogo Globale
-            const productsSnap = await db.collection('global_product_catalog').limit(3).get();
-            let results = [];
-            productsSnap.forEach(doc => results.push(doc.data()));
-            contextData = "Prodotti trovati nel catalogo globale: " + JSON.stringify(results);
-
-            // Se troviamo un venditore specifico, cerchiamo anche i suoi 'consiglicliente'
-            if (results.length > 0) {
-                const vendorId = results[0].vendorId;
-                const tipsSnap = await db.collection('vendors').doc(vendorId).collection('consiglicliente').doc('main').get();
-                if (tipsSnap.exists) {
-                    contextData += " | Info per arrivare al negozio: " + JSON.stringify(tipsSnap.data());
+                    contextData = "Ecco la nostra filosofia: " + platformManifesto;
                 }
-            }
-        }
-        else if (intent === "PROFILO_AMICIZIA") {
-            contextData = `L'utente si chiama ${userName || 'Sconosciuto'}. Se si sta presentando, accoglilo con calore.`;
-        }
+                else if (intent === "RICERCA_PRODOTTI" || intent === "RICERCA_SERVIZI") {
+                    let searchResults = [];
+                    const keywordQueryParts = query.toLowerCase().split(' ').filter(w => w.length > 2); // Split della query per parole chiave
+                    
+                    let catalogSnapshot;
+                    if (keywordQueryParts.length > 0) {
+                        // Ricerca in 'searchableIndex' che hai già, filtrando per parole chiave
+                        catalogSnapshot = await db.collection('global_product_catalog')
+                                                    .where('searchableIndex', 'array-contains-any', keywordQueryParts)
+                                                    .limit(2) // Limita a 2 risultati per un racconto più gestibile
+                                                    .get();
+                    } else {
+                        // Fallback a una query generica se non ci sono parole chiave valide
+                        catalogSnapshot = await db.collection('global_product_catalog').limit(2).get();
+                    }
+        
+                    catalogSnapshot.forEach(doc => searchResults.push({ id: doc.id, ...doc.data() }));
+        
+                    if (searchResults.length > 0) {
+                        contextData = `Hai chiesto di un ${intent === "RICERCA_PRODOTTI" ? "prodotto" : "servizio"}. Ho trovato: \n`;
+                        for (const result of searchResults) {
+                            contextData += `- ${result.productName} (${result.vendorStoreName}). Descrizione: ${result.productDescription || result.shortDescription || 'Nessuna descrizione.'}. Prezzo: ${result.price}€.\n`;
+                            
+                            const vendorTipsSnap = await db.collection('vendors').doc(result.vendorId).collection('consiglicliente').doc('main').get();
+                            if (vendorTipsSnap.exists) {
+                                const tips = vendorTipsSnap.data();
+                                contextData += `  Per arrivare da ${result.vendorStoreName}: ${tips.directions || 'Nessuna indicazione.'}. Parcheggio: ${tips.parkingTips || 'Nessun suggerimento.'}.\n`;
+                            }
+                        }
+                    } else {
+                        contextData = "Mi dispiace, non ho trovato nulla che corrisponda alla tua richiesta nel nostro catalogo. Puoi provare a chiedermi in un altro modo, o forse cercare qualcosa di più generale?";
+                    }
+                } 
+                else if (intent === "PROFILO_AMICIZIA") {
+                    if (userName) {
+                        contextData = `L'utente si chiama ${userName}. Vuole fare amicizia con te, Civora.`;
+                    } else {
+                        contextData = `L'utente sta parlando del suo profilo o vuole presentarsi. Invitalo a dire il suo nome.`;
+                    }
+                } else { // Fallback generico se l'intento non è riconosciuto o è un caso limite
+                    contextData = "Non sono sicuro di aver capito. Riprova a chiedere in modo diverso, oppure chiedimi di Civora.";
+                }
 
         // 3. GENERAZIONE RISPOSTA UMANA E SENSORIALE (Il Concierge)
         const systemPrompt = `
