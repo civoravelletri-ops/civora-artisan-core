@@ -33,7 +33,7 @@ export default async function handler(req, res) {
         Prodotto: "${contesto.nome}"
         Prezzo: "${contesto.prezzo}€"
         Descrizione: "${contesto.descrizione || 'Qualità garantita'}"
-        LINK DA INSERIRE NEL POST: "${contesto.link_store}"
+        LINK DA INSERIRE NEL POST: "${contesto.link_shop}"
         `;
 
     const userPromptContent = `Crea un post social coinvolgente basandoti su queste info: ${infoBase}. 
