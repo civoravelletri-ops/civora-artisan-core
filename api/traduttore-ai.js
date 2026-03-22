@@ -1,5 +1,7 @@
+// File: api/traduttore-ai.js
+
 export default async function handler(req, res) {
-    // Permetti al tuo sito di chiamare questa funzione (CORS)
+    // Intestazioni CORS (copiate dai tuoi file, perfette)
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -10,20 +12,22 @@ export default async function handler(req, res) {
         return;
     }
 
-    const { testoOriginale, tipoCampo } = req.body;
+    const { testiItaliani } = req.body;
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-    // Prompt strutturato per forzare Groq a restituire un JSON perfetto con le 9 lingue
-    const systemPrompt = `Sei un traduttore esperto e un copywriter per attività commerciali locali.
-    Il tuo compito è tradurre il testo fornito dall'italiano in 9 lingue: "en" (Inglese), "es" (Spagnolo), "fr" (Francese), "de" (Tedesco), "ru" (Russo), "ar" (Arabo standard), "ma" (Arabo maghrebino/Darija), "ro" (Rumeno), "zh" (Cinese).
-    Devi mantenere un tono di voce persuasivo, commerciale e accattivante.
-    Se il testo in ingresso è una lista di parole chiave (tipoCampo: array), mantieni il formato a lista separata da virgole in ogni lingua.
-
-    REGOLA FONDAMENTALE: Devi rispondere SOLO ed ESCLUSIVAMENTE con un oggetto JSON valido. 
-    Usa esattamente queste chiavi: "en", "es", "fr", "de", "ru", "ar", "ma", "ro", "zh".
-    Non aggiungere mai nessun commento o testo fuori dal JSON.`;
-
-    const userPromptContent = `Traduci il seguente testo (tipo: ${tipoCampo}):\n"${testoOriginale}"`;
+    // Istruiamo l'IA a fare la traduttrice multilingua e a rispondere in JSON
+    const systemPrompt = `Sei un traduttore automatico professionale per una piattaforma e-commerce locale.
+    Riceverai un oggetto JSON con dei testi in italiano (titoli, descrizioni, tags).
+    Il tuo compito è tradurre OGNI campo in 9 lingue: "en" (Inglese), "es" (Spagnolo), "fr" (Francese), "de" (Tedesco), "ru" (Russo), "ar" (Arabo standard), "ma" (Arabo Marocchino/Darija), "ro" (Rumeno), "zh" (Cinese).
+    Mantieni il tono di voce persuasivo e commerciale. Se il campo è un array di tag, mantieni l'array.
+    
+    REGOLA FONDAMENTALE: Devi rispondere SOLO ed ESCLUSIVAMENTE con un oggetto JSON valido. Niente testo fuori dal JSON.
+    
+    Formato di risposta richiesto:
+    {
+      "en": { "nomeCampo1": "traduzione...", "nomeCampo2": ["tag1", "tag2"] },
+      "es": { "nomeCampo1": "traduzione...", "nomeCampo2": ["tag1", "tag2"] }
+    }`;
 
     try {
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -36,26 +40,24 @@ export default async function handler(req, res) {
                 model: "llama-3.1-8b-instant",
                 messages: [
                     { role: "system", content: systemPrompt },
-                    { role: "user", content: userPromptContent }
+                    { role: "user", content: JSON.stringify(testiItaliani) } // Mandiamo tutti i testi in un colpo solo
                 ],
-                temperature: 0.3, // Teniamo la creatività bassa per avere traduzioni fedeli
-                response_format: { type: "json_object" } // FORZIAMO L'USCITA IN JSON!
+                temperature: 0.3, // Bassa temperatura = traduzioni più precise e meno "invenzioni"
+                response_format: { type: "json_object" } // FORZIAMO IL FORMATO JSON
             })
         });
 
         const data = await response.json();
 
         if (data.error) {
-            return res.status(500).json({ errore: data.error.message });
+            return res.status(500).json({ errore: "Errore da Groq: " + data.error.message });
         }
 
-        // Estraiamo il JSON generato da Groq
-        const testoGenerato = data.choices[0].message.content.trim();
-        const traduzioniJson = JSON.parse(testoGenerato);
-
+        const traduzioniJson = JSON.parse(data.choices[0].message.content.trim());
         res.status(200).json(traduzioniJson);
+
     } catch (error) {
-        console.error("Errore nella Magia Traduttore:", error);
-        res.status(500).json({ errore: "Il traduttore IA si è interrotto: " + error.message });
+        console.error("Errore traduttore AI:", error);
+        res.status(500).json({ errore: "Il traduttore si è inceppato: " + error.message });
     }
 }
