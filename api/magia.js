@@ -15,53 +15,68 @@ export default async function handler(req, res) {
     // Recuperiamo la chiave che metteremo tra poco su Vercel
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-    // Prepariamo il messaggio per l'IA
-    const systemPrompt = `Sei un esperto di marketing per negozi locali e il tuo compito è generare contenuti specifici per campi di un prodotto.
-        Utilizza un linguaggio semplice, persuasivo e adatto a un pubblico locale.
+    // Prepariamo il messaggio per l'IA (Tono differenziato tra Negozio e Cura Persona)
+        let systemPrompt = "";
 
-        REGOLA FONDAMENTALE: Rispondi SOLO E UNICAMENTE con il testo richiesto per il campo specificato.
-        NON includere etichette come "Descrizione breve:", "Tags:", ecc.
-        NON usare virgolette all'inizio e alla fine del testo generato.
-        Il testo deve essere direttamente il contenuto da inserire nel campo.`;
+        if (contesto && contesto.settore === "cura_persona") {
+            systemPrompt = `Sei un esperto di marketing per il settore Wellness, Beauty e Salute.
+            Il tuo obiettivo è trasmettere fiducia, relax e professionalità per un'attività di "${contesto.myTypeStore || 'Cura della Persona'}".
+            Non limitarti a descrivere l'azione tecnica, ma enfatizza il benessere del cliente e il risultato emozionale.
+            Usa un linguaggio caldo, rassicurante ed elegante.`;
+        } else {
+            systemPrompt = `Sei un esperto di marketing per negozi locali e il tuo compito è generare contenuti specifici per prodotti e servizi commerciali.
+            Utilizza un linguaggio semplice, persuasivo e adatto a un pubblico locale.`;
+        }
+
+        systemPrompt += `\n\nREGOLA FONDAMENTALE: Rispondi SOLO E UNICAMENTE con il testo richiesto per il campo specificato.
+            NON includere etichette come "Descrizione breve:", "Tags:", ecc.
+            NON usare virgolette all'inizio e alla fine del testo generato.
+            Il testo deve essere direttamente il contenuto da inserire nel campo.`;
 
         let userPromptContent = '';
 
-            // Contesto per PRODOTTI
-                        if (campo.includes("descrizione_breve") || campo.includes("descrizione_completa") || campo.includes("tags") || campo.includes("keywords") || campo.includes("titolo")) {
-                            userPromptContent = `Il prodotto base è "${contesto.nome}".
-                            Si trova nella categoria "${contesto.categoria}".
-                            La marca è "${contesto.marca}".
-                            Il prezzo è "${contesto.prezzo}€".`;
+            // === LOGICA PER SETTORE CURA DELLA PERSONA (Wellness/Beauty/Salute) ===
+                        if (contesto.settore === "cura_persona") {
+                            const infoBase = `Servizio: "${contesto.nome}". Categoria: "${contesto.categoria} / ${contesto.sottocategoria || ''}". Tipo Attività: "${contesto.myTypeStore}". Prezzo: ${contesto.prezzo}€. Durata: ${contesto.durata} min.`;
 
-                            if (campo === "descrizione_breve") {
-                                userPromptContent += `\nGenera uno slogan accattivante e conciso di massimo 150 caratteri per la "Descrizione Breve".`;
-                            } else if (campo === "descrizione_completa") {
-                                userPromptContent += `\nGenera una descrizione emozionante e dettagliata, lunga circa 3-4 paragrafi, per la "Descrizione Completa". Il testo deve essere ricco di informazioni ma scorrevole.`;
-                            } else if (campo === "tags") {
-                                userPromptContent += `\nGenera 5-7 parole chiave pertinenti, separate da virgola, per il campo "Tags".`;
-                            } else if (campo === "keywords") {
-                                userPromptContent += `\nGenera 7-10 termini di ricerca aggiuntivi, separati da virgola, per il campo "Keywords".`;
-                            } else if (campo === "titolo") {
-                                userPromptContent += `\nGenera un Nome Prodotto (titolo commerciale acchiappa-click) di massimo 60 caratteri. Prendi spunto dal prodotto base inserito e rendilo irresistibile per un cliente che legge.`;
+                            if (campo === "titolo_cura") {
+                                userPromptContent = infoBase + `\nGenera un titolo professionale e invitante (max 60 caratteri) per questo servizio. Deve suonare esclusivo e curato.`;
+                            } else if (campo === "descrizione_breve_cura") {
+                                userPromptContent = infoBase + `\nGenera una descrizione brevissima e poetica (max 150 caratteri). Uno slogan che faccia desiderare di prenotare subito.`;
+                            } else if (campo === "descrizione_esperienza_cura") {
+                                userPromptContent = infoBase + `\nScrivi una descrizione dettagliata dell'ESPERIENZA che il cliente vivrà. Parla dell'atmosfera, della cura nei dettagli e del beneficio finale (relax, bellezza, salute). Usa 3-4 paragrafi coinvolgenti.`;
                             }
                         }
-            // Contesto per SERVIZI
-            else if (campo.includes("servizio") || campo.includes("tags_servizio")) {
-                userPromptContent = `Il servizio si chiama "${contesto.nome}".
-                Si trova nella categoria "${contesto.categoria}".
-                ${contesto.priceContext ? contesto.priceContext : 'Il prezzo non è specificato o variabile.'}`;
+                        // === LOGICA PER PRODOTTI (Bazar / Business) ===
+                        else if (campo.includes("descrizione_breve") || campo.includes("descrizione_completa") || campo.includes("tags") || campo.includes("keywords") || campo.includes("titolo")) {
+                            userPromptContent = `Il prodotto base è "${contesto.nome}". Categoria: "${contesto.categoria}". Marca: "${contesto.marca}". Prezzo: "${contesto.prezzo}€".`;
 
-                if (campo === "descrizione_breve_servizio") {
-                    userPromptContent += `\nGenera uno slogan accattivante e conciso di massimo 150 caratteri per la "Descrizione Breve" del servizio.`;
-                } else if (campo === "descrizione_completa_servizio") {
-                    userPromptContent += `\nGenera una descrizione emozionante e dettagliata, lunga circa 3-4 paragrafi, per la "Descrizione Completa" del servizio. Il testo deve essere ricco di informazioni ma scorrevole.`;
-                } else if (campo === "tags_servizio") {
-                    userPromptContent += `\nGenera 5-7 parole chiave pertinenti, separate da virgola, per il campo "Tags" del servizio.`;
-                }
-            } else {
-                // Fallback per campi non riconosciuti
-                userPromptContent = `Genera un contenuto per il campo "${campo}" relativo a "${contesto.nome}" della categoria "${contesto.categoria}".`;
-            }
+                            if (campo === "descrizione_breve") {
+                                userPromptContent += `\nGenera uno slogan accattivante (max 150 caratteri) per la "Descrizione Breve".`;
+                            } else if (campo === "descrizione_completa") {
+                                userPromptContent += `\nGenera una descrizione dettagliata di 3-4 paragrafi per la "Descrizione Completa".`;
+                            } else if (campo === "tags") {
+                                userPromptContent += `\nGenera 5-7 tag separati da virgola.`;
+                            } else if (campo === "keywords") {
+                                userPromptContent += `\nGenera 7-10 parole chiave SEO separate da virgola.`;
+                            } else if (campo === "titolo") {
+                                userPromptContent += `\nGenera un titolo commerciale irresistibile (max 60 caratteri).`;
+                            }
+                        }
+                        // === LOGICA PER SERVIZI TECNICI (Artigiani/Servizi Business) ===
+                        else if (campo.includes("servizio") || campo.includes("tags_servizio")) {
+                            userPromptContent = `Il servizio si chiama "${contesto.nome}". Categoria: "${contesto.categoria}". ${contesto.priceContext || ''}`;
+
+                            if (campo === "descrizione_breve_servizio") {
+                                userPromptContent += `\nGenera uno slogan tecnico/commerciale di massimo 150 caratteri.`;
+                            } else if (campo === "descrizione_completa_servizio") {
+                                userPromptContent += `\nGenera una descrizione professionale di 3-4 paragrafi che spieghi l'efficacia del servizio.`;
+                            } else if (campo === "tags_servizio") {
+                                userPromptContent += `\nGenera 5-7 parole chiave tecniche separate da virgola.`;
+                            }
+                        } else {
+                            userPromptContent = `Genera un contenuto per il campo "${campo}" relativo a "${contesto.nome}" della categoria "${contesto.categoria}".`;
+                        }
 
         let messages = [
                     { role: "system", content: systemPrompt },
@@ -91,19 +106,19 @@ export default async function handler(req, res) {
                                 }
                             ];
                         }
-                
+
                     try {
                         const bodyRequest = {
                             model: aiModel,
                             messages: messages,
                             temperature: 0.7
                         };
-                        
+
                         // Aggiunge il formato JSON solo se necessario
                         if (responseFormat) {
                             bodyRequest.response_format = responseFormat;
                         }
-                
+
                         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                             method: "POST",
                             headers: {
