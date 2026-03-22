@@ -14,21 +14,25 @@ export default async function handler(req, res) {
     const { testo_italiano, contesto } = req.body;
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
+    // Lista aggiornata delle 10 lingue (per i fallback e il prompt)
+    const I18N_LANGS = ["en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi"];
+
     if (!testo_italiano || testo_italiano.trim() === "") {
-        return res.status(200).json({
-            en: "", es: "", fr: "", de: "", ru: "", ar: "", ma: "", ro: "", zh: ""
-        });
+        // Se il testo è vuoto, restituisci un oggetto con tutte le lingue vuote
+        const emptyTranslations = {};
+        I18N_LANGS.forEach(lang => emptyTranslations[lang] = "");
+        return res.status(200).json(emptyTranslations);
     }
 
     // Diciamo all'IA chi è e cosa deve fare. Le imponiamo di rispondere SOLO in formato JSON.
     const systemPrompt = `Sei un traduttore professionista ed esperto di marketing per attività commerciali locali.
-    Il tuo compito è prendere il testo in italiano e tradurlo in 9 lingue.
+    Il tuo compito è prendere il testo in italiano e tradurlo in 10 lingue.
     Mantieni un tono commerciale, persuasivo e naturale. 
     Se il testo è una lista di parole separate da virgola (tags), mantieni la separazione con le virgole.
 
     REGOLA FONDAMENTALE: DEVI RISPONDERE SOLO ED ESCLUSIVAMENTE CON UN OGGETTO JSON VALIDO.
     Non aggiungere MAI commenti, saluti o testo fuori dal JSON.
-    L'oggetto JSON deve avere ESATTAMENTE queste 10 chiavi:
+    L'oggetto JSON deve avere ESATTAMENTE queste 10 chiavi (ISO 639-1 per le lingue):
     "en" (Inglese)
     "es" (Spagnolo)
     "fr" (Francese)
@@ -36,9 +40,9 @@ export default async function handler(req, res) {
     "ru" (Russo)
     "ar" (Arabo standard)
     "ro" (Rumeno)
-    "hi" (Rumeno)
-    "sq" (Rumeno)
-    "zh" (Cinese semplificato)`;
+    "zh" (Cinese semplificato)
+    "sq" (Albanese)
+    "hi" (Hindi)`;
 
     const userPromptContent = `Contesto del testo: ${contesto}\n\nTesto in italiano da tradurre:\n"${testo_italiano}"`;
 
@@ -81,10 +85,8 @@ export default async function handler(req, res) {
     } catch (error) {
         console.error("Errore magia-traduttore:", error);
         // In caso di errore critico, restituiamo il testo originale in italiano su tutte le lingue per non bloccare il salvataggio
-        res.status(200).json({
-            en: testo_italiano, es: testo_italiano, fr: testo_italiano, 
-            de: testo_italiano, ru: testo_italiano, ar: testo_italiano, 
-            ma: testo_italiano, ro: testo_italiano, zh: testo_italiano
-        });
+        const fallbackTranslations = {};
+        I18N_LANGS.forEach(lang => fallbackTranslations[lang] = testo_italiano);
+        res.status(200).json(fallbackTranslations);
     }
 }
