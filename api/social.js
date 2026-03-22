@@ -29,16 +29,15 @@ export default async function handler(req, res) {
 
     // Costruiamo il contesto basandoci su cosa ci arriva (Prodotto o Servizio)
     const infoBase = `
-    Attività: "${contesto.store_name}"
-    Cosa promuoviamo: "${contesto.nome}"
-    Categoria: "${contesto.categoria}"
-    Prezzo: "${contesto.prezzo}€"
-    Descrizione: "${contesto.descrizione || 'Qualità garantita'}"
-    Link del Negozio su Civora: "https://civora.it/store/${contesto.store_slug || ''}"
-    `;
+        Attività: "${contesto.store_name}"
+        Prodotto: "${contesto.nome}"
+        Prezzo: "${contesto.prezzo}€"
+        Descrizione: "${contesto.descrizione || 'Qualità garantita'}"
+        LINK DA INSERIRE NEL POST: "${contesto.link_prodotto}"
+        `;
 
-    const userPromptContent = `Crea un post social coinvolgente per promuovere: ${infoBase}. 
-    Assicurati di far capire che è un'occasione da non perdere e che possono trovarlo su Civora.`;
+    const userPromptContent = `Crea un post social coinvolgente basandoti su queste info: ${infoBase}. 
+        IMPORTANTE: Alla fine del post, scrivi una frase tipo "Scopri di più qui:" seguita esattamente dal LINK DA INSERIRE NEL POST che ti ho fornito. Non inventare altri link.`;
 
     try {
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
