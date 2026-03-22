@@ -28,15 +28,16 @@ export default async function handler(req, res) {
 
     REGOLA FONDAMENTALE: DEVI RISPONDERE SOLO ED ESCLUSIVAMENTE CON UN OGGETTO JSON VALIDO.
     Non aggiungere MAI commenti, saluti o testo fuori dal JSON.
-    L'oggetto JSON deve avere ESATTAMENTE queste 9 chiavi:
+    L'oggetto JSON deve avere ESATTAMENTE queste 10 chiavi:
     "en" (Inglese)
     "es" (Spagnolo)
     "fr" (Francese)
     "de" (Tedesco)
     "ru" (Russo)
     "ar" (Arabo standard)
-    "ma" (Arabo Marocchino - Darija)
     "ro" (Rumeno)
+    "hi" (Rumeno)
+    "sq" (Rumeno)
     "zh" (Cinese semplificato)`;
 
     const userPromptContent = `Contesto del testo: ${contesto}\n\nTesto in italiano da tradurre:\n"${testo_italiano}"`;
@@ -74,7 +75,7 @@ export default async function handler(req, res) {
         const jsonString = data.choices[0].message.content.trim();
         const traduzioni = JSON.parse(jsonString);
 
-        // Inviamo il pacchetto di 9 lingue al sito
+        // Inviamo il pacchetto di 10 lingue al sito
         res.status(200).json(traduzioni);
 
     } catch (error) {
