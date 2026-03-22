@@ -1,9 +1,22 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
-// Inizializzazione Firebase Admin (assicurati di avere le variabili d'ambiente su Vercel)
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-if (!getApps().length) {
+// Inizializzazione Firebase Admin con decodifica automatica (Base64 o JSON)
+let serviceAccount;
+try {
+    const rawKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+    if (rawKey.startsWith('{')) {
+        // Se è JSON normale
+        serviceAccount = JSON.parse(rawKey);
+    } else {
+        // Se è Base64 (quello che inizia con "ewog")
+        serviceAccount = JSON.parse(Buffer.from(rawKey, 'base64').toString('utf8'));
+    }
+} catch (e) {
+    console.error("Errore critico nella lettura della chiave Firebase:", e);
+}
+
+if (!getApps().length && serviceAccount) {
     initializeApp({ credential: cert(serviceAccount) });
 }
 const db = getFirestore();
@@ -19,7 +32,7 @@ export default async function handler(req, res) {
 
     // --- IL MANIFESTO DI CIVORA (Filosofia caricata nel cervello) ---
     const platformManifesto = `
-    Civora non è un sito di shopping, è un ecosistema di quartiere. 
+    Civora non è un sito di shopping, è un ecosistema di quartiere.
     Uniamo i negozianti locali (artigiani, fornai, parrucchieri) per proteggerli dai giganti del web.
     Per i nostri amici non vedenti, siamo un assistente che li aiuta a 'vedere' cosa c'è in città.
     Offriamo rispetto, accoglienza umana e sconti sulle consegne per chi ha disabilità.
@@ -47,14 +60,14 @@ export default async function handler(req, res) {
         // 2. RECUPERO DATI DAI CASSETTI (Routing)
         if (intent === "INFO_PIATTAFORMA") {
             contextData = "Ecco la nostra filosofia: " + platformManifesto;
-        } 
+        }
         else if (intent === "RICERCA_PRODOTTI" || intent === "RICERCA_SERVIZI") {
             // Qui cerchiamo nel tuo Catalogo Globale
             const productsSnap = await db.collection('global_product_catalog').limit(3).get();
             let results = [];
             productsSnap.forEach(doc => results.push(doc.data()));
             contextData = "Prodotti trovati nel catalogo globale: " + JSON.stringify(results);
-            
+
             // Se troviamo un venditore specifico, cerchiamo anche i suoi 'consiglicliente'
             if (results.length > 0) {
                 const vendorId = results[0].vendorId;
@@ -71,9 +84,9 @@ export default async function handler(req, res) {
         // 3. GENERAZIONE RISPOSTA UMANA E SENSORIALE (Il Concierge)
         const systemPrompt = `
         Sei il "Concierge Civora", l'anima della piattaforma Civora. Il tuo compito è assistere persone non vedenti.
-        USA UN LINGUAGGIO SENSORIALE: Non dire 'Scarpa Nike Bianca'. 
+        USA UN LINGUAGGIO SENSORIALE: Non dire 'Scarpa Nike Bianca'.
         Dì: 'Ho trovato una scarpa da basket che al tatto sembra scattante, di un bianco lucido che cattura la luce, pronta per far correre un bambino.'
-        
+
         REGOLE:
         - Sii estremamente dolce, calmo e rispettoso.
         - Non vendere. Aiuta. Se l'utente vuole andare al negozio, usa le info su parcheggio e indicazioni.
@@ -95,9 +108,9 @@ export default async function handler(req, res) {
         });
 
         const finalData = await finalResponse.json();
-        res.status(200).json({ 
+        res.status(200).json({
             risposta: finalData.choices[0].message.content,
-            intent: intent 
+            intent: intent
         });
 
     } catch (error) {
