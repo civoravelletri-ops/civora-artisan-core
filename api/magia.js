@@ -49,33 +49,52 @@ export default async function handler(req, res) {
                 userPromptContent = infoBaseServizio + `\nScrivi una descrizione dettagliata dell'ESPERIENZA che il cliente vivrà. Parla dell'atmosfera, della cura nei dettagli e del beneficio finale (relax, bellezza, salute). Usa 3-4 paragrafi coinvolgenti.`;
             }
             // NUOVA LOGICA AGGIORNATA PER IL PROFILO DELLO STUDIO "CURA DELLA PERSONA"
-            else if (campo.endsWith("_profile")) {
-                const profileName = contesto.store_name || "questo studio/salone";
-                const profileType = contesto.myTypeStore || "un'attività di cura della persona";
-                const baseProfileInfo = `Nome Studio: "${profileName}". Tipologia: "${profileType}".`;
-                const currentText = (contesto.currentFieldValue || "").trim(); // Prende il testo attuale dal frontend
-
-                let actionPrompt = ""; // "Genera" o "Riscrivi"
-
-                if (currentText) {
-                    // Se c'è già testo, chiedi all'AI di migliorarlo
-                    actionPrompt = `Migliora e riscrivi il seguente testo, rendendolo più professionale e persuasivo. Mantieni l'intento originale e adattalo al contesto di ${profileName} (${profileType}).`;
-                } else {
-                    // Se il campo è vuoto, chiedi all'AI di generare da zero
-                    actionPrompt = `Genera un nuovo testo per questo campo, basandoti sulle informazioni fornite.`;
-                }
-
-                if (campo === "short_description_profile") {
-                    userPromptContent = `${baseProfileInfo}\n${actionPrompt} Crea uno slogan accattivante e conciso (max 150 caratteri). Testo di partenza: "${currentText}"`;
-                } else if (campo === "description_profile") {
-                    userPromptContent = `${baseProfileInfo}\n${actionPrompt} Scrivi una descrizione completa e persuasiva (3-4 paragrafi). Descrivi storia, filosofia, unicità e l'esperienza cliente. Adatta il tono alla tipologia "${profileType}". Testo di partenza: "${currentText}"`;
-                } else if (campo === "tags_profile") {
-                    userPromptContent = `${baseProfileInfo}\n${actionPrompt} Genera 7-10 parole chiave (tags) pertinenti e popolari, separate da virgola. Includi termini relativi alla tipologia "${profileType}" e ai benefici offerti. Testo di partenza: "${currentText}"`;
-                } else if (campo === "specializations_profile") {
-                    userPromptContent = `${baseProfileInfo}\n${actionPrompt} Genera 5-7 specializzazioni chiave, separate da virgola. Focalizzati su servizi unici, tecniche innovative o aree di eccellenza in base alla tipologia "${profileType}". Testo di partenza: "${currentText}"`;
-                }
-                temperature = 0.6; // Leggermente più alta per la ricomposizione, per un po' più di creatività nel migliorare
-            }
+            else if (campo.endsWith("_profile") || campo.endsWith("_cura_product")) { // Aggiornato per includere i nuovi campi prodotto
+                        const isProfile = campo.endsWith("_profile");
+                        const entityName = isProfile ? (contesto.store_name || "questo studio/salone") : (contesto.product_name || "questo prodotto di cura della persona");
+                        const entityType = isProfile ? (contesto.myTypeStore || "un'attività di cura della persona") : (contesto.product_category || contesto.myTypeStore || "un prodotto di cura della persona");
+                        const baseInfo = isProfile ?
+                            `Nome Studio: "${entityName}". Tipologia: "${entityType}".` :
+                            `Prodotto: "${entityName}". Categoria: "${entityType}". Sottocategoria: "${contesto.product_subcategory || 'non specificata'}". Marca: "${contesto.product_brand || 'non specificata'}". Tipo Attività: "${contesto.myTypeStore}".`;
+            
+                        const currentText = (contesto.currentFieldValue || "").trim();
+                        let actionPrompt = "";
+            
+                        if (currentText) {
+                            actionPrompt = `Migliora e riscrivi il seguente testo, rendendolo più professionale, persuasivo e adatto al marketing. Mantieni l'intento originale e adattalo al contesto di ${entityName} (${entityType}).`;
+                        } else {
+                            actionPrompt = `Genera un nuovo testo per questo campo, basandoti sulle informazioni fornite.`;
+                        }
+            
+                        if (campo === "short_description_profile") {
+                            userPromptContent = `${baseInfo}\n${actionPrompt} Crea uno slogan accattivante e conciso (max 150 caratteri). Testo di partenza: "${currentText}"`;
+                        } else if (campo === "description_profile") {
+                            userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi una descrizione completa e persuasiva (3-4 paragrafi). Descrivi storia, filosofia, unicità e l'esperienza cliente. Adatta il tono alla tipologia "${entityType}". Testo di partenza: "${currentText}"`;
+                        } else if (campo === "tags_profile") {
+                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera 7-10 parole chiave (tags) pertinenti e popolari, separate da virgola. Includi termini relativi alla tipologia "${entityType}" e ai benefici offerti. Testo di partenza: "${currentText}"`;
+                        } else if (campo === "specializations_profile") {
+                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera 5-7 specializzazioni chiave, separate da virgola. Focalizzati su servizi unici, tecniche innovative o aree di eccellenza in base alla tipologia "${entityType}". Testo di partenza: "${currentText}"`;
+                        }
+                        // NUOVI CAMPI PRODOTTO CURA PERSONA
+                        else if (campo === "product_name_cura_product") {
+                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera un nome di prodotto accattivante e professionale (max 60 caratteri). Testo di partenza: "${currentText}"`;
+                        } else if (campo === "short_description_product_cura") {
+                            userPromptContent = `${baseInfo}\n${actionPrompt} Crea una descrizione brevissima (slogan, max 150 caratteri) per il prodotto. Testo di partenza: "${currentText}"`;
+                        } else if (campo === "description_product_cura") {
+                            userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi una descrizione completa e persuasiva (3-4 paragrafi) per il prodotto. Enfatizza benefici, uso e ingredienti chiave. Testo di partenza: "${currentText}"`;
+                        } else if (campo === "tags_product_cura") {
+                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera 7-10 parole chiave (tags) pertinenti, separate da virgola, per il prodotto. Includi benefici, ingredienti e usi. Testo di partenza: "${currentText}"`;
+                        } else if (campo === "keywords_product_cura") {
+                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera 7-10 termini di ricerca extra (keywords) pertinenti, separati da virgola, per il prodotto. Testo di partenza: "${currentText}"`;
+                        } else if (campo === "ingredients_product_cura") {
+                            userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi un elenco di ingredienti dettagliato ma conciso per il prodotto. Testo di partenza: "${currentText}"`;
+                        } else if (campo === "allergens_product_cura") {
+                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera un elenco di allergeni comuni, separati da virgola, pertinenti per il prodotto. Testo di partenza: "${currentText}"`;
+                        } else if (campo === "attributes_product_cura") {
+                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera un elenco di benefici o attributi chiave, separati da virgola, per il prodotto (es. tipo di pelle, efficacia). Testo di partenza: "${currentText}"`;
+                        }
+                        temperature = 0.6;
+                    }
 
         }
         // === LOGICA PER PRODOTTI (Bazar / Business) ===
@@ -179,7 +198,7 @@ export default async function handler(req, res) {
             if (data.error) {
                 return res.status(500).json({ errore: "Errore da Groq: " + data.error.message });
             }
-    
+
             // Se non ci sono 'choices', qualcosa è andato storto
             if (!data.choices || data.choices.length === 0) {
                 return res.status(500).json({ errore: "L'IA non ha restituito risultati. Riprova." });
