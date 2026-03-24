@@ -35,110 +35,109 @@ export default async function handler(req, res) {
             Il testo deve essere direttamente il contenuto da inserire nel campo.`;
 
         let userPromptContent = '';
-
-        // === LOGICA PER SETTORE CURA DELLA PERSONA (Wellness/Beauty/Salute) ===
-        if (contesto.settore === "cura_persona") {
-            // Logica specifica per i servizi già presente
-            const infoBaseServizio = `Servizio: "${contesto.nome}". Categoria: "${contesto.categoria} / ${contesto.sottocategoria || ''}". Tipo Attività: "${contesto.myTypeStore}". Prezzo: ${contesto.prezzo}€. Durata: ${contesto.durata} min.`;
-
-            if (campo === "titolo_cura") {
-                userPromptContent = infoBaseServizio + `\nGenera un titolo professionale e invitante (max 60 caratteri) per questo servizio. Deve suonare esclusivo e curato.`;
-            } else if (campo === "descrizione_breve_cura") {
-                userPromptContent = infoBaseServizio + `\nGenera una descrizione brevissima e poetica (max 150 caratteri). Uno slogan che faccia desiderare di prenotare subito.`;
-            } else if (campo === "descrizione_esperienza_cura") {
-                userPromptContent = infoBaseServizio + `\nScrivi una descrizione dettagliata dell'ESPERIENZA che il cliente vivrà. Parla dell'atmosfera, della cura nei dettagli e del beneficio finale (relax, bellezza, salute). Usa 3-4 paragrafi coinvolgenti.`;
-            }
-            // NUOVA LOGICA AGGIORNATA PER IL PROFILO DELLO STUDIO "CURA DELLA PERSONA"
-            else if (campo.endsWith("_profile") || campo.endsWith("_cura_product")) { // Aggiornato per includere i nuovi campi prodotto
-                        const isProfile = campo.endsWith("_profile");
-                        const entityName = isProfile ? (contesto.store_name || "questo studio/salone") : (contesto.product_name || "questo prodotto di cura della persona");
-                        const entityType = isProfile ? (contesto.myTypeStore || "un'attività di cura della persona") : (contesto.product_category || contesto.myTypeStore || "un prodotto di cura della persona");
-                        const baseInfo = isProfile ?
-                            `Nome Studio: "${entityName}". Tipologia: "${entityType}".` :
-                            `Prodotto: "${entityName}". Categoria: "${entityType}". Sottocategoria: "${contesto.product_subcategory || 'non specificata'}". Marca: "${contesto.product_brand || 'non specificata'}". Tipo Attività: "${contesto.myTypeStore}".`;
-            
-                        const currentText = (contesto.currentFieldValue || "").trim();
-                        let actionPrompt = "";
-            
-                        if (currentText) {
-                            actionPrompt = `Migliora e riscrivi il seguente testo, rendendolo più professionale, persuasivo e adatto al marketing. Mantieni l'intento originale e adattalo al contesto di ${entityName} (${entityType}).`;
-                        } else {
-                            actionPrompt = `Genera un nuovo testo per questo campo, basandoti sulle informazioni fornite.`;
-                        }
-            
+        
+                // Determina l'azione in base alla presenza di currentFieldValue
+                const currentTextToRecompose = (contesto.currentFieldValue || "").trim();
+                let actionPrompt = "";
+                if (currentTextToRecompose) {
+                    actionPrompt = `Migliora e riscrivi il seguente testo, rendendolo più professionale, persuasivo e adatto al marketing. Mantieni l'intento originale e adattalo al contesto. Testo di partenza: "${currentTextToRecompose}"`;
+                } else {
+                    actionPrompt = `Genera un nuovo testo per questo campo, basandoti sulle informazioni fornite.`;
+                }
+        
+        
+                // === LOGICA PER SETTORE CURA DELLA PERSONA (Wellness/Beauty/Salute) ===
+                if (contesto.settore === "cura_persona") { // Servizi Cura Persona
+                    const infoBaseServizio = `Servizio: "${contesto.nome}". Categoria: "${contesto.categoria} / ${contesto.sottocategoria || ''}". Tipo Attività: "${contesto.myTypeStore}". Prezzo: ${contesto.prezzo}€. Durata: ${contesto.durata} min.`;
+        
+                    if (campo === "titolo_cura") {
+                        userPromptContent = infoBaseServizio + `\n${actionPrompt} Crea un titolo professionale e invitante (max 60 caratteri) per questo servizio. Deve suonare esclusivo e curato.`;
+                    } else if (campo === "descrizione_breve_cura") {
+                        userPromptContent = infoBaseServizio + `\n${actionPrompt} Genera una descrizione brevissima e poetica (max 150 caratteri). Uno slogan che faccia desiderare di prenotare subito.`;
+                    } else if (campo === "descrizione_esperienza_cura") {
+                        userPromptContent = infoBaseServizio + `\n${actionPrompt} Scrivi una descrizione dettagliata dell'ESPERIENZA che il cliente vivrà. Parla dell'atmosfera, della cura nei dettagli e del beneficio finale (relax, bellezza, salute). Usa 3-4 paragrafi coinvolgenti.`;
+                    }
+                    // LOGICA PER IL PROFILO DELLO STUDIO "CURA DELLA PERSONA"
+                    else if (campo.endsWith("_profile")) {
+                        const profileName = contesto.store_name || "questo studio/salone";
+                        const profileType = contesto.myTypeStore || "un'attività di cura della persona";
+                        const baseProfileInfo = `Nome Studio: "${profileName}". Tipologia: "${profileType}".`;
+        
                         if (campo === "short_description_profile") {
-                            userPromptContent = `${baseInfo}\n${actionPrompt} Crea uno slogan accattivante e conciso (max 150 caratteri). Testo di partenza: "${currentText}"`;
+                            userPromptContent = `${baseProfileInfo}\n${actionPrompt} Crea uno slogan accattivante e conciso (max 150 caratteri).`;
                         } else if (campo === "description_profile") {
-                            userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi una descrizione completa e persuasiva (3-4 paragrafi). Descrivi storia, filosofia, unicità e l'esperienza cliente. Adatta il tono alla tipologia "${entityType}". Testo di partenza: "${currentText}"`;
+                            userPromptContent = `${baseProfileInfo}\n${actionPrompt} Scrivi una descrizione completa e persuasiva (3-4 paragrafi). Descrivi storia, filosofia, unicità e l'esperienza cliente. Adatta il tono alla tipologia "${profileType}".`;
                         } else if (campo === "tags_profile") {
-                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera 7-10 parole chiave (tags) pertinenti e popolari, separate da virgola. Includi termini relativi alla tipologia "${entityType}" e ai benefici offerti. Testo di partenza: "${currentText}"`;
+                            userPromptContent = `${baseProfileInfo}\n${actionPrompt} Genera 7-10 parole chiave (tags) pertinenti e popolari, separate da virgola. Includi termini relativi alla tipologia "${profileType}" e ai benefici offerti.`;
                         } else if (campo === "specializations_profile") {
-                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera 5-7 specializzazioni chiave, separate da virgola. Focalizzati su servizi unici, tecniche innovative o aree di eccellenza in base alla tipologia "${entityType}". Testo di partenza: "${currentText}"`;
+                            userPromptContent = `${baseProfileInfo}\n${actionPrompt} Genera 5-7 specializzazioni chiave, separate da virgola. Focalizzati su servizi unici, tecniche innovative o aree di eccellenza in base alla tipologia "${profileType}".`;
                         }
-                        // NUOVI CAMPI PRODOTTO CURA PERSONA
-                        else if (campo === "product_name_cura_product") {
-                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera un nome di prodotto accattivante e professionale (max 60 caratteri). Testo di partenza: "${currentText}"`;
+                        temperature = 0.6; // Leggermente più alta per la ricomposizione
+                    }
+                    // NUOVA LOGICA PER I PRODOTTI "CURA DELLA PERSONA"
+                    else if (contesto.settore === "cura_persona_prodotto") { // Identificatore specifico per i prodotti
+                        const entityName = contesto.product_name || "questo prodotto di cura della persona";
+                        const entityCategory = contesto.product_category || contesto.myTypeStore || "un prodotto di cura della persona";
+                        const entityBrand = contesto.product_brand || "non specificata";
+                        const baseProductInfo = `Prodotto: "${entityName}". Categoria: "${entityCategory}". Sottocategoria: "${contesto.product_subcategory || 'non specificata'}". Marca: "${entityBrand}". Tipo Attività: "${contesto.myTypeStore}".`;
+        
+                        if (campo === "product_name_cura_product") {
+                            userPromptContent = `${baseProductInfo}\n${actionPrompt} Genera un nome di prodotto accattivante e professionale (max 60 caratteri) per il settore '${contesto.myTypeStore}'.`;
                         } else if (campo === "short_description_product_cura") {
-                            userPromptContent = `${baseInfo}\n${actionPrompt} Crea una descrizione brevissima (slogan, max 150 caratteri) per il prodotto. Testo di partenza: "${currentText}"`;
+                            userPromptContent = `${baseProductInfo}\n${actionPrompt} Crea una descrizione brevissima (slogan, max 150 caratteri) per il prodotto. Enfatizza i benefici chiave.`;
                         } else if (campo === "description_product_cura") {
-                            userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi una descrizione completa e persuasiva (3-4 paragrafi) per il prodotto. Enfatizza benefici, uso e ingredienti chiave. Testo di partenza: "${currentText}"`;
+                            userPromptContent = `${baseProductInfo}\n${actionPrompt} Scrivi una descrizione completa e persuasiva (3-4 paragrafi) per il prodotto. Enfatizza benefici, uso, ingredienti chiave e la qualità per il settore '${contesto.myTypeStore}'.`;
                         } else if (campo === "tags_product_cura") {
-                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera 7-10 parole chiave (tags) pertinenti, separate da virgola, per il prodotto. Includi benefici, ingredienti e usi. Testo di partenza: "${currentText}"`;
+                            userPromptContent = `${baseProductInfo}\n${actionPrompt} Genera 7-10 parole chiave (tags) pertinenti, separate da virgola, per il prodotto. Includi benefici, ingredienti e usi per il settore '${contesto.myTypeStore}'.`;
                         } else if (campo === "keywords_product_cura") {
-                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera 7-10 termini di ricerca extra (keywords) pertinenti, separati da virgola, per il prodotto. Testo di partenza: "${currentText}"`;
+                            userPromptContent = `${baseProductInfo}\n${actionPrompt} Genera 7-10 termini di ricerca extra (keywords) pertinenti, separate da virgola, per il prodotto. Pensa a come i clienti cercherebbero questo prodotto nel settore '${contesto.myTypeStore}'.`;
                         } else if (campo === "ingredients_product_cura") {
-                            userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi un elenco di ingredienti dettagliato ma conciso per il prodotto. Testo di partenza: "${currentText}"`;
+                            userPromptContent = `${baseProductInfo}\n${actionPrompt} Scrivi un elenco di ingredienti dettagliato ma conciso per il prodotto.`;
                         } else if (campo === "allergens_product_cura") {
-                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera un elenco di allergeni comuni, separati da virgola, pertinenti per il prodotto. Testo di partenza: "${currentText}"`;
+                            userPromptContent = `${baseProductInfo}\n${actionPrompt} Genera un elenco di allergeni comuni, separati da virgola, pertinenti per il prodotto.`;
                         } else if (campo === "attributes_product_cura") {
-                            userPromptContent = `${baseInfo}\n${actionPrompt} Genera un elenco di benefici o attributi chiave, separati da virgola, per il prodotto (es. tipo di pelle, efficacia). Testo di partenza: "${currentText}"`;
+                            userPromptContent = `${baseProductInfo}\n${actionPrompt} Genera un elenco di benefici o attributi chiave, separati da virgola, per il prodotto (es. tipo di pelle, efficacia, adatto a...).`;
                         }
                         temperature = 0.6;
                     }
-
-        }
-        // === LOGICA PER PRODOTTI (Bazar / Business) ===
-        // ... (Logica esistente per prodotti) ...
-        else if (campo.includes("descrizione_breve") || campo.includes("descrizione_completa") || campo.includes("tags") || campo.includes("keywords") || campo.includes("titolo")) {
-            // Questa logica si applica a prodotti e servizi generici (non cura_persona), se vogliamo la "ricomposizione magica" anche qui,
-            // dobbiamo aggiungere 'currentFieldValue' anche al contesto di queste chiamate dal frontend e adattare i prompt qui.
-            // Per ora, l'abbiamo fatto solo per i campi '_profile' in 'cura_persona'.
-            userPromptContent = `Il prodotto base è "${contesto.nome}". Categoria: "${contesto.categoria}". Marca: "${contesto.marca}". Prezzo: "${contesto.prezzo}€".`;
-
-            if (campo === "descrizione_breve") {
-                userPromptContent += `\nGenera uno slogan accattivante (max 150 caratteri) per la "Descrizione Breve".`;
-            } else if (campo === "descrizione_completa") {
-                userPromptContent += `\nGenera una descrizione dettagliata di 3-4 paragrafi per la "Descrizione Completa".`;
-            } else if (campo === "tags") {
-                userPromptContent += `\nGenera 5-7 tag separati da virgola.`;
-            } else if (campo === "keywords") {
-                userPromptContent += `\nGenera 7-10 parole chiave SEO separate da virgola.`;
-            } else if (campo === "titolo") {
-                userPromptContent += `\nGenera un titolo commerciale irresistibile (max 60 caratteri).`;
-            }
-        }
-        // === LOGICA PER SERVIZI TECNICI (Artigiani/Servizi Business - Non Cura Persona) ===
-        // ... (Logica esistente per servizi tecnici) ...
-        else if (campo.includes("servizio") || campo.includes("tags_servizio")) {
-            userPromptContent = `Il servizio si chiama "${contesto.nome}". Categoria: "${contesto.categoria}". ${contesto.priceContext || ''}`;
-
-            if (campo === "descrizione_breve_servizio") {
-                userPromptContent += `\nGenera uno slogan tecnico/commerciale di massimo 150 caratteri.`;
-            } else if (campo === "descrizione_completa_servizio") {
-                userPromptContent += `\nGenera una descrizione professionale di 3-4 paragrafi che spieghi l'efficacia del servizio.`;
-            } else if (campo === "tags_servizio") {
-                userPromptContent += `\nGenera 5-7 parole chiave tecniche separate da virgola.`;
-            }
-        }
-        // === LOGICA PER VISIONE D'IMMAGINE ===
-        // ... (Logica esistente per visione immagine) ...
-        else if (campo === "visione_immagine") {
-            // Questo è già gestito con un blocco `if (campo === "visione_immagine")` più avanti per la modifica di `messages` e `aiModel`
-            // Lasciamo vuoto qui perché la logica per messages è speciale.
-        }
-        else {
-            userPromptContent = `Genera un contenuto per il campo "${campo}" relativo a "${contesto.nome}" della categoria "${contesto.categoria}".`;
-        }
+                }
+                // === LOGICA PER PRODOTTI (Bazar / Business) ===
+                else if (campo.includes("descrizione_breve") || campo.includes("descrizione_completa") || campo.includes("tags") || campo.includes("keywords") || campo.includes("titolo")) {
+                    userPromptContent = `Il prodotto base è "${contesto.nome}". Categoria: "${contesto.categoria}". Marca: "${contesto.marca}". Prezzo: "${contesto.prezzo}€".`;
+        
+                    if (campo === "descrizione_breve") {
+                        userPromptContent += `\n${actionPrompt} Genera uno slogan accattivante (max 150 caratteri) per la "Descrizione Breve".`;
+                    } else if (campo === "descrizione_completa") {
+                        userPromptContent += `\n${actionPrompt} Genera una descrizione dettagliata di 3-4 paragrafi per la "Descrizione Completa".`;
+                    } else if (campo === "tags") {
+                        userPromptContent += `\n${actionPrompt} Genera 5-7 tag separati da virgola.`;
+                    } else if (campo === "keywords") {
+                        userPromptContent += `\n${actionPrompt} Genera 7-10 parole chiave SEO separate da virgola.`;
+                    } else if (campo === "titolo") {
+                        userPromptContent += `\n${actionPrompt} Genera un titolo commerciale irresistibile (max 60 caratteri).`;
+                    }
+                }
+                // === LOGICA PER SERVIZI TECNICI (Artigiani/Servizi Business - Non Cura Persona) ===
+                else if (campo.includes("servizio") || campo.includes("tags_servizio")) {
+                    userPromptContent = `Il servizio si chiama "${contesto.nome}". Categoria: "${contesto.categoria}". ${contesto.priceContext || ''}`;
+        
+                    if (campo === "descrizione_breve_servizio") {
+                        userPromptContent += `\n${actionPrompt} Genera uno slogan tecnico/commerciale di massimo 150 caratteri.`;
+                    } else if (campo === "descrizione_completa_servizio") {
+                        userPromptContent += `\n${actionPrompt} Genera una descrizione professionale di 3-4 paragrafi che spieghi l'efficacia del servizio.`;
+                    } else if (campo === "tags_servizio") {
+                        userPromptContent += `\n${actionPrompt} Genera 5-7 parole chiave tecniche separate da virgola.`;
+                    }
+                }
+                // === LOGICA PER VISIONE D'IMMAGINE ===
+                else if (campo === "visione_immagine") {
+                    // Questo è già gestito con un blocco `if (campo === "visione_immagine")` più avanti per la modifica di `messages` e `aiModel`
+                    // Lasciamo vuoto qui perché la logica per messages è speciale.
+                    // Il `actionPrompt` non ha senso qui, poiché è una generazione diretta da immagine.
+                }
+                else {
+                    userPromptContent = `Genera un contenuto per il campo "${campo}" relativo a "${contesto.nome}" della categoria "${contesto.categoria}".`;
+                }
 
 
         let messages = [
