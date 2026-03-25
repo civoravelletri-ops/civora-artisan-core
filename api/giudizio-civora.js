@@ -22,37 +22,44 @@ export default async function handler(req, res) {
                     throw new Error("GROQ_API_KEY mancante nelle variabili d'ambiente di Vercel");
                 }
 
-                // FASE 1: GLI OCCHI (Analisi dell'immagine se presente)
-                let visualAnalysis = "Nessuna immagine disponibile.";
-                if (productData.imageUrl) {
-                    try {
-                        const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                            method: 'POST',
-                            headers: {
-                                'Authorization': `Bearer ${GROQ_API_KEY}`,
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-                                messages: [
-                                    {
-                                        role: 'user',
-                                        content: [
-                                            { type: 'text', text: "Analizza questa immagine. Dimmi cosa vedi (colori, materiali, tipo di prodotto). Se è un prodotto artigianale (come fiori o cibo), descrivine la cura e la freschezza. Se è tecnico, descrivi i dettagli visibili." },
-                                            { type: 'image_url', image_url: { url: productData.imageUrl } }
-                                        ]
-                                    }
-                                ],
-                                temperature: 0.2
-                            })
-                        });
-                        const visionData = await visionResponse.json();
-                        visualAnalysis = visionData.choices[0]?.message?.content || "Analisi visiva non riuscita.";
-                    } catch (vErr) {
-                        console.error("Errore visione:", vErr);
-                        visualAnalysis = "Errore durante l'analisi visiva.";
-                    }
-                }
+                // FASE 1: GLI OCCHI (Analisi dell'immagine e delle varianti)
+                        let visualAnalysis = "Nessuna immagine disponibile.";
+
+                        // Prepariamo i contenuti per l'IA Vision (max 3 immagini per non rallentare troppo)
+                        const imagesToAnalyze = productData.allImages && productData.allImages.length > 0
+                                                ? productData.allImages.slice(0, 3)
+                                                : (productData.imageUrl ? [productData.imageUrl] : []);
+
+                        if (imagesToAnalyze.length > 0) {
+                            try {
+                                const visionContent = [
+                                    { type: 'text', text: "Analizza queste immagini del prodotto (possono essere varianti dello stesso oggetto). Dimmi cosa vedi: colori, materiali, freschezza. Se vedi che è un'opera artigianale o un bouquet, enfatizza la composizione manuale. Se vedi varianti di colore, segnalalo. Questo mi serve per capire se è un pezzo unico o industriale." }
+                                ];
+
+                                // Aggiungiamo ogni immagine al messaggio per l'IA
+                                imagesToAnalyze.forEach(url => {
+                                    visionContent.push({ type: 'image_url', image_url: { url: url } });
+                                });
+
+                                const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Authorization': `Bearer ${GROQ_API_KEY}`,
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify({
+                                        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+                                        messages: [{ role: 'user', content: visionContent }],
+                                        temperature: 0.2
+                                    })
+                                });
+                                const visionData = await visionResponse.json();
+                                visualAnalysis = visionData.choices[0]?.message?.content || "Analisi visiva non riuscita.";
+                            } catch (vErr) {
+                                console.error("Errore visione:", vErr);
+                                visualAnalysis = "Errore durante l'analisi visiva.";
+                            }
+                        }
 
                 // FASE 2: IL GIUDIZIO DEL CONCIERGE (Il Cervello)
                 const promptSystem = `Sei un "Concierge" esperto, un personal shopper imparziale e onesto.
