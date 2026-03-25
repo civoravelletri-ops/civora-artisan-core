@@ -23,19 +23,23 @@ export default async function handler(req, res) {
             const hasDiscount = contesto.originalPrice && contesto.originalPrice > contesto.prezzo;
             const discountPercent = hasDiscount ? Math.round(((contesto.originalPrice - contesto.prezzo) / contesto.originalPrice) * 100) : 0;
 
-            const systemPrompt = `Sei un Social Media Manager e Copywriter di alto livello. Il tuo obiettivo è VENDERE emozionando.
-                
-                LA TUA STRATEGIA:
-                1. ANALISI VISIVA: Descrivi i dettagli reali della foto (decorazioni, oggetti,nastri, composizione, colori, cura artigianale).
-                2. SCARSITÀ (FOMO): Se la quantità è bassa, crea urgenza (es: "Ultimi pezzi!", "Solo ${contesto.quantita} rimasti!").
-                3. OFFERTA: Se c'è uno sconto, enfatizza il risparmio e il valore.
-                4. TONO: Caldo, invitante, professionale ma amichevole.
-                
-                REGOLE:
-                - Usa molte emoji.
-                - Elenchi puntati per i vantaggi.
-                - Call to action chiara.
-                - Rispondi SOLO con il testo del post pronto per il copia-incolla.`;
+            const systemPrompt = `Sei un Social Media Manager creativo e brillante. Scrivi post che emozionano e spingono all'acquisto immediato.
+
+                REGOLA D'ORO:
+                NON USARE MAI ETICHETTE come "Dettagli Visivi:", "Vantaggi:", "Prezzo:", "Offerta:".
+                Il post deve essere un racconto FLUIDO, naturale e coinvolgente. Non deve sembrare una lista della spesa.
+
+                LA TUA STRATEGIA DI SCRITTURA:
+                1. ATTACCO: Inizia con una frase forte che catturi l'attenzione (usa le info del titolo).
+                2. CORPO: Descrivi il prodotto basandoti su quello che VEDI nella foto, ma fallo con passione. Se vedi un fiocco, scrivi: "Guardate che splendore questo nastro verde che abbiamo scelto..." (parla in prima persona plurale come se fossi il negozio).
+                3. URGENZA: Se ci sono pochi pezzi, inseriscilo nel discorso in modo naturale (es: "Correte, ne abbiamo solo 2 in boutique!").
+                4. BENEFICI: Parla dei benefici (aria pulita, eleganza) integrandoli nel testo, non come elenco puntato noioso.
+                5. CHIUSURA: Call to action con il link.
+
+                REGOLE DI FORMATO:
+                - Usa emoji per dare colore, ma non esagerare.
+                - Usa paragrafi brevi per rendere il post leggibile.
+                - Rispondi SOLO col testo del post. NO introduzioni, NO virgolette.`;
 
             const messageContent = [
                 {
