@@ -49,22 +49,22 @@ export default async function handler(req, res) {
         - Tag/Keywords: ${(productData.productTags || []).join(', ')}`;
 
         // Chiamata nativa a Groq (molto veloce)
-        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${GROQ_API_KEY}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                model: 'llama3-70b-8192', // Usiamo il modello Llama3 potente per un buon ragionamento
-                response_format: { type: "json_object" }, // Forza Groq a restituire SOLO JSON
-                messages: [
-                    { role: 'system', content: promptSystem },
-                    { role: 'user', content: promptUser }
-                ],
-                temperature: 0.7,
-            })
-        });
+                const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${GROQ_API_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'meta-llama/llama-4-scout-17b-16e-instruct', // IL MODELLO LLAMA 4 SCELTO DA TE
+                        response_format: { type: "json_object" }, // Forza Groq a restituire SOLO JSON
+                        messages: [
+                            { role: 'system', content: promptSystem },
+                            { role: 'user', content: promptUser }
+                        ],
+                        temperature: 0.7,
+                    })
+                });
 
         if (!groqResponse.ok) {
             const err = await groqResponse.text();
