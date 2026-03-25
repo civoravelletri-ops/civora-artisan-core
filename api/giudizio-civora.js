@@ -16,72 +16,95 @@ export default async function handler(req, res) {
 
     try {
         const productData = req.body;
+                const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-        // Assicurati di avere la variabile d'ambiente GROQ_API_KEY impostata su Vercel
-        const GROQ_API_KEY = process.env.GROQ_API_KEY;
+                if (!GROQ_API_KEY) {
+                    throw new Error("GROQ_API_KEY mancante nelle variabili d'ambiente di Vercel");
+                }
 
-        if (!GROQ_API_KEY) {
-            throw new Error("GROQ_API_KEY mancante nelle variabili d'ambiente di Vercel");
-        }
+                // FASE 1: GLI OCCHI (Analisi dell'immagine se presente)
+                let visualAnalysis = "Nessuna immagine disponibile.";
+                if (productData.imageUrl) {
+                    try {
+                        const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${GROQ_API_KEY}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+                                messages: [
+                                    {
+                                        role: 'user',
+                                        content: [
+                                            { type: 'text', text: "Analizza questa immagine. Dimmi cosa vedi (colori, materiali, tipo di prodotto). Se è un prodotto artigianale (come fiori o cibo), descrivine la cura e la freschezza. Se è tecnico, descrivi i dettagli visibili." },
+                                            { type: 'image_url', image_url: { url: productData.imageUrl } }
+                                        ]
+                                    }
+                                ],
+                                temperature: 0.2
+                            })
+                        });
+                        const visionData = await visionResponse.json();
+                        visualAnalysis = visionData.choices[0]?.message?.content || "Analisi visiva non riuscita.";
+                    } catch (vErr) {
+                        console.error("Errore visione:", vErr);
+                        visualAnalysis = "Errore durante l'analisi visiva.";
+                    }
+                }
 
-        // Il NUOVO prompt da "Concierge Onesto"
-        const promptSystem = `Sei un "Concierge" esperto, un personal shopper imparziale e onesto. Il tuo obiettivo NON è vendere il prodotto a tutti i costi, ma AIUTARE il cliente a capire se è l'acquisto giusto per lui.
-        REGOLE FONDAMENTALI:
-        1. Basati sulla tua vasta conoscenza globale del brand (se famoso) o sull'analisi tecnica dei materiali/design (se artigianale o sconosciuto).
-        2. Sii super onesto. Evidenzia a chi è adatto questo prodotto e a chi NON è adatto. 
-        3. Il tono deve essere quello di un esperto che ha analizzato il prodotto online e ne riassume le caratteristiche reali, pregi e difetti.
-        4. Non menzionare mai la piattaforma "Civora" come entità che vende. Parla solo del prodotto in sé.
-        5. Ricorda al cliente che acquistando questo articolo tramite questo specifico negozio fisico locale ha la garanzia di originalità del brand, lo scontrino e un'assistenza reale e umana in caso di problemi o resi.
-        6. Scrivi un breve riassunto (summary), un array di 2 o 3 "Pro" (oggettivi, es: "Ottimo rapporto qualità/prezzo", "Tessuto traspirante") e un array di 1 o 2 "Contro" (reali e utili, es: "Veste aderente, consigliata una taglia in più", "Materiali basici").
-        7. DEVI RISPONDERE ESATTAMENTE E SOLO CON UN OGGETTO JSON VALIDO, senza altro testo prima o dopo.
+                // FASE 2: IL GIUDIZIO DEL CONCIERGE (Il Cervello)
+                const promptSystem = `Sei un "Concierge" esperto, un personal shopper imparziale e onesto.
+                REGOLE FONDAMENTALI:
+                1. Se l'analisi visiva o i dati indicano un prodotto ARTIGIANALE (fiori, artigianato, cibo), non cercare il Brand. Valuta l'unicità, la freschezza e l'estetica del pezzo unico.
+                2. Se è un prodotto INDUSTRIALE, valuta marca e specifiche tecniche.
+                3. Sii super onesto: evidenzia pregi e difetti reali (es: stagionalità per i fiori, o vestibilità per abiti).
+                4. Il tono deve essere quello di un esperto che ha visto il prodotto e lo commenta per un amico.
+                5. Ricorda al cliente che acquistando tramite questo negozio fisico locale ha garanzia di originalità, scontrino e assistenza umana reale.
+                6. DEVI RISPONDERE SOLO CON UN OGGETTO JSON VALIDO.
 
-        Formato JSON richiesto:
-        {
-            "summary": "Il tuo testo di riassunto...",
-            "pros": ["Pro 1", "Pro 2"],
-            "cons": ["Contro 1"]
-        }`;
+                Formato JSON:
+                {
+                    "summary": "Breve riassunto emozionale e onesto...",
+                    "pros": ["Vantaggio 1", "Vantaggio 2"],
+                    "cons": ["Svantaggio reale 1"]
+                }`;
 
-        const promptUser = `Ecco i dati del prodotto da analizzare come personal shopper:
-        - Nome: ${productData.productName || 'Non specificato'}
-        - Categoria: ${productData.productCategory || 'Non specificato'}
-        - Marca: ${productData.brand || 'Non specificato'}
-        - Prezzo: €${productData.price || 'Non specificato'}
-        - Condizione: ${productData.condition === 'new' ? 'Nuovo' : productData.condition === 'refurbished' ? 'Ricondizionato' : 'Usato'}
-        - Descrizione del negoziante: ${productData.shortDescription || productData.productDescription || 'Nessuna descrizione'}
-        - Tag/Keywords: ${(productData.productTags || []).join(', ')}`;
+                const promptUser = `Dati del prodotto:
+                - Nome: ${productData.productName}
+                - Categoria: ${productData.productCategory}
+                - Marca: ${productData.brand || 'Artigianale/Non specificata'}
+                - Prezzo: €${productData.price}
+                - Descrizione Negoziante: ${productData.shortDescription || productData.productDescription}
+                - COSA VEDI NELL'IMMAGINE: ${visualAnalysis}`;
 
-        // Chiamata nativa a Groq
-        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${GROQ_API_KEY}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                model: 'meta-llama/llama-4-scout-17b-16e-instruct', // Il tuo modello
-                response_format: { type: "json_object" }, // Forza Groq a restituire SOLO JSON
-                messages: [
-                    { role: 'system', content: promptSystem },
-                    { role: 'user', content: promptUser }
-                ],
-                temperature: 0.7,
-            })
-        });
+                const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${GROQ_API_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+                        response_format: { type: "json_object" },
+                        messages: [
+                            { role: 'system', content: promptSystem },
+                            { role: 'user', content: promptUser }
+                        ],
+                        temperature: 0.7,
+                    })
+                });
 
-        if (!groqResponse.ok) {
-            const err = await groqResponse.text();
-            throw new Error(`Errore da Groq: ${err}`);
-        }
+                if (!groqResponse.ok) {
+                    const err = await groqResponse.text();
+                    throw new Error(`Errore da Groq: ${err}`);
+                }
 
-        const data = await groqResponse.json();
-        
-        // Estraiamo il JSON generato dall'IA
-        const aiJudgmentString = data.choices[0].message.content;
-        const aiJudgmentJSON = JSON.parse(aiJudgmentString);
+                const data = await groqResponse.json();
+                const aiJudgmentJSON = JSON.parse(data.choices[0].message.content);
 
-        // Rispondiamo al frontend
-        res.status(200).json(aiJudgmentJSON);
+                res.status(200).json(aiJudgmentJSON);
 
     } catch (error) {
         console.error("Errore nella generazione del giudizio Civora:", error);
