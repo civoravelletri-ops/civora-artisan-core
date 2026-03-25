@@ -46,23 +46,25 @@ export default async function handler(req, res) {
     
     Rispondi SOLO con il testo del post pronto per FB/IG.`;
             const messageContent = [
-                {
-                    type: "text",
-                    text: `Dati per il post:
-                    - Negozio: "${contesto.store_name}"
-                    - Prodotto: "${contesto.nome}"
-                    - Prezzo Attuale: ${contesto.prezzo}€
-                    ${hasDiscount ? `- PREZZO ORIGINALE: ${contesto.originalPrice}€ (SCONTO DEL ${discountPercent}%)` : ''}
-                    - QUANTITÀ DISPONIBILE: ${contesto.quantita}
-                    - Descrizione di Alessandro: "${contesto.descrizione}"
-                    - LINK SHOP: ${contesto.link_shop}
-
-                    ISTRUZIONI EXTRA:
-                    ${isLowStock ? '!!! ATTENZIONE: La quantità è bassissima, crea un senso di urgenza nel post !!!' : ''}
-                    Guarda la foto e integra i dettagli visivi con i dati di vendita sopra.
-                    Inserisci il link alla fine con una frase d'invito.`
-                }
-            ];
+                    { 
+                        type: "text", 
+                        text: `Dati per il post:
+                        - Negozio: "${contesto.store_name}"
+                        - Prodotto: "${contesto.nome}"
+                        - Prezzo Attuale: ${contesto.prezzo}€
+                        ${hasDiscount ? `- PREZZO ORIGINALE: ${contesto.originalPrice}€ (SCONTO DEL ${discountPercent}%)` : ''}
+                        - QUANTITÀ DISPONIBILE: ${contesto.quantita}
+                        - Descrizione Originale: "${contesto.descrizione}"
+                        - LINK SHOP: ${contesto.link_shop}
+                        
+                        - RICHIESTE SPECIFICHE DEL NEGOZIANTE: "${contesto.note_extra || 'Nessuna, usa la tua creatività'}"
+                        
+                        ISTRUZIONI DI VENDITA: 
+                        ${isLowStock ? '!!! ATTENZIONE: Crea urgenza perché restano pochissimi pezzi !!!' : ''}
+                        Analizza l'immagine, segui le richieste specifiche del negoziante e scrivi un post mozzafiato. 
+                        Inserisci il link alla fine.`
+                    }
+                ];
 
             imagesToAnalyze.forEach(url => {
                 messageContent.push({ type: "image_url", image_url: { url: url } });
