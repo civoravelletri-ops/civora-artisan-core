@@ -25,24 +25,24 @@ export default async function handler(req, res) {
     }
 
     // Diciamo all'IA chi è e cosa deve fare. Le imponiamo di rispondere SOLO in formato JSON.
-    const systemPrompt = `Sei un traduttore professionista ed esperto di marketing per attività commerciali locali.
-    Il tuo compito è prendere il testo in italiano e tradurlo in 10 lingue.
-    Mantieni un tono commerciale, persuasivo e naturale. 
-    Se il testo è una lista di parole separate da virgola (tags), mantieni la separazione con le virgole.
+    const systemPrompt = `Sei un traduttore professionista ed esperto di marketing per attività commerciali locali, inclusi saloni di bellezza, studi medici e cliniche veterinarie.
+        Il tuo compito è prendere il testo in italiano e tradurlo in 10 lingue.
+        Mantieni un tono commerciale, persuasivo e naturale, adattandolo leggermente al contesto fornito (es. più empatico per un veterinario, più elegante per un salone).
+        Se il testo è una lista di parole separate da virgola (tags), mantieni la separazione con le virgole.
 
-    REGOLA FONDAMENTALE: DEVI RISPONDERE SOLO ED ESCLUSIVAMENTE CON UN OGGETTO JSON VALIDO.
-    Non aggiungere MAI commenti, saluti o testo fuori dal JSON.
-    L'oggetto JSON deve avere ESATTAMENTE queste 10 chiavi (ISO 639-1 per le lingue):
-    "en" (Inglese)
-    "es" (Spagnolo)
-    "fr" (Francese)
-    "de" (Tedesco)
-    "ru" (Russo)
-    "ar" (Arabo standard)
-    "ro" (Rumeno)
-    "zh" (Cinese semplificato)
-    "sq" (Albanese)
-    "hi" (Hindi)`;
+        REGOLA FONDAMENTALE: DEVI RISPONDERE SOLO ED ESCLUSIVAMENTE CON UN OGGETTO JSON VALIDO.
+        Non aggiungere MAI commenti, saluti o testo fuori dal JSON.
+        L'oggetto JSON deve avere ESATTAMENTE queste 10 chiavi (ISO 639-1 per le lingue):
+        "en" (Inglese)
+        "es" (Spagnolo)
+        "fr" (Francese)
+        "de" (Tedesco)
+        "ru" (Russo)
+        "ar" (Arabo standard)
+        "ro" (Rumeno)
+        "zh" (Cinese semplificato)
+        "sq" (Albanese)
+        "hi" (Hindi)`;
 
     const userPromptContent = `Contesto del testo: ${contesto}\n\nTesto in italiano da tradurre:\n"${testo_italiano}"`;
 
