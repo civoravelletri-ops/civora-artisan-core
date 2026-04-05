@@ -1,56 +1,120 @@
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Credentials', true);
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+// api/generate-image.js
+import { GoogleAuth } from 'google-auth-library';
+import fetch from 'node-fetch'; // Necessario per Vercel con Node 20
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
+export default async function handler(req, res) {
+  // Configurazione CORS (Access-Control-Allow-...)
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*'); 
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST,PUT,DELETE,PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end(); // Risposta immediata per il preflight CORS
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Metodo non consentito' });
+  }
 
   const { image, prompt } = req.body;
-  const API_KEY = process.env.VERTEX_API_KEY;
+  
+  // Recupero variabili d'ambiente da Vercel
+  const PROJECT_ID = process.env.GOOGLE_PROJECT_ID; // Es. civora-ai-editor
+  const REGION = "us-central1"; // La regione dove hai abilitato Vertex AI
 
-  // PROVIAMO IL MODELLO 2.5 FLASH (Verifichi se il nome è esatto per AI Studio)
-  const model = "gemini-2.5-flash-image"; 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`;
+  if (!PROJECT_ID) {
+      return res.status(500).json({ debug_error: true, message: "Variabile GOOGLE_PROJECT_ID mancante su Vercel." });
+  }
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+      return res.status(500).json({ debug_error: true, message: "Variabile GOOGLE_APPLICATION_CREDENTIALS_JSON mancante su Vercel." });
+  }
+
+  // --- Autenticazione con Google Cloud tramite Service Account JSON ---
+  let authToken;
+  try {
+    // google-auth-library legge questa variabile per autenticarsi
+    // Devi impostare GOOGLE_APPLICATION_CREDENTIALS come variabile d'ambiente su Vercel
+    // con il contenuto del tuo JSON key file.
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+
+    const auth = new GoogleAuth({
+      scopes: ['https://www.googleapis.com/auth/cloud-platform']
+    });
+    const client = await auth.getClient();
+    const accessToken = await client.getAccessToken();
+    authToken = accessToken.token;
+    if (!authToken) throw new Error('Auth token non generato da GoogleAuth.');
+  } catch (authError) {
+    console.error('Errore di autenticazione:', authError.message, authError.stack);
+    return res.status(500).json({ 
+      debug_error: true, 
+      message: 'Errore autenticazione Google Cloud. Controlla il JSON del Service Account su Vercel.', 
+      details: authError.message 
+    });
+  }
+
+  // Endpoint per Imagen 2 (Image Editing) su Vertex AI
+  // Questo è l'endpoint corretto per la manipolazione di immagini esistenti
+  const url = `https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/publishers/google/models/imagegeneration:predict`;
 
   try {
+    const payload = {
+      instances: [
+        {
+          prompt: prompt, // Il prompt di modifica testuale
+          image: { bytesBase64Encoded: image } // L'immagine originale in Base64
+        }
+      ],
+      parameters: {
+        sampleCount: 1, // Numero di immagini generate
+        sampleImageSize: "1024", // Dimensioni dell'output (es. "512", "1024")
+        mime_type: "image/png", // Tipo di immagine in output
+        seed: 42 // Opzionale: per risultati riproducibili
+      }
+    };
+
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: `INSTRUCTION: Edit this image. Task: ${prompt}. Output only the new image data.` },
-            { inline_data: { mime_type: "image/png", data: image } }
-          ]
-        }]
-      })
+      headers: {
+        'Authorization': `Bearer ${authToken}`, // Autenticazione con il token generato
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
     });
 
     const data = await response.json();
 
-    // SE C'È UN ERRORE, LO MANDIAMO AL FRONTEND PER LEGGERLO
-    if (data.error) {
-      return res.status(200).json({ 
-        debug_error: true, 
-        message: data.error.message, 
-        reason: data.error.status 
-      });
+    // Controlla se la risposta HTTP di Google è un errore
+    if (!response.ok) { 
+        console.error('Errore HTTP da Google:', data);
+        return res.status(response.status).json({ 
+            debug_error: true, 
+            message: `Errore HTTP da Google: ${response.status}`, 
+            google_response: data.error?.message || JSON.stringify(data) // Invia l'errore specifico
+        });
     }
 
-    const resultPart = data.candidates?.[0]?.content?.parts?.[0];
-
-    if (resultPart && resultPart.inline_data) {
-      return res.status(200).json({ modifiedImage: resultPart.inline_data.data });
-    } else {
-      // Se il modello risponde con testo invece di un'immagine
+    // Controlla se la risposta contiene l'immagine modificata
+    if (data.predictions && data.predictions[0] && data.predictions[0].bytesBase64Encoded) {
       return res.status(200).json({ 
+        modifiedImage: data.predictions[0].bytesBase64Encoded 
+      });
+    } else {
+      console.error('Risposta inattesa da Google (no immagine):', data);
+      return res.status(500).json({ 
         debug_error: true, 
-        message: "Il modello ha risposto con testo, non con un'immagine. Risposta: " + (resultPart?.text || "Vuota")
+        message: 'Google non ha restituito un\'immagine o formato inatteso.', 
+        google_response: JSON.stringify(data) // Invia la risposta completa di Google per debug
       });
     }
 
   } catch (error) {
-    return res.status(200).json({ debug_error: true, message: "Errore Vercel: " + error.message });
+    console.error('Errore di rete o chiamata fetch:', error);
+    return res.status(500).json({ 
+      debug_error: true, 
+      message: 'Errore di sistema Vercel o di rete: ' + error.message, 
+      details: error.stack 
+    });
   }
 }
