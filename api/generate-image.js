@@ -1,17 +1,17 @@
-// api/generate-image.js - Vercel Serverless Function CORRETTA
-// Formato: Vercel Serverless (non Next.js API routes)
+// api/generate-image.js - Vercel Serverless Function (CORRETTA)
 
+// ⚠️ Config corretta per Vercel: solo "nodejs", "edge" o "experimental-edge"
 export const config = {
-  runtime: 'nodejs20.x',
-  maxDuration: 60
+  runtime: 'nodejs',  // ✅ CORRETTO
+  maxDuration: 60     // Timeout in secondi (necessario per generazione immagini)
 };
 
-// Helper CORS: ritorna gli header corretti
+// Helper CORS
 const corsHeaders = (origin = '*') => ({
   'Access-Control-Allow-Origin': origin,
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept',
-  'Access-Control-Max-Age': '86400' // 24h cache preflight
+  'Access-Control-Max-Age': '86400'
 });
 
 // Helper: ottiene token OAuth2 dal service account JSON
@@ -20,7 +20,6 @@ async function getAccessToken() {
     const credentialsRaw = process.env.GOOGLE_SERVICE_ACCOUNT;
     if (!credentialsRaw) throw new Error('GOOGLE_SERVICE_ACCOUNT non impostata');
     
-    // Pulisci il JSON: rimuovi spazi extra e gestisci eventuali escape
     const credentials = JSON.parse(credentialsRaw.trim());
     
     if (!credentials.private_key || !credentials.client_email) {
@@ -39,16 +38,14 @@ async function getAccessToken() {
     const encoder = new TextEncoder();
     const toBase64Url = (obj) => {
       const json = JSON.stringify(obj);
-      const encoded = btoa(encoder.encode(json))
+      return btoa(encoder.encode(json))
         .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      return encoded;
     };
     
     const header = toBase64Url({ alg: 'RS256', typ: 'JWT' });
     const claim = toBase64Url(claimSet);
     const signatureInput = `${header}.${claim}`;
     
-    // Firma JWT con la private key
     const privateKey = credentials.private_key.replace(/\\n/g, '\n');
     const key = await crypto.subtle.importKey(
       'pkcs8',
@@ -61,7 +58,6 @@ async function getAccessToken() {
     const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, encoder.encode(signatureInput));
     const jwt = `${signatureInput}.${btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
 
-    // Scambia JWT per access token
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -132,7 +128,7 @@ export default async function handler(request) {
   const origin = request.headers.get('origin') || '*';
   const headers = corsHeaders(origin);
 
-  // ✅ GESTIONE PREFLIGHT CORS (OPZIONI) - DEVE ESSERE PRIMA DI TUTTO
+  // ✅ PREFLIGHT CORS - DEVE RITORNARE 204 SUBITO
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers });
   }
