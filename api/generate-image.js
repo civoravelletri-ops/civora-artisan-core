@@ -1,77 +1,61 @@
-// api/generate-image.js - Vercel Serverless Function (Node.js runtime - CORRETTA)
+// api/generate-image.js - Vercel Serverless Function (DEFINITIVA con google-auth-library)
+const { GoogleAuth } = require('google-auth-library');
 
 export const config = {
-  runtime: 'nodejs',  // ✅ Solo 'nodejs', 'edge' o 'experimental-edge'
-  maxDuration: 60     // Timeout in secondi
+  runtime: 'nodejs',
+  maxDuration: 60
 };
 
-// Helper CORS: imposta gli header sulla risposta Node.js
+// Helper CORS
 function setCorsHeaders(res, origin = '*') {
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
-  res.setHeader('Access-Control-Max-Age', '86400'); // 24h cache preflight
+  res.setHeader('Access-Control-Max-Age', '86400');
 }
 
-// Helper: ottiene token OAuth2 dal service account JSON
+// Helper: ottiene access token con google-auth-library
 async function getAccessToken() {
   try {
     const credentialsRaw = process.env.GOOGLE_SERVICE_ACCOUNT;
     if (!credentialsRaw) throw new Error('GOOGLE_SERVICE_ACCOUNT non impostata');
     
-    const credentials = JSON.parse(credentialsRaw.trim());
+    // Parse del JSON
+    let credentials;
+    try {
+      credentials = JSON.parse(credentialsRaw.trim());
+    } catch (parseErr) {
+      throw new Error(`JSON parsing error: ${parseErr.message}. Controlla che GOOGLE_SERVICE_ACCOUNT sia un JSON valido.`);
+    }
     
     if (!credentials.private_key || !credentials.client_email) {
       throw new Error('Credenziali incomplete: manca private_key o client_email');
     }
 
-    const now = Math.floor(Date.now() / 1000);
-    const claimSet = {
-      iss: credentials.client_email,
-      scope: 'https://www.googleapis.com/auth/cloud-platform',
-      aud: 'https://oauth2.googleapis.com/token',
-      exp: now + 3600,
-      iat: now
-    };
+    // ✅ FIX CRUCIALE: google-auth-library si aspetta la private_key con \n reali, non \\n
+    // Se Vercel ha escapato i newline, li ripristiniamo
+    let privateKey = credentials.private_key;
+    if (privateKey.includes('\\n')) {
+      privateKey = privateKey.replace(/\\n/g, '\n');
+    }
 
-    const encoder = new TextEncoder();
-    const toBase64Url = (obj) => {
-      const json = JSON.stringify(obj);
-      return btoa(encoder.encode(json))
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    };
-    
-    const header = toBase64Url({ alg: 'RS256', typ: 'JWT' });
-    const claim = toBase64Url(claimSet);
-    const signatureInput = `${header}.${claim}`;
-    
-    const privateKey = credentials.private_key.replace(/\\n/g, '\n');
-    const key = await crypto.subtle.importKey(
-      'pkcs8',
-      encoder.encode(privateKey),
-      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-      false,
-      ['sign']
-    );
-    
-    const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, encoder.encode(signatureInput));
-    const jwt = `${signatureInput}.${btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
-
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-        assertion: jwt
-      })
+    const auth = new GoogleAuth({
+      credentials: {
+        type: 'service_account',
+        client_email: credentials.client_email,
+        private_key: privateKey
+      },
+      scopes: ['https://www.googleapis.com/auth/cloud-platform']
     });
 
-    const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) {
-      throw new Error(`OAuth2 error: ${JSON.stringify(tokenData)}`);
+    const client = await auth.getClient();
+    const tokenResponse = await client.getAccessToken();
+    
+    if (!tokenResponse.token) {
+      throw new Error('Impossibile ottenere access token');
     }
     
-    return tokenData.access_token;
+    return tokenResponse.token;
   } catch (err) {
     console.error('❌ getAccessToken error:', err.message);
     throw err;
@@ -84,6 +68,8 @@ async function callVertexAI(imageBase64, prompt, mimeType = 'image/jpeg') {
   const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT;
   const LOCATION = process.env.GOOGLE_CLOUD_LOCATION || 'europe-west1';
   const MODEL = 'imagegeneration@006';
+  
+  if (!PROJECT_ID) throw new Error('GOOGLE_CLOUD_PROJECT non impostata');
   
   const endpoint = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL}:predict`;
   
@@ -122,24 +108,21 @@ async function callVertexAI(imageBase64, prompt, mimeType = 'image/jpeg') {
   return generated;
 }
 
-// === HANDLER PRINCIPALE - SINTASSI NODE.JS (req, res) ===
+// === HANDLER PRINCIPALE ===
 export default async function handler(req, res) {
-  // ✅ CORS: usa l'origin della richiesta se presente
   const origin = req.headers.origin || '*';
   setCorsHeaders(res, origin);
 
-  // ✅ PREFLIGHT CORS: DEVE RITORNARE SUBITO 204
+  // ✅ PREFLIGHT CORS - DEVE RITORNARE SUBITO
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
 
-  // Solo POST permesso
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    // Parse del body (Vercel lo fa automaticamente per JSON)
     const { imageBase64, prompt, mimeType = 'image/jpeg' } = req.body || {};
 
     if (!imageBase64 || !prompt) {
