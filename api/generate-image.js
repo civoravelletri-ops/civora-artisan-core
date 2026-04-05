@@ -30,15 +30,13 @@ export default async function handler(req, res) {
       return res.status(500).json({ debug_error: true, message: "Variabile GOOGLE_APPLICATION_CREDENTIALS_JSON mancante su Vercel." });
   }
 
-  // --- Autenticazione con Google Cloud tramite Service Account JSON ---
+  // --- AUTENTICAZIONE CORRETTA CON GOOGLE CLOUD VIA SERVICE ACCOUNT JSON ---
   let authToken;
   try {
-    // google-auth-library legge questa variabile per autenticarsi
-    // Devi impostare GOOGLE_APPLICATION_CREDENTIALS come variabile d'ambiente su Vercel
-    // con il contenuto del tuo JSON key file.
-    process.env.GOOGLE_APPLICATION_CREDENTIALS = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+    const credentialsJson = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
 
     const auth = new GoogleAuth({
+      credentials: credentialsJson, // Passa direttamente l'oggetto JSON della chiave
       scopes: ['https://www.googleapis.com/auth/cloud-platform']
     });
     const client = await auth.getClient();
@@ -49,13 +47,14 @@ export default async function handler(req, res) {
     console.error('Errore di autenticazione:', authError.message, authError.stack);
     return res.status(500).json({ 
       debug_error: true, 
-      message: 'Errore autenticazione Google Cloud. Controlla il JSON del Service Account su Vercel.', 
-      details: authError.message 
+      message: 'Errore autenticazione Google Cloud. Controlla il JSON del Service Account su Vercel. Dettagli: ' + authError.message, 
+      details: authError.stack 
     });
   }
+  // --- FINE AUTENTICAZIONE ---
 
   // Endpoint per Imagen 2 (Image Editing) su Vertex AI
-  // Questo è l'endpoint corretto per la manipolazione di immagini esistenti
+  // Questo è l'endpoint corretto e documentato per la manipolazione di immagini esistenti
   const url = `https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/publishers/google/models/imagegeneration:predict`;
 
   try {
@@ -104,7 +103,7 @@ export default async function handler(req, res) {
       console.error('Risposta inattesa da Google (no immagine):', data);
       return res.status(500).json({ 
         debug_error: true, 
-        message: 'Google non ha restituito un\'immagine o formato inatteso.', 
+        message: 'Google non ha restituito un\'immagine o formato inatteso. La risposta completa è nei dettagli.', 
         google_response: JSON.stringify(data) // Invia la risposta completa di Google per debug
       });
     }
