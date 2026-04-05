@@ -1,18 +1,17 @@
-// api/generate-image.js - Vercel Serverless Function (CORRETTA)
+// api/generate-image.js - Vercel Serverless Function (Node.js runtime - CORRETTA)
 
-// ⚠️ Config corretta per Vercel: solo "nodejs", "edge" o "experimental-edge"
 export const config = {
-  runtime: 'nodejs',  // ✅ CORRETTO
-  maxDuration: 60     // Timeout in secondi (necessario per generazione immagini)
+  runtime: 'nodejs',  // ✅ Solo 'nodejs', 'edge' o 'experimental-edge'
+  maxDuration: 60     // Timeout in secondi
 };
 
-// Helper CORS
-const corsHeaders = (origin = '*') => ({
-  'Access-Control-Allow-Origin': origin,
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept',
-  'Access-Control-Max-Age': '86400'
-});
+// Helper CORS: imposta gli header sulla risposta Node.js
+function setCorsHeaders(res, origin = '*') {
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24h cache preflight
+}
 
 // Helper: ottiene token OAuth2 dal service account JSON
 async function getAccessToken() {
@@ -123,54 +122,44 @@ async function callVertexAI(imageBase64, prompt, mimeType = 'image/jpeg') {
   return generated;
 }
 
-// === HANDLER PRINCIPALE ===
-export default async function handler(request) {
-  const origin = request.headers.get('origin') || '*';
-  const headers = corsHeaders(origin);
+// === HANDLER PRINCIPALE - SINTASSI NODE.JS (req, res) ===
+export default async function handler(req, res) {
+  // ✅ CORS: usa l'origin della richiesta se presente
+  const origin = req.headers.origin || '*';
+  setCorsHeaders(res, origin);
 
-  // ✅ PREFLIGHT CORS - DEVE RITORNARE 204 SUBITO
-  if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers });
+  // ✅ PREFLIGHT CORS: DEVE RITORNARE SUBITO 204
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
   }
 
   // Solo POST permesso
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { ...headers, 'Content-Type': 'application/json' }
-    });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const { imageBase64, prompt, mimeType = 'image/jpeg' } = await request.json();
+    // Parse del body (Vercel lo fa automaticamente per JSON)
+    const { imageBase64, prompt, mimeType = 'image/jpeg' } = req.body || {};
 
     if (!imageBase64 || !prompt) {
-      return new Response(JSON.stringify({ error: 'Missing imageBase64 or prompt' }), {
-        status: 400,
-        headers: { ...headers, 'Content-Type': 'application/json' }
-      });
+      return res.status(400).json({ error: 'Missing imageBase64 or prompt' });
     }
 
     console.log('🎨 Processing image edit request...');
     const generatedBase64 = await callVertexAI(imageBase64, prompt, mimeType);
 
-    return new Response(JSON.stringify({
+    return res.status(200).json({
       success: true,
       image: `image/png;base64,${generatedBase64}`
-    }), {
-      status: 200,
-      headers: { ...headers, 'Content-Type': 'application/json' }
     });
 
   } catch (error) {
     console.error('❌ Function error:', error.message);
     
-    return new Response(JSON.stringify({
+    return res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'
-    }), {
-      status: 500,
-      headers: { ...headers, 'Content-Type': 'application/json' }
     });
   }
 }
