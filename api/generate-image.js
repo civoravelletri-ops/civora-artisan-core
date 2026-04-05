@@ -1,15 +1,16 @@
 // api/generate-image.js
-import fetch from 'node-fetch'; // Per compatibilità Vercel
+import { GoogleAuth } from 'google-auth-library';
+import fetch from 'node-fetch';
 
 export default async function handler(req, res) {
-  // CORS (Access-Control-Allow-...)
+  // CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*'); 
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST,PUT,DELETE,PATCH');
   res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end(); 
+    return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
@@ -18,75 +19,83 @@ export default async function handler(req, res) {
 
   const { image, prompt } = req.body;
   
-  // Recupera la NUOVA API KEY da Vercel (la stessa variabile usata prima)
-  const API_KEY = process.env.GOOGLE_AI_STUDIO_API_KEY; // Nota: nome variabile cambiato per chiarezza
+  const PROJECT_ID = process.env.GOOGLE_PROJECT_ID; 
+  const REGION = "us-central1"; 
 
-  if (!API_KEY) {
-      return res.status(500).json({ debug_error: true, message: "Variabile GOOGLE_AI_STUDIO_API_KEY mancante su Vercel." });
+  // --- AUTENTICAZIONE PURA VERTEX AI (SERVICE ACCOUNT) ---
+  let authToken;
+  try {
+    const credentialsJson = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+
+    const auth = new GoogleAuth({
+      credentials: credentialsJson,
+      scopes: ['https://www.googleapis.com/auth/cloud-platform']
+    });
+    const client = await auth.getClient();
+    const accessToken = await client.getAccessToken();
+    authToken = accessToken.token;
+  } catch (authError) {
+    return res.status(500).json({ 
+      debug_error: true, 
+      message: 'Errore autenticazione Service Account.', 
+      details: authError.message 
+    });
   }
 
-  // Endpoint per Gemini 1.5 Flash (API Generative Language)
-  // Questo modello supporta input immagine e output testo/immagine
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+  // --- ENDPOINT UFFICIALE VERTEX AI (NO AI STUDIO) ---
+  // Uso la versione V1 e il modello specifico imagegeneration@006 per evitare il 404
+  const url = `https://${REGION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${REGION}/publishers/google/models/imagegeneration@006:predict`;
 
   try {
     const payload = {
-      contents: [{
-        parts: [
-          // Istruzioni più precise per l'editing
-          { text: `Modify this image based on the following instruction. Focus on direct visual changes. Output ONLY the resulting image data in base64. If you cannot make the visual change, state so clearly in text. Instruction: ${prompt}` },
-          { inline_data: { mime_type: "image/png", data: image } }
-        ]
-      }]
+      instances:[
+        {
+          prompt: prompt,
+          image: { bytesBase64Encoded: image }
+        }
+      ],
+      parameters: {
+        sampleCount: 1
+      }
     };
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Authorization': `Bearer ${authToken}`, 
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify(payload)
     });
 
     const data = await response.json();
 
+    // Se Vertex AI dà errore, te lo mostriamo esatto
     if (!response.ok) { 
-        console.error('Errore HTTP da Google:', data);
         return res.status(response.status).json({ 
             debug_error: true, 
-            message: `Errore HTTP da Google: ${response.status}`, 
-            google_response: data.error?.message || JSON.stringify(data) 
+            message: `Errore Vertex AI: ${response.status}`, 
+            google_response: data 
         });
     }
-    
-    // Controlla il formato della risposta per l'immagine
-    const resultPart = data.candidates?.[0]?.content?.parts?.[0];
 
-    if (resultPart && resultPart.inline_data && resultPart.inline_data.data) {
+    if (data.predictions && data.predictions[0] && data.predictions[0].bytesBase64Encoded) {
       return res.status(200).json({ 
-        modifiedImage: resultPart.inline_data.data 
+        modifiedImage: data.predictions[0].bytesBase64Encoded 
       });
-    } else if (resultPart && resultPart.text) {
-        // Se Google ha risposto con testo (es. non può fare la modifica)
-        return res.status(200).json({ 
-            debug_error: true, 
-            message: "Il modello ha risposto con testo, non un'immagine. Potrebbe non essere riuscito a fare la modifica.", 
-            google_response: resultPart.text 
-        });
-    }
-    else {
-      console.error('Risposta inattesa da Google (no immagine):', data);
+    } else {
       return res.status(500).json({ 
         debug_error: true, 
-        message: 'Google ha restituito un formato di risposta inatteso.', 
-        google_response: JSON.stringify(data) 
+        message: 'Vertex AI non ha restituito l\'immagine.', 
+        google_response: data 
       });
     }
 
   } catch (error) {
-    console.error('Errore di rete o chiamata fetch:', error);
     return res.status(500).json({ 
       debug_error: true, 
-      message: 'Errore di sistema Vercel o di rete: ' + error.message, 
-      details: error.stack 
+      message: 'Errore di rete Vercel', 
+      details: error.message 
     });
   }
 }
