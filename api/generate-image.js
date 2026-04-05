@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // Gestione CORS professionale
+  // CORS obbligatorio
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -14,45 +14,44 @@ export default async function handler(req, res) {
   }
 
   const { image, prompt } = req.body;
-  const API_KEY = process.env.VERTEX_API_KEY;
-  const PROJECT_ID = process.env.GOOGLE_PROJECT_ID;
-  const REGION = "us-central1"; 
+  const API_KEY = process.env.VERTEX_API_KEY; // Usiamo la stessa variabile
 
-  // Usiamo l'endpoint v1beta che è più stabile per i nuovi progetti
-  const url = `https://${REGION}-aiplatform.googleapis.com/v1beta/projects/${PROJECT_ID}/locations/${REGION}/publishers/google/models/gemini-2.5-flash-image:predict?key=${API_KEY}`;
+  // Nuovissimo endpoint Gemini 2.5 Flash Image tramite Google AI Studio (Generative Language)
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${API_KEY}`;
 
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        instances: [
-          {
-            prompt: prompt,
-            image: { bytesBase64Encoded: image }
-          }
-        ],
-        parameters: {
-          sampleCount: 1
-        }
+        contents: [{
+          parts: [
+            { text: `Edit this image as follows: ${prompt}. Return ONLY the resulting image data.` },
+            { inline_data: { mime_type: "image/png", data: image } }
+          ]
+        }]
       })
     });
 
     const data = await response.json();
 
-    // Se Google risponde con successo
-    if (data.predictions && data.predictions[0]) {
+    // Debug rapido se Google risponde male
+    if (data.error) {
+      return res.status(500).json({ error: 'Errore API Google', details: data.error });
+    }
+
+    // Estrazione immagine modificata (Gemini 2.5 restituisce i bytes nella risposta)
+    const resultPart = data.candidates?.[0]?.content?.parts?.[0];
+
+    if (resultPart && resultPart.inline_data) {
       return res.status(200).json({ 
-        modifiedImage: data.predictions[0].bytesBase64Encoded 
+        modifiedImage: resultPart.inline_data.data 
       });
     } else {
-      // Se Google dà errore, lo riportiamo fedelmente per capire il problema
-      return res.status(500).json({ 
-        error: 'Errore specifico da Google Vertex AI', 
-        details: data.error || data 
-      });
+      return res.status(500).json({ error: 'Risposta inattesa dal modello', details: data });
     }
+
   } catch (error) {
-    return res.status(500).json({ error: 'Errore di sistema Vercel: ' + error.message });
+    return res.status(500).json({ error: 'Errore Vercel: ' + error.message });
   }
 }
