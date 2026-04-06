@@ -1,11 +1,18 @@
 const { GoogleAuth } = require('google-auth-library');
 
 module.exports = async function handler(req, res) {
-    // Rispondiamo subito all'OPTIONS (il poliziotto del browser) per farlo passare
+    // --- 1. LASCIAPASSARE CORS ASSOLUTO ---
+    res.setHeader('Access-Control-Allow-Credentials', true);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+    // Se il browser fa il controllo preventivo (OPTIONS), diciamo "Tutto OK!" e lo facciamo passare
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
 
+    // Da qui in poi gestiamo solo le vere chiamate POST
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Metodo non consentito, usa POST.' });
     }
