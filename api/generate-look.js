@@ -13,7 +13,7 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === 'GET') {
-        return res.status(200).json({ message: "BINGO! Motore acceso (Versione IMAGEN 3)!" });
+        return res.status(200).json({ message: "BINGO! Motore acceso (Versione GEMINI 2.5 FLASH IMAGE)!" });
     }
 
     if (req.method !== 'POST') {
@@ -44,35 +44,32 @@ module.exports = async (req, res) => {
         const projectId = credentials.project_id;
         const location = 'us-central1'; 
         
-        // IL NUOVO MOTORE SUPER POTENTE DI GOOGLE
-        const modelId = 'imagen-3.0-capability-001'; 
+        // IL NUOVO MOTORE UNIFICATO DI GOOGLE
+        const modelId = 'gemini-2.5-flash-image'; 
 
-        const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:predict`;
+        // Il nuovo URL per Gemini usa "generateContent" invece di "predict"
+        const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
 
         const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
 
-        // IL NUOVO "PACCO" PER LA SPEDIZIONE
+        // IL NUOVO "PACCO" FORMATO GEMINI
         const payload = {
-            instances:[
+            contents:[
                 {
-                    prompt: prompt,
-                    referenceImages:[
+                    role: "user",
+                    parts:[
                         {
-                            referenceType: "REFERENCE_TYPE_RAW",
-                            referenceId: 1,
-                            referenceImage: {
-                                bytesBase64Encoded: cleanBase64
+                            text: prompt
+                        },
+                        {
+                            inlineData: {
+                                mimeType: "image/jpeg",
+                                data: cleanBase64
                             }
                         }
                     ]
                 }
-            ],
-            parameters: {
-                sampleCount: 1,
-                editConfig: {
-                    editMode: "EDIT_MODE_DEFAULT"
-                }
-            }
+            ]
         };
 
         const response = await fetch(url, {
@@ -91,9 +88,23 @@ module.exports = async (req, res) => {
             return res.status(response.status).json({ error: 'Errore Vertex', details: data });
         }
 
-        if (data.predictions && data.predictions.length > 0) {
-            return res.status(200).json({ imageBase64: `data:image/jpeg;base64,${data.predictions[0].bytesBase64Encoded}` });
+        // Gemini restituisce un array di "parts", noi cerchiamo quello che contiene l'immagine
+        let returnedImageBase64 = null;
+        
+        if (data.candidates && data.candidates.length > 0) {
+            const parts = data.candidates[0].content.parts;
+            for (let part of parts) {
+                if (part.inlineData && part.inlineData.data) {
+                    returnedImageBase64 = part.inlineData.data;
+                    break;
+                }
+            }
+        }
+
+        if (returnedImageBase64) {
+            return res.status(200).json({ imageBase64: `data:image/jpeg;base64,${returnedImageBase64}` });
         } else {
+            console.error("Risposta anomala da Gemini:", JSON.stringify(data, null, 2));
             return res.status(500).json({ error: 'Nessuna immagine restituita da Google.' });
         }
 
