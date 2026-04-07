@@ -38,27 +38,33 @@ return [{ type: "image_url", image_url: { url: base64 } }];
 };
 
 const getSystemPrompt = (purpose, currentStoreType = "") => {
+// Se dobbiamo generare il prompt finale per l'AI grafica, usiamo istruzioni puramente tecniche
+if (purpose === "consult_chat_final_prompt") {
+return `Sei un traduttore tecnico per AI generative.
+Basandoti sulla conversazione precedente e sulla foto, scrivi un unico prompt in inglese iper-realistico e dettagliato per fotoritocco.
+REGOLA CRITICA: Restituisci esclusivamente il testo in inglese.
+NON aggiungere "Ciao capo", NON aggiungere spiegazioni, NON aggiungere commenti.
+Scrivi solo il prompt e basta.`;
+}
+
+// Per la chat normale, manteniamo lo stile "Ciao capo"
 let basePrompt = `Sei l'assistente esperto di un ${currentStoreType}. Il tuo capo è il negoziante. `;
 
 let conversationStyle = `
 STILE DI CONVERSAZIONE:
-- Saluta sempre con "Ciao capo" nel primo messaggio.
-- Sii estremamente sintetico, secco e professionale. Niente chiacchiere inutili.
-- Identifica subito cosa vedi nella foto (es: "Vedo le mani della cliente", "Vedo il viso del cliente").
-- Rispondi come un collega esperto che dà consigli pratici e veloci.
-- Se l'utente ha una richiesta (es: matrimonio, look moderno), dai subito 2 o 3 opzioni concrete di stile.
+- Saluta con "Ciao capo" solo all'inizio.
+- Sii estremamente sintetico e professionale.
+- Identifica subito cosa vedi nella foto (es: "Ho visto il viso").
+- Dai consigli pratici e veloci.
 - Parla sempre in italiano.
-- Non fare domande lunghe, chiedi solo "Dimmi tutto" o "Hai richieste?".
 `;
 
 if (purpose === "enhance_prompt") {
-return basePrompt + conversationStyle + ` Compito: Migliora il testo per un'AI grafica. Scrivi solo il prompt in inglese, dettagliato e iper-realistico. Niente introduzioni.`;
+return `Compito: Migliora questo prompt per un'AI grafica. Scrivi solo il testo in inglese dettagliato. Niente saluti o introduzioni.`;
 } else if (purpose === "consult_chat_initial") {
-return basePrompt + conversationStyle + ` Compito: Saluta, identifica la parte del corpo nella foto e chiedi se ci sono richieste particolari. Sii brevissimo.`;
+return basePrompt + conversationStyle + ` Compito: Saluta il capo, di' cosa vedi nella foto e chiedi se ci sono richieste o se vuoi un consiglio. Sii brevissimo.`;
 } else if (purpose === "consult_chat_message") {
-return basePrompt + conversationStyle + ` Compito: Rispondi alla richiesta del capo con consigli tecnici precisi e veloci basati sulla foto.`;
-} else if (purpose === "consult_chat_final_prompt") {
-return basePrompt + conversationStyle + ` Compito: Trasforma la discussione in un prompt finale iper-realistico in inglese per fotoritocco. Restituisci SOLO il testo del prompt.`;
+return basePrompt + conversationStyle + ` Compito: Rispondi alla richiesta con consigli tecnici veloci basati sulla foto.`;
 }
 return basePrompt + conversationStyle;
 };
