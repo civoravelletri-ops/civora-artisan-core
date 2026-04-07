@@ -33,7 +33,7 @@ export default async function handler(req, res) {
 
         // Funzione per formattare l'immagine per l'input multimodale di Groq
         const formatImageForGroq = (base64) => {
-            if (!base64) return [];
+            if (!base64) return []; // Non dovrebbe succedere per consult_chat_initial e ora nemmeno per i successivi se inviata
             return [{ type: "image_url", image_url: { url: base64 } }];
         };
 
@@ -92,7 +92,7 @@ export default async function handler(req, res) {
             } else if (purpose === "consult_chat_initial" || purpose === "consult_chat_message") {
                 return basePrompt + conversationStyle;
             } else if (purpose === "consult_chat_final_prompt") {
-                return basePrompt + conversationStyle + ` Basandoti su tutta la nostra conversazione e l'analisi visiva (se disponibile), genera un prompt finale in inglese, iper-realistico e dettagliato per la generazione di immagini AI. Focalizzati esclusivamente sull'aspetto del look (es. acconconciatura, colore, stile unghie, tipo di barba, ecc.). NON includere saluti, introduzioni o conclusioni. Restituisci SOLO il prompt finale in un unico blocco di testo.`;
+                return basePrompt + conversationStyle + ` Basandoti su tutta la nostra conversazione e l'analisi visiva, genera un prompt finale in inglese, iper-realistico e dettagliato per la generazione di immagini AI. Focalizzati esclusivamente sull'aspetto del look (es. acconconciatura, colore, stile unghie, tipo di barba, ecc.). NON includere saluti, introduzioni o conclusioni. Restituisci SOLO il prompt finale in un unico blocco di testo.`;
             }
             return basePrompt + conversationStyle; // Fallback
         };
@@ -111,7 +111,6 @@ export default async function handler(req, res) {
             case 'consult_chat_initial':
             case 'consult_chat_message':
             case 'consult_chat_final_prompt':
-                // La gestione delle immagini avviene qui, nel campo 'content' del messaggio user
                 temperature = (type === 'consult_chat_final_prompt') ? 0.3 : 0.7;
 
                 let chatMessagesForGroq = [];
@@ -119,47 +118,59 @@ export default async function handler(req, res) {
                 // Primo messaggio di sistema (con la persona dell'AI)
                 chatMessagesForGroq.push({
                     role: 'system',
-                    content: getSystemPrompt(type, storeType) // Il system prompt ora ha le istruzioni per analizzare l'immagine nell'input user
+                    content: getSystemPrompt(type, storeType)
                 });
                 
-                // --- LOGICA PER IL PRIMO MESSAGGIO (consult_chat_initial) E I SEGUENTI ---
-                // Il contenuto del messaggio 'user' ora includerà l'immagine solo all'inizio
-                // o se specificamente ricaricata (cosa che la UI attuale non fa per i messaggi successivi)
+                // --- LOGICA per la COSTRUZIONE DELLA CRONOLOGIA DELLA CHAT ---
+                // Qui ricostruiamo tutta la cronologia, INVIANDO L'IMMAGINE IN OGNI MESSAGGIO 'user'
+                // se imageBase64 è presente (come ora sarà, per tua istruzione).
+
+                // Iniziamo con il messaggio iniziale dell'utente (che include l'immagine)
                 if (type === 'consult_chat_initial') {
-                    let initialContent = [];
-                    if (imageBase64) {
-                        // Se c'è un'immagine, la si passa come input multimodale al primo messaggio 'user'
-                        // E si istruisce l'AI a partire con una consulenza proattiva basata su ciò che vede
-                        initialContent.push({ type: 'text', text: `Analizza questa immagine del cliente. Capisci subito se si tratta di un viso, capelli, mezzo corpo, mani, piedi, denti, ecc. Basandoti sul tuo ruolo di esperto in "${storeType}", fornisci una consulenza iniziale proattiva e specifica per il look o il servizio più adatto, senza attendere domande. Sii conciso e diretto.` });
-                        initialContent.push(...formatImageForGroq(imageBase64));
-                    } else {
-                        // Se non ci sono immagini, l'AI deve iniziare con un'apertura proattiva testuale
-                        initialContent.push({ type: 'text', text: `Benvenuto! Sono qui per offrirti una consulenza di stile esperta per la tua attività di "${storeType}". Dimmi pure, come posso aiutarti a creare il look perfetto per il tuo cliente oggi?` });
+                    if (!imageBase64) {
+                        throw new Error("Errore: La consulenza AI è stata richiesta senza fornire un'immagine.");
                     }
+                    let initialContent = [];
+                    initialContent.push({ type: 'text', text: `Analizza attentamente questa immagine del cliente. Capisci subito se si tratta di un viso, capelli, mezzo corpo, mani, piedi, denti o qualsiasi parte del corpo visibile. Basandoti sul tuo ruolo di esperto in "${storeType}", fornisci una consulenza iniziale proattiva e specifica per il look o il servizio più adatto, senza attendere domande. Sii conciso e diretto.` });
+                    initialContent.push(...formatImageForGroq(imageBase64));
                     chatMessagesForGroq.push({ role: 'user', content: initialContent });
 
-                } else if (type === 'consult_chat_message') {
-                    // Per i messaggi successivi, aggiungiamo la cronologia
+                } else {
+                    // Per i messaggi successivi (consult_chat_message e consult_chat_final_prompt),
+                    // ricostruiamo la history includendo imageBase64 in ogni messaggio 'user' della history
                     if (chatHistory && chatHistory.length > 0) {
-                        chatHistory.forEach(msg => {
-                            // Assumiamo che i messaggi passati nella history siano testuali
-                            chatMessagesForGroq.push({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text });
-                        });
+                        for (const msg of chatHistory) {
+                            if (msg.sender === 'user') {
+                                // Ogni messaggio 'user' nella history riceve l'immagine
+                                let userMessageContent = [{ type: 'text', text: msg.text }];
+                                if (imageBase64) { // Se l'immagine è stata fornita all'inizio, la ripassiamo
+                                    userMessageContent.push(...formatImageForGroq(imageBase64));
+                                }
+                                chatMessagesForGroq.push({ role: 'user', content: userMessageContent });
+                            } else {
+                                // I messaggi 'assistant' sono solo testo
+                                chatMessagesForGroq.push({ role: 'assistant', content: msg.text });
+                            }
+                        }
                     }
-                    // Aggiungiamo il messaggio più recente dell'utente.
-                    chatMessagesForGroq.push({ role: 'user', content: latestMessage });
 
-                } else if (type === 'consult_chat_final_prompt') {
-                    // Per il prompt finale, aggiungiamo la cronologia
-                    if (chatHistory && chatHistory.length > 0) {
-                        chatHistory.forEach(msg => {
-                            chatMessagesForGroq.push({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text });
-                        });
+                    // Aggiungiamo il messaggio più recente dell'utente o l'istruzione finale (con l'immagine)
+                    if (type === 'consult_chat_message') {
+                        let latestUserMessageContent = [{ type: 'text', text: latestMessage }];
+                        if (imageBase64) {
+                            latestUserMessageContent.push(...formatImageForGroq(imageBase64));
+                        }
+                        chatMessagesForGroq.push({ role: 'user', content: latestUserMessageContent });
+                    } else if (type === 'consult_chat_final_prompt') {
+                        let finalPromptInstructionContent = [{
+                            type: 'text',
+                            text: `Basandoti su tutta la nostra conversazione e l'analisi visiva, genera un prompt finale in inglese, iper-realistico e dettagliato per la generazione di immagini AI. Focalizzati esclusivamente sull'aspetto del look (es. acconconciatura, colore, stile unghie, tipo di barba, ecc.). NON includere saluti, introduzioni o conclusioni. Restituisci SOLO il prompt finale in un unico blocco di testo.`
+                        }];
+                        if (imageBase64) {
+                            finalPromptInstructionContent.push(...formatImageForGroq(imageBase64));
+                        }
+                        chatMessagesForGroq.push({ role: 'user', content: finalPromptInstructionContent });
                     }
-                    chatMessagesForGroq.push({
-                        role: 'user',
-                        content: `Basandoti su tutta la nostra conversazione e l'analisi visiva iniziale (se disponibile), genera un prompt finale in inglese, iper-realistico e dettagliato per la generazione di immagini AI. Focalizzati esclusivamente sull'aspetto del look (es. acconconciatura, colore, stile unghie, tipo di barba, ecc.). NON includere saluti, introduzioni o conclusioni. Restituisci SOLO il prompt finale in un unico blocco di testo.`
-                    });
                 }
                 messages = chatMessagesForGroq;
                 break;
