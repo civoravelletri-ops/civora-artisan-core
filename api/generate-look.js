@@ -50,27 +50,28 @@ module.exports = async (req, res) => {
         // Il nuovo URL per Gemini usa "generateContent" invece di "predict"
         const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
 
-        const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+        const mimeMatch = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
+                const detectedMimeType = mimeMatch ? mimeMatch[1] : "image/webp";
+                const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
 
-        // IL NUOVO "PACCO" FORMATO GEMINI
-        const payload = {
-            contents:[
-                {
-                    role: "user",
-                    parts:[
+                const payload = {
+                    contents:[
                         {
-                            text: prompt
-                        },
-                        {
-                            inlineData: {
-                                mimeType: "image/jpeg",
-                                data: cleanBase64
-                            }
+                            role: "user",
+                            parts:[
+                                {
+                                    text: prompt
+                                },
+                                {
+                                    inlineData: {
+                                        mimeType: detectedMimeType,
+                                        data: cleanBase64
+                                    }
+                                }
+                            ]
                         }
                     ]
-                }
-            ]
-        };
+                };
 
         const response = await fetch(url, {
             method: 'POST',
@@ -102,8 +103,8 @@ module.exports = async (req, res) => {
         }
 
         if (returnedImageBase64) {
-            return res.status(200).json({ imageBase64: `data:image/jpeg;base64,${returnedImageBase64}` });
-        } else {
+                    return res.status(200).json({ imageBase64: `data:image/webp;base64,${returnedImageBase64}` });
+                } else {
             console.error("Risposta anomala da Gemini:", JSON.stringify(data, null, 2));
             return res.status(500).json({ error: 'Nessuna immagine restituita da Google.' });
         }
