@@ -34,11 +34,12 @@ module.exports = async (req, res) => {
         if (!process.env.GOOGLE_CREDENTIALS) {
                     return res.status(500).json({ error: 'Chiave Google Cloud mancante.' });
                 }
-                // --- INIZIO: CONTROLLO CREDENZIALI FIRESTORE ADMIN ---
-                if (!process.env.FIREBASE_ADMIN_CREDENTIALS) {
-                    console.error("FIREBASE_ADMIN_CREDENTIALS non configurata. Il contatore globale non funzionerà.");
-                    // Non blocchiamo la richiesta, ma logghiamo l'errore.
-                }
+                // --- INIZIO: CONTROLLO CREDENZIALI FIRESTORE ADMIN (usando il tuo nome) ---
+                        if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+                            console.error("FIREBASE_SERVICE_ACCOUNT_KEY non configurata. Il contatore globale non funzionerà.");
+                            // Non blocchiamo la richiesta, ma logghiamo l'errore.
+                        }
+                        // --- FINE: CONTROLLO CREDENZIALI FIRESTORE ADMIN ---
                 // --- FINE: CONTROLLO CREDENZIALI FIRESTORE ADMIN ---
 
                 const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
@@ -114,54 +115,58 @@ module.exports = async (req, res) => {
 
         if (returnedImageBase64) {
                     // --- INIZIO: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN (con i tuoi nomi personalizzati) ---
-                    if (process.env.FIREBASE_ADMIN_CREDENTIALS) {
-                        try {
-                            // Inizializza Firebase Admin SDK solo una volta per istanza della funzione
-                            if (!firebaseAdminApp) {
-                                const adminCredentials = JSON.parse(process.env.FIREBASE_ADMIN_CREDENTIALS);
-                                firebaseAdminApp = admin.initializeApp({
-                                    credential: admin.credential.cert(adminCredentials)
-                                }, 'globalCounterApp'); // Nome unico per l'app Admin
-                            }
-                            const db = admin.firestore(firebaseAdminApp); // Usa l'istanza corretta del db
-                            
-                            const globalStatsRef = db.collection('civora_analytics').doc('ai_gen'); // Usa la tua Collezione e Documento
-                            
-                            // Tentiamo di aggiornare il documento
-                            await globalStatsRef.update({
-                                total_generated_images_ai: admin.firestore.FieldValue.increment(1) // Usa il tuo Campo
-                            });
-                            
-                        } catch (error) {
-                            // Se il documento non esiste (codice 5 per "NotFound"), crealo
-                            if (error.code === 5 || (error.details && error.details.includes('not found'))) {
-                                try {
-                                    const adminCredentials = JSON.parse(process.env.FIREBASE_ADMIN_CREDENTIALS);
-                                    if (!firebaseAdminApp) { // Doppio controllo per evitare reinizializzazioni
-                                        firebaseAdminApp = admin.initializeApp({
-                                            credential: admin.credential.cert(adminCredentials)
-                                        }, 'globalCounterApp');
+                    // --- INIZIO: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN (con i tuoi nomi personalizzati e la tua variabile d'ambiente) ---
+                                if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) { // Ora usa il tuo nome di variabile
+                                    try {
+                                        // Inizializza Firebase Admin SDK solo una volta per istanza della funzione
+                                        if (!firebaseAdminApp) {
+                                            // Usa la tua variabile d'ambiente
+                                            const adminCredentials = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+                                            firebaseAdminApp = admin.initializeApp({
+                                                credential: admin.credential.cert(adminCredentials)
+                                            }, 'globalCounterApp'); // Nome unico per l'app Admin
+                                        }
+                                        const db = admin.firestore(firebaseAdminApp); // Usa l'istanza corretta del db
+
+                                        const globalStatsRef = db.collection('civora_analytics').doc('ai_gen'); // La tua Collezione e Documento
+
+                                        // Tentiamo di aggiornare il documento
+                                        await globalStatsRef.update({
+                                            total_generated_images_ai: admin.firestore.FieldValue.increment(1) // Il tuo Campo
+                                        });
+
+                                    } catch (error) {
+                                        // Se il documento non esiste (codice 5 per "NotFound"), crealo
+                                        if (error.code === 5 || (error.details && error.details.includes('not found'))) {
+                                            try {
+                                                // Usa la tua variabile d'ambiente
+                                                const adminCredentials = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+                                                if (!firebaseAdminApp) { // Doppio controllo per evitare reinizializzazioni
+                                                    firebaseAdminApp = admin.initializeApp({
+                                                        credential: admin.credential.cert(adminCredentials)
+                                                    }, 'globalCounterApp');
+                                                }
+                                                const db = admin.firestore(firebaseAdminApp);
+                                                await db.collection('civora_analytics').doc('ai_gen').set({ // Crea con i tuoi nomi
+                                                    total_generated_images_ai: 1 // Inizializza il tuo Campo
+                                                });
+                                            } catch (setError) {
+                                                console.error("Errore nel creare/inizializzare contatore globale:", setError);
+                                            }
+                                        } else {
+                                            console.error("Errore nell'incrementare il contatore globale AI:", error);
+                                        }
                                     }
-                                    const db = admin.firestore(firebaseAdminApp);
-                                    await db.collection('civora_analytics').doc('ai_gen').set({ // Crea con i tuoi nomi
-                                        total_generated_images_ai: 1 // Inizializza il tuo Campo
-                                    });
-                                } catch (setError) {
-                                    console.error("Errore nel creare/inizializzare contatore globale:", setError);
                                 }
-                            } else {
-                                console.error("Errore nell'incrementare il contatore globale AI:", error);
-                            }
-                        }
-                    }
+                                // --- FINE: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN ---
                     // --- FINE: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN ---
-        
+
                     return res.status(200).json({ imageBase64: `data:image/webp;base64,${returnedImageBase64}` });
                 } else {
                     console.error("Risposta anomala da Gemini:", JSON.stringify(data, null, 2));
                     return res.status(500).json({ error: 'Nessuna immagine restituita da Google.' });
                 }
-        
+
             } catch (error) {
                 console.error('Errore Try-Catch:', error);
                 return res.status(500).json({ error: 'Errore interno', details: error.message });
