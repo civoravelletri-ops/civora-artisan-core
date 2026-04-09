@@ -1,250 +1,168 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const admin = require('firebase-admin');
+const { GoogleAuth } = require('google-auth-library');
+const admin = require('firebase-admin'); // Necessario per Firebase Admin SDK
+let db; // Questa variabile verrà usata per il tuo Firestore
 
+// --- INIZIO: INIZIALIZZAZIONE FIRESTORE ADMIN SDK (Basata sul tuo bazar.js, pulita) ---
+// La logica di inizializzazione viene eseguita una sola volta quando la funzione Vercel si carica
 if (!admin.apps.length) {
-    const firebaseConfig = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8'));
-    admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
+    try {
+        const firebaseConfig = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8'));
+        admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
+    } catch (error) {
+        console.error("ERRORE CRITICO: Impossibile inizializzare Firebase Admin SDK. Controlla FIREBASE_SERVICE_ACCOUNT_KEY:", error.message);
+        // È fondamentale non bloccare il caricamento della funzione, ma registrare l'errore.
+        // db rimarrà non definito e i tentativi di accesso falliranno, ma non blocca l'API per altri scopi.
+    }
 }
-const db = admin.firestore();
-
-function setCorsHeaders(res) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+// Se l'inizializzazione è riuscita o era già avvenuta, assegna l'istanza del database
+if (admin.apps.length) {
+    db = admin.firestore();
 }
+// --- FINE: INIZIALIZZAZIONE FIRESTORE ADMIN SDK ---
 
 module.exports = async (req, res) => {
-    setCorsHeaders(res);
-    if (req.method === 'OPTIONS') return res.status(200).end();
-    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+    // 1. CORS DINAMICO
+    const origin = req.headers.origin || '*';
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
 
-    const { action } = req.body;
-
-    try {
-        if (action === 'CALCULATE_AND_PAY') {
-            return await handleBazarCalculateAndPay(req, res);
-        } else if (action === 'FINALIZE_ORDER') {
-            return await handleBazarFinalizeOrder(req, res);
-        } else if (action === 'RELEASE_LOCK') {
-            return await handleBazarReleaseLock(req, res);
-        }
-        return res.status(400).json({ error: 'Azione sconosciuta' });
-    } catch (error) {
-        console.error("❌ ERRORE BAZAR:", error);
-        return res.status(400).json({ error: error.message || 'Errore interno del server.' });
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
     }
-};
 
-async function handleBazarCalculateAndPay(req, res) {
-    const { cartItems, vendorId, clientClaimedTotal, userId } = req.body;
+    if (req.method === 'GET') {
+        return res.status(200).json({ message: "BINGO! Motore acceso (Versione GEMINI 2.5 FLASH IMAGE)!" });
+    }
 
-    if (!userId) throw new Error("Utente non identificato. Ricarica la pagina per favore.");
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Metodo non consentito, usa POST.' });
+    }
 
-    // =========================================================
-    // MODIFICA: RECUPERO LA FEE DINAMICA DA FIREBASE
-    // =========================================================
-    let CIVORA_COMMISSION = 0.07; // Paracadute di sicurezza base
     try {
-        const configDoc = await db.collection('app_settings').doc('main_config').get();
-        if (configDoc.exists) {
-            const configData = configDoc.data();
-            if (configData.baraz_occasioni_fee !== undefined) {
-                // Prende la stringa "0.05" e la fa diventare numero
-                CIVORA_COMMISSION = parseFloat(configData.baraz_occasioni_fee);
-                console.log(`Fee recuperata da Firebase: ${CIVORA_COMMISSION}`);
+        const { imageBase64, prompt } = req.body;
+
+        if (!imageBase64 || !prompt) {
+            return res.status(400).json({ error: 'Immagine o comando mancanti.' });
+        }
+
+        if (!process.env.GOOGLE_CREDENTIALS) {
+                    return res.status(500).json({ error: 'Chiave Google Cloud mancante.' });
+                }
+
+                const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+
+                const auth = new GoogleAuth({
+                    credentials,
+                    scopes:['https://www.googleapis.com/auth/cloud-platform']
+                });
+
+                const client = await auth.getClient();
+                const accessToken = (await client.getAccessToken()).token;
+
+        const projectId = credentials.project_id;
+        const location = 'us-central1'; 
+        
+        // IL NUOVO MOTORE UNIFICATO DI GOOGLE
+        const modelId = 'gemini-2.5-flash-image'; 
+
+        // Il nuovo URL per Gemini usa "generateContent" invece di "predict"
+        const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
+
+        const mimeMatch = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
+                const detectedMimeType = mimeMatch ? mimeMatch[1] : "image/webp";
+                const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+
+                const payload = {
+                    contents:[
+                        {
+                            role: "user",
+                            parts:[
+                                {
+                                    text: prompt
+                                },
+                                {
+                                    inlineData: {
+                                        mimeType: detectedMimeType,
+                                        data: cleanBase64
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                };
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            console.error("Errore da Vertex:", JSON.stringify(data, null, 2));
+            return res.status(response.status).json({ error: 'Errore Vertex', details: data });
+        }
+
+        // Gemini restituisce un array di "parts", noi cerchiamo quello che contiene l'immagine
+        let returnedImageBase64 = null;
+        
+        if (data.candidates && data.candidates.length > 0) {
+            const parts = data.candidates[0].content.parts;
+            for (let part of parts) {
+                if (part.inlineData && part.inlineData.data) {
+                    returnedImageBase64 = part.inlineData.data;
+                    break;
+                }
             }
         }
-    } catch (err) {
-        console.error("Errore recupero fee da Firebase, uso default 0.07:", err);
-    }
-    // =========================================================
 
-    const item = cartItems[0];
-    const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(item.docId);
+        if (returnedImageBase64) {
+                    // --- INIZIO: LOGICA CONTATORE GLOBALE FIRESTORE (con i tuoi nomi personalizzati) ---
+                    // Solo se il database è stato inizializzato correttamente all'inizio del file
+                    if (db) {
+                        try {
+                            const globalStatsRef = db.collection('civora_analytics').doc('ai_gen'); // La tua Collezione e Documento
 
-    let productData;
-    await db.runTransaction(async (transaction) => {
-        const productDoc = await transaction.get(productRef);
-        if (!productDoc.exists) throw new Error("Prodotto non trovato.");
+                            await globalStatsRef.update({
+                                total_generated_images_ai: admin.firestore.FieldValue.increment(1) // Il tuo Campo
+                            });
 
-        productData = productDoc.data();
-        const now = admin.firestore.Timestamp.now().toMillis();
+                        } catch (error) {
+                            // Se il documento non esiste (codice 5 per "NotFound"), crealo
+                            if (error.code === 5 || (error.details && error.details.includes('not found'))) {
+                                try {
+                                    // Se il db è stato inizializzato correttamente, possiamo usarlo qui
+                                    if (db) {
+                                        await db.collection('civora_analytics').doc('ai_gen').set({ // Crea con i tuoi nomi
+                                            total_generated_images_ai: 1 // Inizializza il tuo Campo
+                                        });
+                                    }
+                                } catch (setError) {
+                                    console.error("Errore nel creare/inizializzare contatore globale (nel catch):", setError);
+                                }
+                            } else {
+                                console.error("Errore nell'incrementare il contatore globale AI:", error);
+                            }
+                        }
+                    } else {
+                        console.warn("DB Firebase Admin non inizializzato, contatore globale non aggiornato.");
+                    }
+                    // --- FINE: LOGICA CONTATORE GLOBALE FIRESTORE ---
 
-        if (productData.status === 'sold' || productData.quantity <= 0) {
-            throw new Error("Prodotto esaurito.");
-        }
+                    return res.status(200).json({ imageBase64: `data:image/webp;base64,${returnedImageBase64}` });
+                } else {
+                    console.error("Risposta anomala da Gemini:", JSON.stringify(data, null, 2));
+                    return res.status(500).json({ error: 'Nessuna immagine restituita da Google.' });
+                }
 
-        const activeLocks = productData.activeLocks || {};
-        if (!activeLocks[userId] || activeLocks[userId] <= now) {
-            throw new Error("La tua priorità su questo prodotto è scaduta. Riprova dalla vetrina.");
-        }
-    });
-
-    const netPrice = parseFloat(productData.priceNettoVendor || productData.price);
-    const deliveryCost = parseFloat(productData.deliveryCost || 0);
-    // Ora usa la commissione scaricata da Firebase!
-    const commission = parseFloat((netPrice * CIVORA_COMMISSION).toFixed(2));
-    const priceCliente = parseFloat((netPrice + commission).toFixed(2));
-    const totalToPay = parseFloat((priceCliente + deliveryCost).toFixed(2));
-
-    if (Math.abs(totalToPay * 100 - clientClaimedTotal) > 100) {
-        throw new Error("Discrepanza nei prezzi rilevata. Riprova l'acquisto.");
-    }
-
-    const vendorData = (await db.collection('vendors').doc(vendorId).get()).data();
-    if (!vendorData || !vendorData.stripeAccountId) {
-        throw new Error("Il venditore non ha un account Stripe configurato.");
-    }
-
-    const paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(totalToPay * 100),
-        currency: 'eur',
-        application_fee_amount: Math.round(commission * 100),
-        transfer_data: { destination: vendorData.stripeAccountId },
-        metadata: {
-            vendorId,
-            productId: item.docId,
-            bazarPriceNetto: netPrice.toString(),
-            commissionCivora: commission.toString(),
-            deliveryCost: deliveryCost.toString(),
-            buyerUserId: userId
-        }
-    });
-
-    return res.status(200).json({ clientSecret: paymentIntent.client_secret, summary: { realTotal: totalToPay } });
-}
-
-async function handleBazarFinalizeOrder(req, res) {
-    const { paymentIntentId, vendorId, productId, userId, customerShippingData, orderNotes, deliveryNotesForRider } = req.body;
-
-    let productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
-    let finalProductData;
-
-    await db.runTransaction(async (transaction) => {
-        const productDoc = await transaction.get(productRef);
-        if (!productDoc.exists) {
-            await stripe.refunds.create({ payment_intent: paymentIntentId });
-            throw new Error("Prodotto non trovato. Rimborso avviato.");
-        }
-
-        finalProductData = productDoc.data();
-        const now = admin.firestore.Timestamp.now().toMillis();
-
-        if (finalProductData.status === 'sold' || finalProductData.quantity <= 0) {
-            await stripe.refunds.create({ payment_intent: paymentIntentId });
-            throw new Error("Prodotto già venduto. Rimborso avviato.");
-        }
-
-        let activeLocks = finalProductData.activeLocks || {};
-        if (!activeLocks[userId] || activeLocks[userId] <= now) {
-            await stripe.refunds.create({ payment_intent: paymentIntentId });
-            throw new Error("La tua priorità è scaduta. Rimborso avviato.");
-        }
-
-        // Rimuovi il lucchetto di questo utente
-        delete activeLocks[userId];
-        let newQuantity = finalProductData.quantity - 1;
-
-        const updateFields = {
-            activeLocks: activeLocks,
-            quantity: newQuantity
-        };
-
-        if (newQuantity <= 0) {
-            updateFields.status = 'sold';
-            updateFields.activeLocks = {}; // Svuota tutti i lucchetti rimasti (ormai inutili)
-        }
-
-        transaction.update(productRef, updateFields);
-    });
-
-    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
-    if (!intent || intent.status !== 'succeeded') {
-        throw new Error("Il Payment Intent non è riuscito.");
-    }
-    const soldiVeriPagati = intent.amount / 100;
-
-    const orderRef = db.collection('vendors').doc(vendorId).collection('orders').doc();
-    const orderNumber = `B-${new Date().getTime().toString().slice(-8)}`;
-
-    const purchasedItem = {
-        docId: intent.metadata.productId,
-        quantity: 1,
-        type: 'bazar_product',
-        price: parseFloat(intent.amount / 100 - intent.application_fee_amount / 100).toFixed(2),
-        priceNettoVendor: parseFloat(intent.metadata.bazarPriceNetto),
-        commissionCivoraPercentage: parseFloat(intent.application_fee_amount / 100) / parseFloat(intent.amount / 100 - intent.application_fee_amount / 100),
-        productName: finalProductData.name,
-        vendorId: intent.metadata.vendorId,
-        imageUrl: finalProductData.imageUrls?.[0] || null,
-        deliveryCost: parseFloat(intent.metadata.deliveryCost)
-    };
-
-    await orderRef.set({
-            orderNumber,
-            status: 'pending',
-            vendorId,
-            shippingAddress: customerShippingData,
-            orderNotes: orderNotes || '',
-            deliveryNotesForRider: deliveryNotesForRider || '',
-            paymentIntentId,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            orderCategory: 'bazar',
-            totalAmount: soldiVeriPagati,
-            cartItems: [purchasedItem],
-            buyerUserId: userId
-        });
-    
-        // ==========================================
-        // AUMENTA LA CODA DEL NEGOZIO DI 1
-        // ==========================================
-        await db.collection('vendors').doc(vendorId).update({
-            pending_orders_count: admin.firestore.FieldValue.increment(1)
-        });
-        // ==========================================
-
-    // ==========================================
-    // INVIO SMS MACRODROID BLINDATO
-    // ==========================================
-    try {
-        const vendorDoc = await db.collection('vendors').doc(vendorId).get();
-        const nomeNegozio = vendorDoc.exists ? (vendorDoc.data().store_name || 'Bazar') : 'Bazar';
-        let numeroCliente = customerShippingData.phone.replace(/\s+/g, '');
-        if (!numeroCliente.startsWith('+')) numeroCliente = '+39' + numeroCliente;
-
-        const messaggioSmsCliente = `Ciao da ${nomeNegozio}, grazie per l'acquisto! Il tuo ordine #${orderNumber} e' in elaborazione. Preparati alla chiamata del corriere per ricevere l'ordine.`;
-        const macrodroidUrlCliente = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroCliente)}&message=${encodeURIComponent(messaggioSmsCliente)}`;
-
-        // Aggiunto l'AWAIT qui: Obbliga Vercel ad aspettare che MacroDroid riceva il comando
-        await fetch(macrodroidUrlCliente);
-        console.log("SMS inviato a Macrodroid con successo.");
-
-    } catch (smsError) {
-        console.error("Errore invio SMS:", smsError);
-    }
-    // ==========================================
-
-    return res.status(200).json({ success: true, orderId: orderRef.id, orderNumber });
-}
-
-async function handleBazarReleaseLock(req, res) {
-    const { vendorId, productId, userId } = req.body;
-    if (!vendorId || !productId || !userId) return res.status(400).json({ error: 'Dati mancanti' });
-
-    const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
-
-    await db.runTransaction(async (transaction) => {
-        const productDoc = await transaction.get(productRef);
-        if (productDoc.exists) {
-            const data = productDoc.data();
-            let activeLocks = data.activeLocks || {};
-
-            if (activeLocks[userId] && data.status !== 'sold') {
-                delete activeLocks[userId];
-                transaction.update(productRef, { activeLocks: activeLocks });
-            }
-        }
-    });
-
-    return res.status(200).json({ success: true });
-}
+            } catch (error) {
+                    console.error('Errore Try-Catch (generate-look):', error); // Aggiunto nome funzione per log più chiari
+                    return res.status(500).json({ error: 'Errore interno', details: error.message });
+                }
+            };
