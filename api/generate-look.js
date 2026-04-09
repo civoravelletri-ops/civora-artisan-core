@@ -120,12 +120,13 @@ module.exports = async (req, res) => {
                                     try {
                                         // Inizializza Firebase Admin SDK solo una volta per istanza della funzione
                                         if (!firebaseAdminApp) {
-                                            // Usa la tua variabile d'ambiente
-                                            const adminCredentials = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-                                            firebaseAdminApp = admin.initializeApp({
-                                                credential: admin.credential.cert(adminCredentials)
-                                            }, 'globalCounterApp'); // Nome unico per l'app Admin
-                                        }
+                                                                // Decodifica Base64 prima di fare il JSON.parse
+                                                                const decodedCredentialsString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8');
+                                                                const adminCredentials = JSON.parse(decodedCredentialsString);
+                                                                firebaseAdminApp = admin.initializeApp({
+                                                                    credential: admin.credential.cert(adminCredentials)
+                                                                }, 'globalCounterApp'); // Nome unico per l'app Admin
+                                                            }
                                         const db = admin.firestore(firebaseAdminApp); // Usa l'istanza corretta del db
 
                                         const globalStatsRef = db.collection('civora_analytics').doc('ai_gen'); // La tua Collezione e Documento
@@ -139,13 +140,14 @@ module.exports = async (req, res) => {
                                         // Se il documento non esiste (codice 5 per "NotFound"), crealo
                                         if (error.code === 5 || (error.details && error.details.includes('not found'))) {
                                             try {
-                                                // Usa la tua variabile d'ambiente
-                                                const adminCredentials = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-                                                if (!firebaseAdminApp) { // Doppio controllo per evitare reinizializzazioni
-                                                    firebaseAdminApp = admin.initializeApp({
-                                                        credential: admin.credential.cert(adminCredentials)
-                                                    }, 'globalCounterApp');
-                                                }
+                                                                        // Decodifica Base64 prima di fare il JSON.parse
+                                                                        const decodedCredentialsString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8');
+                                                                        const adminCredentials = JSON.parse(decodedCredentialsString); 
+                                                                        if (!firebaseAdminApp) { // Doppio controllo per evitare reinizializzazioni
+                                                                            firebaseAdminApp = admin.initializeApp({
+                                                                                credential: admin.credential.cert(adminCredentials)
+                                                                            }, 'globalCounterApp');
+                                                                        }
                                                 const db = admin.firestore(firebaseAdminApp);
                                                 await db.collection('civora_analytics').doc('ai_gen').set({ // Crea con i tuoi nomi
                                                     total_generated_images_ai: 1 // Inizializza il tuo Campo
