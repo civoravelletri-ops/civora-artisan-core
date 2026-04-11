@@ -25,11 +25,11 @@ module.exports = async (req, res) => {
     }
 
     try {
-        const { imageBase64, prompt } = req.body;
+       const { imageBase64, referenceImageBase64, prompt } = req.body;
 
-        if (!imageBase64 || !prompt) {
-            return res.status(400).json({ error: 'Immagine o comando mancanti.' });
-        }
+       if (!imageBase64 || !prompt) {
+           return res.status(400).json({ error: 'Immagine o comando mancanti.' });
+       }
 
         if (!process.env.GOOGLE_CREDENTIALS) {
                     return res.status(500).json({ error: 'Chiave Google Cloud mancante.' });
@@ -65,24 +65,28 @@ module.exports = async (req, res) => {
                 const detectedMimeType = mimeMatch ? mimeMatch[1] : "image/webp";
                 const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
 
-                const payload = {
-                    contents:[
-                        {
-                            role: "user",
-                            parts:[
-                                {
-                                    text: prompt
-                                },
-                                {
-                                    inlineData: {
-                                        mimeType: detectedMimeType,
-                                        data: cleanBase64
-                                    }
+                // Prepariamo la lista dei pezzi (parts) per l'AI
+                                let parts = [{ text: prompt }];
+
+                                // Aggiungiamo la foto cliente (Immagine 1)
+                                parts.push({
+                                    inlineData: { mimeType: detectedMimeType, data: cleanBase64 }
+                                });
+
+                                // Se c'è la foto riferimento (Immagine 2), aggiungiamola!
+                                if (referenceImageBase64) {
+                                    const refMimeMatch = referenceImageBase64.match(/^data:(image\/[a-z]+);base64,/);
+                                    const refMimeType = refMimeMatch ? refMimeMatch[1] : "image/webp";
+                                    const cleanRefBase64 = referenceImageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+
+                                    parts.push({
+                                        inlineData: { mimeType: refMimeType, data: cleanRefBase64 }
+                                    });
                                 }
-                            ]
-                        }
-                    ]
-                };
+
+                                const payload = {
+                                    contents: [{ role: "user", parts: parts }]
+                                };
 
         const response = await fetch(url, {
             method: 'POST',
