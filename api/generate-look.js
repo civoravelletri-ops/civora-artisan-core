@@ -68,29 +68,29 @@ console.log("Dati ricevuti da Vercel - Immagine cliente presente:", !!imageBase6
                 // Prepariamo il vassoio per l'AI
                                 const parts = [];
                 
-                                // 1. Aggiungiamo la foto cliente
+                                // 1. Aggiungiamo la foto cliente (Immagine 1)
                                 parts.push({
                                     inlineData: { mimeType: detectedMimeType, data: cleanBase64 }
                                 });
                 
-                                // 2. Aggiungiamo la foto riferimento
-                                if (referenceImageBase64) {
-                                    const refMimeMatch = referenceImageBase64.match(/^data:(image\/[a-z]+);base64,/);
-                                    const refMimeType = refMimeMatch ? refMimeMatch[1] : "image/webp";
-                                    const cleanRefBase64 = referenceImageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-                                    
-                                    parts.push({
-                                        inlineData: { mimeType: refMimeType, data: cleanRefBase64 }
-                                    });
+                                // 2. Aggiungiamo la foto riferimento (Immagine 2) SOLO SE ESISTE
+                                if (referenceImageBase64 && typeof referenceImageBase64 === 'string') {
+                                    try {
+                                        const refMimeMatch = referenceImageBase64.match(/^data:(image\/[a-z]+);base64,/);
+                                        const refMimeType = refMimeMatch ? refMimeMatch[1] : "image/jpeg"; // Default a jpeg se non trova il tipo
+                                        const cleanRefBase64 = referenceImageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+                                        
+                                        parts.push({
+                                            inlineData: { mimeType: refMimeType, data: cleanRefBase64 }
+                                        });
+                                    } catch (e) {
+                                        console.error("Errore nel processare l'immagine di riferimento:", e);
+                                    }
                                 }
                 
-                                // 3. Il prompt va IN FONDO, dopo le immagini!
+                                // 3. Il prompt va IN FONDO
                                 parts.push({ text: prompt });
                 
-                                const payload = {
-                                    contents: [{ role: "user", parts: parts }]
-                                };
-
                                 const payload = {
                                     contents: [{ role: "user", parts: parts }]
                                 };
