@@ -1,19 +1,8 @@
 const { GoogleAuth } = require('google-auth-library');
+// --- INIZIO: AGGIUNTE PER FIRESTORE ADMIN SDK ---
 const admin = require('firebase-admin');
-
-// --- INIZIALIZZAZIONE FIREBASE ADMIN GLOBALE ---
-let firebaseAdminApp;
-if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY && !firebaseAdminApp) {
-    try {
-        const decodedCredentialsString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8');
-        const adminCredentials = JSON.parse(decodedCredentialsString);
-        firebaseAdminApp = admin.initializeApp({
-            credential: admin.credential.cert(adminCredentials)
-        }, 'globalCounterApp');
-    } catch (e) {
-        console.error("Errore avvio Firebase Admin:", e);
-    }
-}
+let firebaseAdminApp; // Dichiarazione per l'istanza dell'app Firebase Admin
+// --- FINE: AGGIUNTE PER FIRESTORE ADMIN SDK ---
 
 module.exports = async (req, res) => {
     // 1. CORS DINAMICO
@@ -28,7 +17,7 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === 'GET') {
-        return res.status(200).json({ message: "BINGO! Motore acceso (Versione GEMINI 2.0 FLASH IMAGE GENERATOR)!" });
+        return res.status(200).json({ message: "BINGO! Motore acceso (Versione GEMINI 2.5 FLASH IMAGE)!" });
     }
 
     if (req.method !== 'POST') {
@@ -43,28 +32,39 @@ module.exports = async (req, res) => {
         }
 
         if (!process.env.GOOGLE_CREDENTIALS) {
-            return res.status(500).json({ error: 'Chiave Google Cloud mancante.' });
-        }
+                    return res.status(500).json({ error: 'Chiave Google Cloud mancante.' });
+                }
+                // --- INIZIO: CONTROLLO CREDENZIALI FIRESTORE ADMIN (usando il tuo nome) ---
+                        if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+                            console.error("FIREBASE_SERVICE_ACCOUNT_KEY non configurata. Il contatore globale non funzionerà.");
+                            // Non blocchiamo la richiesta, ma logghiamo l'errore.
+                        }
+                        // --- FINE: CONTROLLO CREDENZIALI FIRESTORE ADMIN ---
+                // --- FINE: CONTROLLO CREDENZIALI FIRESTORE ADMIN ---
 
-        const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-        const auth = new GoogleAuth({
-            credentials,
-            scopes:['https://www.googleapis.com/auth/cloud-platform']
-        });
+                const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 
-        const client = await auth.getClient();
-        const accessToken = (await client.getAccessToken()).token;
+                const auth = new GoogleAuth({
+                    credentials,
+                    scopes:['https://www.googleapis.com/auth/cloud-platform']
+                });
+
+                const client = await auth.getClient();
+                const accessToken = (await client.getAccessToken()).token;
 
         const projectId = credentials.project_id;
-                const location = 'global'; 
-                const modelId = 'gemini-2.5-pro'; 
+        const location = 'us-central1'; 
         
-                const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
-        
-                const mimeMatch = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
+        // IL NUOVO MOTORE UNIFICATO DI GOOGLE
+        const modelId = 'gemini-2.5-flash-image'; 
+
+        // Il nuovo URL per Gemini usa "generateContent" invece di "predict"
+        const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
+
+        const mimeMatch = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
                 const detectedMimeType = mimeMatch ? mimeMatch[1] : "image/webp";
                 const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-        
+
                 const payload = {
                     contents:[
                         {
@@ -81,10 +81,7 @@ module.exports = async (req, res) => {
                                 }
                             ]
                         }
-                    ],
-                    generationConfig: {
-                        responseModalities: ["TEXT", "IMAGE"]
-                    }
+                    ]
                 };
 
         const response = await fetch(url, {
@@ -103,8 +100,9 @@ module.exports = async (req, res) => {
             return res.status(response.status).json({ error: 'Errore Vertex', details: data });
         }
 
+        // Gemini restituisce un array di "parts", noi cerchiamo quello che contiene l'immagine
         let returnedImageBase64 = null;
-
+        
         if (data.candidates && data.candidates.length > 0) {
             const parts = data.candidates[0].content.parts;
             for (let part of parts) {
@@ -116,40 +114,63 @@ module.exports = async (req, res) => {
         }
 
         if (returnedImageBase64) {
-            // --- INIZIO: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN ---
-            if (firebaseAdminApp) {
-                try {
-                    const db = admin.firestore(firebaseAdminApp);
-                    const globalStatsRef = db.collection('civora_analytics').doc('ai_gen');
+                    // --- INIZIO: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN (con i tuoi nomi personalizzati) ---
+                    // --- INIZIO: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN (con i tuoi nomi personalizzati e la tua variabile d'ambiente) ---
+                                if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) { // Ora usa il tuo nome di variabile
+                                    try {
+                                        // Inizializza Firebase Admin SDK solo una volta per istanza della funzione
+                                        if (!firebaseAdminApp) {
+                                                                // Decodifica Base64 prima di fare il JSON.parse
+                                                                const decodedCredentialsString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8');
+                                                                const adminCredentials = JSON.parse(decodedCredentialsString);
+                                                                firebaseAdminApp = admin.initializeApp({
+                                                                    credential: admin.credential.cert(adminCredentials)
+                                                                }, 'globalCounterApp'); // Nome unico per l'app Admin
+                                                            }
+                                        const db = admin.firestore(firebaseAdminApp); // Usa l'istanza corretta del db
 
-                    await globalStatsRef.update({
-                        total_generated_images_ai: admin.firestore.FieldValue.increment(1)
-                    });
-                } catch (error) {
-                    if (error.code === 5 || (error.details && error.details.includes('not found'))) {
-                        try {
-                            const db = admin.firestore(firebaseAdminApp);
-                            await db.collection('civora_analytics').doc('ai_gen').set({
-                                total_generated_images_ai: 1
-                            });
-                        } catch (setError) {
-                            console.error("Errore nel creare/inizializzare contatore globale:", setError);
-                        }
-                    } else {
-                        console.error("Errore nell'incrementare il contatore globale AI:", error);
-                    }
+                                        const globalStatsRef = db.collection('civora_analytics').doc('ai_gen'); // La tua Collezione e Documento
+
+                                        // Tentiamo di aggiornare il documento
+                                        await globalStatsRef.update({
+                                            total_generated_images_ai: admin.firestore.FieldValue.increment(1) // Il tuo Campo
+                                        });
+
+                                    } catch (error) {
+                                        // Se il documento non esiste (codice 5 per "NotFound"), crealo
+                                        if (error.code === 5 || (error.details && error.details.includes('not found'))) {
+                                            try {
+                                                                        // Decodifica Base64 prima di fare il JSON.parse
+                                                                        const decodedCredentialsString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8');
+                                                                        const adminCredentials = JSON.parse(decodedCredentialsString); 
+                                                                        if (!firebaseAdminApp) { // Doppio controllo per evitare reinizializzazioni
+                                                                            firebaseAdminApp = admin.initializeApp({
+                                                                                credential: admin.credential.cert(adminCredentials)
+                                                                            }, 'globalCounterApp');
+                                                                        }
+                                                const db = admin.firestore(firebaseAdminApp);
+                                                await db.collection('civora_analytics').doc('ai_gen').set({ // Crea con i tuoi nomi
+                                                    total_generated_images_ai: 1 // Inizializza il tuo Campo
+                                                });
+                                            } catch (setError) {
+                                                console.error("Errore nel creare/inizializzare contatore globale:", setError);
+                                            }
+                                        } else {
+                                            console.error("Errore nell'incrementare il contatore globale AI:", error);
+                                        }
+                                    }
+                                }
+                                // --- FINE: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN ---
+                    // --- FINE: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN ---
+
+                    return res.status(200).json({ imageBase64: `data:image/webp;base64,${returnedImageBase64}` });
+                } else {
+                    console.error("Risposta anomala da Gemini:", JSON.stringify(data, null, 2));
+                    return res.status(500).json({ error: 'Nessuna immagine restituita da Google.' });
                 }
+
+            } catch (error) {
+                console.error('Errore Try-Catch:', error);
+                return res.status(500).json({ error: 'Errore interno', details: error.message });
             }
-            // --- FINE: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN ---
-
-            return res.status(200).json({ imageBase64: `data:image/jpeg;base64,${returnedImageBase64}` });
-        } else {
-            console.error("Risposta anomala da Gemini:", JSON.stringify(data, null, 2));
-            return res.status(500).json({ error: 'Nessuna immagine restituita. Assicurati che il comando generi un disegno.' });
-        }
-
-    } catch (error) {
-        console.error('Errore Try-Catch:', error);
-        return res.status(500).json({ error: 'Errore interno', details: error.message });
-    }
-};
+        };
