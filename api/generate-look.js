@@ -53,18 +53,16 @@ module.exports = async (req, res) => {
                 const accessToken = (await client.getAccessToken()).token;
 
         const projectId = credentials.project_id;
-        const location = 'us-central1'; 
+                const location = 'global'; 
+                const modelId = 'gemini-2.5-flash-image'; 
         
-        // IL NUOVO MOTORE UNIFICATO DI GOOGLE
-        const modelId = 'gemini-2.5-flash-image'; 
-
-        // Il nuovo URL per Gemini usa "generateContent" invece di "predict"
-        const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
-
-        const mimeMatch = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
+                // ATTENZIONE: per il server "global" l'URL inizia diversamente!
+                const url = `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
+        
+                const mimeMatch = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
                 const detectedMimeType = mimeMatch ? mimeMatch[1] : "image/webp";
                 const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-
+        
                 const payload = {
                     contents:[
                         {
@@ -81,7 +79,10 @@ module.exports = async (req, res) => {
                                 }
                             ]
                         }
-                    ]
+                    ],
+                    generationConfig: {
+                        responseModalities: ["TEXT", "IMAGE"]
+                    }
                 };
 
         const response = await fetch(url, {
