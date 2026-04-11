@@ -56,11 +56,11 @@ module.exports = async (req, res) => {
         const location = 'us-central1'; 
         
         // IL VERO MOTORE PER MODIFICARE IMMAGINI SU VERTEX AI
-        const modelId = 'imagegeneration@006'; 
+        const modelId = 'gemini-3.0-flash';
 
         // Usa "predict" per i modelli grafici Imagen, non "generateContent"
-        const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:predict`;
-
+        const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
+        
         // Pulizia dell'intestazione base64 dall'immagine in ingresso
         const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
 
