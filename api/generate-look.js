@@ -47,7 +47,7 @@ module.exports = async (req, res) => {
 
         const projectId = credentials.project_id;
         const location = 'global'; // Location for Gemini Flash
-        const modelIdImage = 'gemini-3.1-flash-image-preview';
+        const modelIdImage = 'gemini-3.1-flash-image-preview'; // Il tuo modello esistente per le immagini
 
         // --- INIZIO: GENERAZIONE IMMAGINE (IL TUO CODICE ESISTENTE) ---
         const urlImage = `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelIdImage}:generateContent`;
