@@ -54,9 +54,9 @@ module.exports = async (req, res) => {
 
         const projectId = credentials.project_id;
                 const location = 'global'; 
-                const modelId = 'gemini-2.5-flash-image'; 
+                const modelId = 'gemini-3.1-flash-image-preview'; 
         
-                // ATTENZIONE: per il server "global" l'URL inizia diversamente!
+                // ATTENZIONE: per il server "global" l'URL ha un formato diverso!
                 const url = `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
         
                 const mimeMatch = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
@@ -81,7 +81,7 @@ module.exports = async (req, res) => {
                         }
                     ],
                     generationConfig: {
-                        responseModalities: ["TEXT", "IMAGE"]
+                        responseModalities: ["TEXT", "IMAGE"] // Richiediamo sia testo che immagine, come fa la UI di Google.
                     }
                 };
 
