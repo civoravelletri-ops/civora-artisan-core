@@ -57,10 +57,10 @@ module.exports = async (req, res) => {
 
         const projectId = credentials.project_id;
         const location = 'us-central1'; 
-        const modelId = 'gemini-2.0-flash-exp'; 
+        const modelId = 'gemini-3.1-flash-image-preview'; 
 
-        const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
-
+const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
+        
         const mimeMatch = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
         const detectedMimeType = mimeMatch ? mimeMatch[1] : "image/webp";
         const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
