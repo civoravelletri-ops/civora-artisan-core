@@ -56,7 +56,7 @@ console.log("Dati ricevuti da Vercel - Immagine cliente presente:", !!imageBase6
         const location = 'us-central1'; 
         
         // IL NUOVO MOTORE UNIFICATO DI GOOGLE
-        const modelId = 'gemini-3.1-flash-image-preview'; 
+        const modelId = 'gemini-3.1-pro-preview'; 
 
         // Il nuovo URL per Gemini usa "generateContent" invece di "predict"
         const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
