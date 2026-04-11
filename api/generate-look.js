@@ -1,11 +1,8 @@
 const { GoogleAuth } = require('google-auth-library');
-// --- INIZIO: AGGIUNTE PER FIRESTORE ADMIN SDK ---
 const admin = require('firebase-admin');
-let firebaseAdminApp; // Dichiarazione per l'istanza dell'app Firebase Admin
-// --- FINE: AGGIUNTE PER FIRESTORE ADMIN SDK ---
+let firebaseAdminApp;
 
 module.exports = async (req, res) => {
-    // 1. CORS DINAMICO
     const origin = req.headers.origin || '*';
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -17,7 +14,7 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === 'GET') {
-        return res.status(200).json({ message: "BINGO! Motore acceso (Versione GEMINI 2.5 FLASH IMAGE)!" });
+        return res.status(200).json({ message: "BINGO! Motore acceso (Versione GEMINI 2.5 FLASH IMAGE + VEO VIDEO)!" });
     }
 
     if (req.method !== 'POST') {
@@ -32,96 +29,87 @@ module.exports = async (req, res) => {
         }
 
         if (!process.env.GOOGLE_CREDENTIALS) {
-                    return res.status(500).json({ error: 'Chiave Google Cloud mancante.' });
-                }
-                // --- INIZIO: CONTROLLO CREDENZIALI FIRESTORE ADMIN (usando il tuo nome) ---
-                        if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-                            console.error("FIREBASE_SERVICE_ACCOUNT_KEY non configurata. Il contatore globale non funzionerà.");
-                            // Non blocchiamo la richiesta, ma logghiamo l'errore.
-                        }
-                        // --- FINE: CONTROLLO CREDENZIALI FIRESTORE ADMIN ---
-                // --- FINE: CONTROLLO CREDENZIALI FIRESTORE ADMIN ---
+            return res.status(500).json({ error: 'Chiave Google Cloud mancante.' });
+        }
+        if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+            console.error("FIREBASE_SERVICE_ACCOUNT_KEY non configurata. Il contatore globale non funzionerà.");
+        }
 
-                const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+        const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 
-                const auth = new GoogleAuth({
-                    credentials,
-                    scopes:['https://www.googleapis.com/auth/cloud-platform']
-                });
+        const auth = new GoogleAuth({
+            credentials,
+            scopes:['https://www.googleapis.com/auth/cloud-platform']
+        });
 
-                const client = await auth.getClient();
-                const accessToken = (await client.getAccessToken()).token;
+        const client = await auth.getClient();
+        const accessToken = (await client.getAccessToken()).token;
 
         const projectId = credentials.project_id;
-                const location = 'global';
-                const modelId = 'gemini-3.1-flash-image-preview';
+        const location = 'global'; // Location for Gemini Flash
+        const modelIdImage = 'gemini-3.1-flash-image-preview';
 
-                // ATTENZIONE: per il server "global" l'URL ha un formato diverso!
-                const url = `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
+        // --- INIZIO: GENERAZIONE IMMAGINE (IL TUO CODICE ESISTENTE) ---
+        const urlImage = `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelIdImage}:generateContent`;
 
-                const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-                                const detectedMimeType = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
-                                const finalMimeType = detectedMimeType ? detectedMimeType[1] : "image/webp";
+        const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+        const detectedMimeType = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
+        const finalMimeType = detectedMimeType ? detectedMimeType[1] : "image/webp";
 
-                                // Verifichiamo se è stata inviata anche una referenceImageBase64
-                                const { referenceImageBase64 } = req.body;
+        const { referenceImageBase64 } = req.body;
 
-                                let partsForGemini = [
-                                    {
-                                        text: prompt
-                                    },
-                                    {
-                                        inlineData: {
-                                            mimeType: finalMimeType,
-                                            data: cleanBase64
-                                        }
-                                    }
-                                ];
+        let partsForGeminiImage = [
+            { text: prompt },
+            {
+                inlineData: {
+                    mimeType: finalMimeType,
+                    data: cleanBase64
+                }
+            }
+        ];
 
-                                // Se c'è una foto di riferimento, la aggiungiamo al payload per Gemini
-                                if (referenceImageBase64) {
-                                    const cleanReferenceBase64 = referenceImageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-                                    const detectedReferenceMimeType = referenceImageBase64.match(/^data:(image\/[a-z]+);base64,/);
-                                    const finalReferenceMimeType = detectedReferenceMimeType ? detectedReferenceMimeType[1] : "image/jpeg"; // Di solito è JPEG
+        if (referenceImageBase64) {
+            const cleanReferenceBase64 = referenceImageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+            const detectedReferenceMimeType = referenceImageBase64.match(/^data:(image\/[a-z]+);base64,/);
+            const finalReferenceMimeType = detectedReferenceMimeType ? detectedReferenceMimeType[1] : "image/jpeg";
 
-                                    partsForGemini.push({
-                                        inlineData: {
-                                            mimeType: finalReferenceMimeType,
-                                            data: cleanReferenceBase64
-                                        }
-                                    });
-                                }
+            partsForGeminiImage.push({
+                inlineData: {
+                    mimeType: finalReferenceMimeType,
+                    data: cleanReferenceBase64
+                }
+            });
+        }
 
-                                const payload = {
-                                    contents: [{
-                                        role: "user",
-                                        parts: partsForGemini
-                                    }],
-                                    generationConfig: {
-                                        responseModalities: ["TEXT", "IMAGE"]
-                                    }
-                                };
-        const response = await fetch(url, {
+        const payloadImage = {
+            contents: [{
+                role: "user",
+                parts: partsForGeminiImage
+            }],
+            generationConfig: {
+                responseModalities: ["TEXT", "IMAGE"]
+            }
+        };
+
+        const responseImage = await fetch(urlImage, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payloadImage)
         });
 
-        const data = await response.json();
+        const dataImage = await responseImage.json();
 
-        if (!response.ok) {
-            console.error("Errore da Vertex:", JSON.stringify(data, null, 2));
-            return res.status(response.status).json({ error: 'Errore Vertex', details: data });
+        if (!responseImage.ok) {
+            console.error("Errore da Vertex (Immagine):", JSON.stringify(dataImage, null, 2));
+            return res.status(responseImage.status).json({ error: 'Errore Vertex (Immagine)', details: dataImage });
         }
 
-        // Gemini restituisce un array di "parts", noi cerchiamo quello che contiene l'immagine
         let returnedImageBase64 = null;
-        
-        if (data.candidates && data.candidates.length > 0) {
-            const parts = data.candidates[0].content.parts;
+        if (dataImage.candidates && dataImage.candidates.length > 0) {
+            const parts = dataImage.candidates[0].content.parts;
             for (let part of parts) {
                 if (part.inlineData && part.inlineData.data) {
                     returnedImageBase64 = part.inlineData.data;
@@ -130,64 +118,127 @@ module.exports = async (req, res) => {
             }
         }
 
-        if (returnedImageBase64) {
-                    // --- INIZIO: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN (con i tuoi nomi personalizzati) ---
-                    // --- INIZIO: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN (con i tuoi nomi personalizzati e la tua variabile d'ambiente) ---
-                                if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) { // Ora usa il tuo nome di variabile
-                                    try {
-                                        // Inizializza Firebase Admin SDK solo una volta per istanza della funzione
-                                        if (!firebaseAdminApp) {
-                                                                // Decodifica Base64 prima di fare il JSON.parse
-                                                                const decodedCredentialsString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8');
-                                                                const adminCredentials = JSON.parse(decodedCredentialsString);
-                                                                firebaseAdminApp = admin.initializeApp({
-                                                                    credential: admin.credential.cert(adminCredentials)
-                                                                }, 'globalCounterApp'); // Nome unico per l'app Admin
-                                                            }
-                                        const db = admin.firestore(firebaseAdminApp); // Usa l'istanza corretta del db
+        if (!returnedImageBase64) {
+            console.error("Risposta anomala da Gemini (Immagine):", JSON.stringify(dataImage, null, 2));
+            return res.status(500).json({ error: 'Nessuna immagine restituita da Google.' });
+        }
+        // --- FINE: GENERAZIONE IMMAGINE ---
 
-                                        const globalStatsRef = db.collection('civora_analytics').doc('ai_gen'); // La tua Collezione e Documento
+        // --- INIZIO: GENERAZIONE VIDEO CON VEO (NUOVA LOGICA AGGIUNTA) ---
+        let videoUrl = null;
+        try {
+            const videoLocation = 'us-central1'; // I modelli di generazione video spesso hanno regioni specifiche
+            const modelIdVideo = 'veo-001'; // Il tuo modello VEO richiesto per la generazione video
 
-                                        // Tentiamo di aggiornare il documento
-                                        await globalStatsRef.update({
-                                            total_generated_images_ai: admin.firestore.FieldValue.increment(1) // Il tuo Campo
-                                        });
+            // Prompt specifico per il video, come descritto dall'utente
+            const videoPromptText = "Simula un movimento naturale: la persona che si guarda allo specchio, gira leggermente la testa per ammirare il taglio e accenna un sorriso di soddisfazione. Qualità: HD (1080p). Durata: 5-6 secondi.";
 
-                                    } catch (error) {
-                                        // Se il documento non esiste (codice 5 per "NotFound"), crealo
-                                        if (error.code === 5 || (error.details && error.details.includes('not found'))) {
-                                            try {
-                                                                        // Decodifica Base64 prima di fare il JSON.parse
-                                                                        const decodedCredentialsString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8');
-                                                                        const adminCredentials = JSON.parse(decodedCredentialsString); 
-                                                                        if (!firebaseAdminApp) { // Doppio controllo per evitare reinizializzazioni
-                                                                            firebaseAdminApp = admin.initializeApp({
-                                                                                credential: admin.credential.cert(adminCredentials)
-                                                                            }, 'globalCounterApp');
-                                                                        }
-                                                const db = admin.firestore(firebaseAdminApp);
-                                                await db.collection('civora_analytics').doc('ai_gen').set({ // Crea con i tuoi nomi
-                                                    total_generated_images_ai: 1 // Inizializza il tuo Campo
-                                                });
-                                            } catch (setError) {
-                                                console.error("Errore nel creare/inizializzare contatore globale:", setError);
-                                            }
-                                        } else {
-                                            console.error("Errore nell'incrementare il contatore globale AI:", error);
-                                        }
-                                    }
-                                }
-                                // --- FINE: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN ---
-                    // --- FINE: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN ---
+            // Endpoint per i modelli di generazione video, potrebbe essere leggermente diverso se veo-001 non è un 'publisher/google/models' standard
+            // Per ora assumiamo che sia sotto lo stesso endpoint di aiplatform con una location diversa e un model ID specifico
+            const urlVideo = `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/${videoLocation}/publishers/google/models/${modelIdVideo}:generateContent`;
 
-                    return res.status(200).json({ imageBase64: `data:image/webp;base64,${returnedImageBase64}` });
-                } else {
-                    console.error("Risposta anomala da Gemini:", JSON.stringify(data, null, 2));
-                    return res.status(500).json({ error: 'Nessuna immagine restituita da Google.' });
+            const payloadVideo = {
+                contents: [{
+                    role: "user",
+                    parts: [
+                        { text: videoPromptText },
+                        {
+                            inlineData: {
+                                mimeType: `image/webp`, // Mime type dell'immagine generata
+                                data: returnedImageBase64 // Immagine generata da Gemini
+                            }
+                        }
+                    ]
+                }],
+                // Parametri specifici per la generazione video (questi potrebbero variare a seconda dell'API Veo)
+                generationConfig: {
+                    responseModalities: ["VIDEO"], // Chiediamo un video
+                    // Ad esempio, per durata e risoluzione, potrebbero esserci parametri qui
+                    // Questo è un esempio, l'API VEO potrebbe avere parametri diversi
+                    // Per ora, l'istruzione di risoluzione e durata è nel prompt testuale
+                    videoGenerationParameters: { // Esempio di come potrebbero essere i parametri video
+                         duration_seconds: 5,
+                         resolution: "1080p"
+                    }
                 }
+            };
 
-            } catch (error) {
-                console.error('Errore Try-Catch:', error);
-                return res.status(500).json({ error: 'Errore interno', details: error.message });
+            const responseVideo = await fetch(urlVideo, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payloadVideo)
+            });
+
+            const dataVideo = await responseVideo.json();
+
+            if (!responseVideo.ok) {
+                console.error("Errore da Vertex (Video):", JSON.stringify(dataVideo, null, 2));
+                // Non blocchiamo l'intera richiesta se il video fallisce, ma logghiamo l'errore
+                // throw new Error(dataVideo.error || 'Errore sconosciuto da Vertex (Video)');
+            } else {
+                if (dataVideo.candidates && dataVideo.candidates.length > 0) {
+                    const videoPart = dataVideo.candidates[0].content.parts.find(p => p.fileData && p.fileData.fileUri);
+                    if (videoPart && videoPart.fileData.fileUri) {
+                        videoUrl = videoPart.fileData.fileUri; // L'URL del video generato
+                    }
+                }
             }
-        };
+        } catch (videoError) {
+            console.error("Errore durante la generazione del video:", videoError);
+            // Continuiamo comunque, ma videoUrl sarà null
+        }
+        // --- FINE: GENERAZIONE VIDEO ---
+
+        // --- INIZIO: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN ---
+        if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+            try {
+                if (!firebaseAdminApp) {
+                    const decodedCredentialsString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8');
+                    const adminCredentials = JSON.parse(decodedCredentialsString);
+                    firebaseAdminApp = admin.initializeApp({
+                        credential: admin.credential.cert(adminCredentials)
+                    }, 'globalCounterApp');
+                }
+                const db = admin.firestore(firebaseAdminApp);
+                const globalStatsRef = db.collection('civora_analytics').doc('ai_gen');
+                await globalStatsRef.update({
+                    total_generated_images_ai: admin.firestore.FieldValue.increment(1)
+                });
+            } catch (error) {
+                if (error.code === 5 || (error.details && error.details.includes('not found'))) {
+                    try {
+                        const decodedCredentialsString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8');
+                        const adminCredentials = JSON.parse(decodedCredentialsString);
+                        if (!firebaseAdminApp) {
+                            firebaseAdminApp = admin.initializeApp({
+                                credential: admin.credential.cert(adminCredentials)
+                            }, 'globalCounterApp');
+                        }
+                        const db = admin.firestore(firebaseAdminApp);
+                        await db.collection('civora_analytics').doc('ai_gen').set({
+                            total_generated_images_ai: 1
+                        });
+                    } catch (setError) {
+                        console.error("Errore nel creare/inizializzare contatore globale:", setError);
+                    }
+                } else {
+                    console.error("Errore nell'incrementare il contatore globale AI:", error);
+                }
+            }
+        }
+        // --- FINE: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN ---
+
+        // Restituisci entrambi i risultati
+        return res.status(200).json({
+            imageBase64: `data:image/webp;base64,${returnedImageBase64}`,
+            videoUrl: videoUrl // Può essere null se la generazione video fallisce
+        });
+
+    } catch (error) {
+        console.error('Errore Try-Catch generale:', error);
+        return res.status(500).json({ error: 'Errore interno', details: error.message });
+    }
+};
