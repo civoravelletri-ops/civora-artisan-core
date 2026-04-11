@@ -56,7 +56,7 @@ console.log("Dati ricevuti da Vercel - Immagine cliente presente:", !!imageBase6
         const location = 'us-central1'; 
         
         // IL NUOVO MOTORE UNIFICATO DI GOOGLE
-        const modelId = 'gemini-2.5-flash-image'; 
+        const modelId = 'gemini-3-flash';
 
         // Il nuovo URL per Gemini usa "generateContent" invece di "predict"
         const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
@@ -67,7 +67,7 @@ console.log("Dati ricevuti da Vercel - Immagine cliente presente:", !!imageBase6
 
                 // Prepariamo il vassoio per l'AI
                                 const parts = [];
-                
+
                                 // 1. Aggiungiamo la foto cliente (Immagine 1)
                                 parts.push({
                                     text: "Immagine 1 (Cliente):"
@@ -75,13 +75,13 @@ console.log("Dati ricevuti da Vercel - Immagine cliente presente:", !!imageBase6
                                 parts.push({
                                     inlineData: { mimeType: detectedMimeType, data: cleanBase64 }
                                 });
-                
+
                                 // 2. Aggiungiamo la foto riferimento (Immagine 2)
                                 if (referenceImageBase64) {
                                     const refMimeMatch = referenceImageBase64.match(/^data:(image\/[a-z]+);base64,/);
                                     const refMimeType = refMimeMatch ? refMimeMatch[1] : "image/jpeg";
                                     const cleanRefBase64 = referenceImageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-                                    
+
                                     parts.push({
                                         text: "Immagine 2 (Modello di riferimento):"
                                     });
@@ -89,12 +89,12 @@ console.log("Dati ricevuti da Vercel - Immagine cliente presente:", !!imageBase6
                                         inlineData: { mimeType: refMimeType, data: cleanRefBase64 }
                                     });
                                 }
-                
+
                                 // 3. Istruzione finale che collega Immagine 1 e Immagine 2
-                                parts.push({ 
-                                    text: prompt + " Usa l'Immagine 2 per modificare l'Immagine 1." 
+                                parts.push({
+                                    text: prompt + " Usa l'Immagine 2 per modificare l'Immagine 1."
                                 });
-                
+
                                 const payload = {
                                     contents: [{ role: "user", parts: parts }]
                                 };
