@@ -70,26 +70,30 @@ console.log("Dati ricevuti da Vercel - Immagine cliente presente:", !!imageBase6
                 
                                 // 1. Aggiungiamo la foto cliente (Immagine 1)
                                 parts.push({
+                                    text: "Immagine 1 (Cliente):"
+                                });
+                                parts.push({
                                     inlineData: { mimeType: detectedMimeType, data: cleanBase64 }
                                 });
                 
-                                // 2. Aggiungiamo la foto riferimento (Immagine 2) SOLO SE ESISTE
-                                if (referenceImageBase64 && typeof referenceImageBase64 === 'string') {
-                                    try {
-                                        const refMimeMatch = referenceImageBase64.match(/^data:(image\/[a-z]+);base64,/);
-                                        const refMimeType = refMimeMatch ? refMimeMatch[1] : "image/jpeg"; // Default a jpeg se non trova il tipo
-                                        const cleanRefBase64 = referenceImageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-                                        
-                                        parts.push({
-                                            inlineData: { mimeType: refMimeType, data: cleanRefBase64 }
-                                        });
-                                    } catch (e) {
-                                        console.error("Errore nel processare l'immagine di riferimento:", e);
-                                    }
+                                // 2. Aggiungiamo la foto riferimento (Immagine 2)
+                                if (referenceImageBase64) {
+                                    const refMimeMatch = referenceImageBase64.match(/^data:(image\/[a-z]+);base64,/);
+                                    const refMimeType = refMimeMatch ? refMimeMatch[1] : "image/jpeg";
+                                    const cleanRefBase64 = referenceImageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+                                    
+                                    parts.push({
+                                        text: "Immagine 2 (Modello di riferimento):"
+                                    });
+                                    parts.push({
+                                        inlineData: { mimeType: refMimeType, data: cleanRefBase64 }
+                                    });
                                 }
                 
-                                // 3. Il prompt va IN FONDO
-                                parts.push({ text: prompt });
+                                // 3. Istruzione finale che collega Immagine 1 e Immagine 2
+                                parts.push({ 
+                                    text: prompt + " Usa l'Immagine 2 per modificare l'Immagine 1." 
+                                });
                 
                                 const payload = {
                                     contents: [{ role: "user", parts: parts }]
