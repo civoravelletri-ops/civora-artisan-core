@@ -53,38 +53,54 @@ module.exports = async (req, res) => {
                 const accessToken = (await client.getAccessToken()).token;
 
         const projectId = credentials.project_id;
-                const location = 'global'; 
-                const modelId = 'gemini-3.1-flash-image-preview'; 
-        
+                const location = 'global';
+                const modelId = 'gemini-3.1-flash-image-preview';
+
                 // ATTENZIONE: per il server "global" l'URL ha un formato diverso!
                 const url = `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
-        
-                const mimeMatch = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
-                const detectedMimeType = mimeMatch ? mimeMatch[1] : "image/webp";
-                const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-        
-                const payload = {
-                    contents:[
-                        {
-                            role: "user",
-                            parts:[
-                                {
-                                    text: prompt
-                                },
-                                {
-                                    inlineData: {
-                                        mimeType: detectedMimeType,
-                                        data: cleanBase64
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    generationConfig: {
-                        responseModalities: ["TEXT", "IMAGE"] // Richiediamo sia testo che immagine, come fa la UI di Google.
-                    }
-                };
 
+                const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+                                const detectedMimeType = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
+                                const finalMimeType = detectedMimeType ? detectedMimeType[1] : "image/webp";
+
+                                // Verifichiamo se è stata inviata anche una referenceImageBase64
+                                const { referenceImageBase64 } = req.body;
+
+                                let partsForGemini = [
+                                    {
+                                        text: prompt
+                                    },
+                                    {
+                                        inlineData: {
+                                            mimeType: finalMimeType,
+                                            data: cleanBase64
+                                        }
+                                    }
+                                ];
+
+                                // Se c'è una foto di riferimento, la aggiungiamo al payload per Gemini
+                                if (referenceImageBase64) {
+                                    const cleanReferenceBase64 = referenceImageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+                                    const detectedReferenceMimeType = referenceImageBase64.match(/^data:(image\/[a-z]+);base64,/);
+                                    const finalReferenceMimeType = detectedReferenceMimeType ? detectedReferenceMimeType[1] : "image/jpeg"; // Di solito è JPEG
+
+                                    partsForGemini.push({
+                                        inlineData: {
+                                            mimeType: finalReferenceMimeType,
+                                            data: cleanReferenceBase64
+                                        }
+                                    });
+                                }
+
+                                const payload = {
+                                    contents: [{
+                                        role: "user",
+                                        parts: partsForGemini
+                                    }],
+                                    generationConfig: {
+                                        responseModalities: ["TEXT", "IMAGE"]
+                                    }
+                                };
         const response = await fetch(url, {
             method: 'POST',
             headers: {
