@@ -56,45 +56,33 @@ console.log("Dati ricevuti da Vercel - Immagine cliente presente:", !!imageBase6
         const location = 'us-central1'; 
         
         // IL NUOVO MOTORE UNIFICATO DI GOOGLE
-
         const modelId = 'gemini-2.5-flash-image'; 
 
-
-
         // Il nuovo URL per Gemini usa "generateContent" invece di "predict"
-
         const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
-
 
         const mimeMatch = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
                 const detectedMimeType = mimeMatch ? mimeMatch[1] : "image/webp";
                 const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
 
-                // Prepariamo il vassoio per l'AI
-                                const parts = [];
-                
-                                // 1. Aggiungiamo la foto cliente
+                // Prepariamo la lista dei pezzi (parts) per l'AI
+                                let parts = [{ text: prompt }];
+
+                                // Aggiungiamo la foto cliente (Immagine 1)
                                 parts.push({
                                     inlineData: { mimeType: detectedMimeType, data: cleanBase64 }
                                 });
-                
-                                // 2. Aggiungiamo la foto riferimento
+
+                                // Se c'è la foto riferimento (Immagine 2), aggiungiamola!
                                 if (referenceImageBase64) {
                                     const refMimeMatch = referenceImageBase64.match(/^data:(image\/[a-z]+);base64,/);
                                     const refMimeType = refMimeMatch ? refMimeMatch[1] : "image/webp";
                                     const cleanRefBase64 = referenceImageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-                                    
+
                                     parts.push({
                                         inlineData: { mimeType: refMimeType, data: cleanRefBase64 }
                                     });
                                 }
-                
-                                // 3. Il prompt va IN FONDO, dopo le immagini!
-                                parts.push({ text: prompt });
-                
-                                const payload = {
-                                    contents: [{ role: "user", parts: parts }]
-                                };
 
                                 const payload = {
                                     contents: [{ role: "user", parts: parts }]
