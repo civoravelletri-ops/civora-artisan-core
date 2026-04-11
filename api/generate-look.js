@@ -65,24 +65,31 @@ console.log("Dati ricevuti da Vercel - Immagine cliente presente:", !!imageBase6
                 const detectedMimeType = mimeMatch ? mimeMatch[1] : "image/webp";
                 const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
 
-                // Prepariamo la lista dei pezzi (parts) per l'AI
-                                let parts = [{ text: prompt }];
-
-                                // Aggiungiamo la foto cliente (Immagine 1)
+                // Prepariamo il vassoio per l'AI
+                                const parts = [];
+                
+                                // 1. Aggiungiamo la foto cliente
                                 parts.push({
                                     inlineData: { mimeType: detectedMimeType, data: cleanBase64 }
                                 });
-
-                                // Se c'è la foto riferimento (Immagine 2), aggiungiamola!
+                
+                                // 2. Aggiungiamo la foto riferimento
                                 if (referenceImageBase64) {
                                     const refMimeMatch = referenceImageBase64.match(/^data:(image\/[a-z]+);base64,/);
                                     const refMimeType = refMimeMatch ? refMimeMatch[1] : "image/webp";
                                     const cleanRefBase64 = referenceImageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-
+                                    
                                     parts.push({
                                         inlineData: { mimeType: refMimeType, data: cleanRefBase64 }
                                     });
                                 }
+                
+                                // 3. Il prompt va IN FONDO, dopo le immagini!
+                                parts.push({ text: prompt });
+                
+                                const payload = {
+                                    contents: [{ role: "user", parts: parts }]
+                                };
 
                                 const payload = {
                                     contents: [{ role: "user", parts: parts }]
