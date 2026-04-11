@@ -57,7 +57,7 @@ module.exports = async (req, res) => {
 
         const projectId = credentials.project_id;
                 const location = 'global'; 
-                const modelId = 'gemini-3.1-flash-image-preview'; 
+                const modelId = 'gemini-2.5-pro'; 
         
                 const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
         
