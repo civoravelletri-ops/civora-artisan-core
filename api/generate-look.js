@@ -26,7 +26,7 @@ module.exports = async (req, res) => {
 
     try {
        const { imageBase64, referenceImageBase64, prompt } = req.body;
-
+console.log("Dati ricevuti da Vercel - Immagine cliente presente:", !!imageBase64, "Riferimento presente:", !!referenceImageBase64);
        if (!imageBase64 || !prompt) {
            return res.status(400).json({ error: 'Immagine o comando mancanti.' });
        }
