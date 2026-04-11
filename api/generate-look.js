@@ -56,36 +56,36 @@ module.exports = async (req, res) => {
         const accessToken = (await client.getAccessToken()).token;
 
         const projectId = credentials.project_id;
-        const location = 'us-central1'; 
-        const modelId = 'gemini-3.1-flash-image-preview'; 
-
-const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
+                const location = 'global'; 
+                const modelId = 'gemini-3.1-flash-image-preview'; 
         
-        const mimeMatch = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
-        const detectedMimeType = mimeMatch ? mimeMatch[1] : "image/webp";
-        const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-
-        const payload = {
-            contents:[
-                {
-                    role: "user",
-                    parts:[
+                const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
+        
+                const mimeMatch = imageBase64.match(/^data:(image\/[a-z]+);base64,/);
+                const detectedMimeType = mimeMatch ? mimeMatch[1] : "image/webp";
+                const cleanBase64 = imageBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+        
+                const payload = {
+                    contents:[
                         {
-                            text: prompt
-                        },
-                        {
-                            inlineData: {
-                                mimeType: detectedMimeType,
-                                data: cleanBase64
-                            }
+                            role: "user",
+                            parts:[
+                                {
+                                    text: prompt
+                                },
+                                {
+                                    inlineData: {
+                                        mimeType: detectedMimeType,
+                                        data: cleanBase64
+                                    }
+                                }
+                            ]
                         }
-                    ]
-                }
-            ],
-            generationConfig: {
-                responseModalities: ["IMAGE"]
-            }
-        };
+                    ],
+                    generationConfig: {
+                        responseModalities: ["TEXT", "IMAGE"]
+                    }
+                };
 
         const response = await fetch(url, {
             method: 'POST',
@@ -104,7 +104,7 @@ const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${project
         }
 
         let returnedImageBase64 = null;
-        
+
         if (data.candidates && data.candidates.length > 0) {
             const parts = data.candidates[0].content.parts;
             for (let part of parts) {
@@ -117,7 +117,7 @@ const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${project
 
         if (returnedImageBase64) {
             // --- INIZIO: LOGICA CONTATORE GLOBALE FIRESTORE ADMIN ---
-            if (firebaseAdminApp) { 
+            if (firebaseAdminApp) {
                 try {
                     const db = admin.firestore(firebaseAdminApp);
                     const globalStatsRef = db.collection('civora_analytics').doc('ai_gen');
