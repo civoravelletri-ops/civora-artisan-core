@@ -19,46 +19,59 @@ export default async function handler(req, res) {
                                     : (contesto.imageUrl ? [contesto.imageUrl] : []);
 
             // Calcolo Urgenza e Offerta
-            const isLowStock = contesto.quantita > 0 && contesto.quantita <= 3;
-            const hasDiscount = contesto.originalPrice && contesto.originalPrice > contesto.prezzo;
-            const discountPercent = hasDiscount ? Math.round(((contesto.originalPrice - contesto.prezzo) / contesto.originalPrice) * 100) : 0;
+                        const isLowStock = contesto.quantita > 0 && contesto.quantita <= 3;
+                        const hasDiscount = contesto.originalPrice && contesto.originalPrice > contesto.prezzo;
+                        const discountPercent = hasDiscount ? Math.round(((contesto.originalPrice - contesto.prezzo) / contesto.originalPrice) * 100) : 0;
 
-           const systemPrompt = `Sei un Senior Social Media Copywriter da Agenzia di Marketing di Lusso. Il tuo compito è creare post ad ALTO IMPATTO, con una formattazione impeccabile e un tono magnetico.
+                        // --- SELEZIONE AUTOMATICA DELLE ISTRUZIONI (SOCIAL vs ESPERTO) ---
+                        let systemPrompt = "";
+                        let userPromptText = "";
 
-               REGOLE DI STRUTTURA E FORMATTAZIONE (FONDAMENTALI):
-               1. TITOLO POTENTE: Inizia sempre con un titolo in **GRASSETTO MAIUSCOLO** tra due emoji forti. Deve "bucare" lo schermo.
-               2. STORYTELLING VISIVO: Guarda la foto. Descrivi con eleganza i dettagli artigianali (es: "Il nastro di raso verde che avvolge questa creazione...") integrandoli nel racconto.
-               3. ELENCHI PUNTATI ELEGANTI: Usa i punti elenco (•) o emoji specifiche per elencare i punti di forza del prodotto. Deve essere leggibile e ordinato.
-               4. GRASSETTI STRATEGICI: Usa il doppio asterisco ** per evidenziare prezzi, offerte, nomi di prodotti e l'urgenza.
-               5. MARKETING DELLA SCARSITÀ: Se restano 1-3 pezzi, scrivi un paragrafo dedicato in grassetto che crei il desiderio immediato (FOMO).
+                        // Se nel pacchetto c'è una domanda del cliente, diventiamo l'Esperto del Banco
+                        if (contesto.isAIAssistant || contesto.nota_extra?.includes("Agisci come un esperto")) {
 
-               TONO E LINGUAGGIO:
-               - Professionale, esperto, ma profondamente coinvolgente (usa il "noi").
-               - MAI usare etichette banali come "Prezzo:" o "Vantaggi:".
-               - Mescola i dati tecnici alla poesia dell'artigianato.
-               - Se ci sono note extra del negoziante (es. San Valentino), falle diventare il cuore del post con uno stile impeccabile.
+                            systemPrompt = `Sei l'Assistente Esperto di un banco del Mercato Fresco di Civora.
+                            Il tuo obiettivo è consigliare il cliente, rispondere ai suoi dubbi e aiutarlo a usare al meglio il prodotto.
 
-               Rispondi SOLO con il testo finale, formattato perfettamente, pronto per essere copiato e incollato.`;
-            const messageContent = [
-                    { 
-                        type: "text", 
-                        text: `Dati per il post:
-                        - Negozio: "${contesto.store_name}"
-                        - Prodotto: "${contesto.nome}"
-                        - Prezzo Attuale: ${contesto.prezzo}€
-                        ${hasDiscount ? `- PREZZO ORIGINALE: ${contesto.originalPrice}€ (SCONTO DEL ${discountPercent}%)` : ''}
-                        - QUANTITÀ DISPONIBILE: ${contesto.quantita}
-                        - Descrizione Originale: "${contesto.descrizione}"
-                        - LINK SHOP: ${contesto.link_shop}
-                        
-                        - RICHIESTE SPECIFICHE DEL NEGOZIANTE: "${contesto.note_extra || 'Nessuna, usa la tua creatività'}"
-                        
-                        ISTRUZIONI DI VENDITA: 
-                        ${isLowStock ? '!!! ATTENZIONE: Crea urgenza perché restano pochissimi pezzi !!!' : ''}
-                        Analizza l'immagine, segui le richieste specifiche del negoziante e scrivi un post mozzafiato. 
-                        Inserisci il link alla fine.`
-                    }
-                ];
+                            REGOLE DI COMPORTAMENTO:
+                            1. TONO: Amichevole, caloroso e professionale (come il macellaio o il fruttivendolo di fiducia). Usa il "tu".
+                            2. COMPETENZA: Dai consigli pratici su come cucinare il prodotto, come conservarlo e con cosa abbinarlo (vini, contorni).
+                            3. STORYTELLING: Esalta la provenienza e la freschezza citando i dati forniti.
+                            4. VENDITA GENTILE: Incoraggia l'acquisto sottolineando la qualità, senza essere insistente.
+                            5. FORMATTAZIONE: Usa i **grassetti** per le cose importanti e le emoji per rendere la lettura piacevole.
+
+                            Rispondi in modo conciso ma esaustivo.`;
+
+                            userPromptText = `Un cliente ti chiede informazioni su questo prodotto:
+                            - Nome: "${contesto.nome}"
+                            - Categoria: "${contesto.categoria || contesto.categoryGroup}"
+                            - Provenienza: "${contesto.provenienza || 'Italia'}"
+                            - Descrizione del Venditore: "${contesto.descrizione}"
+                            - Dettagli Tecnici: "${contesto.specifiche || ''}"
+
+                            DOMANDA DEL CLIENTE: "${contesto.nota_extra}"`;
+
+                        } else {
+                            // ALTRIMENTI: Restiamo il Senior Copywriter per i post social
+                            systemPrompt = `Sei un Senior Social Media Copywriter da Agenzia di Marketing di Lusso. Il tuo compito è creare post ad ALTO IMPATTO magnetici.
+                            REGOLE: Inizia con un TITOLO IN GRASSETTO MAIUSCOLO tra emoji. Usa elenchi puntati eleganti. Usa i grassetti per prezzi e urgenza. Crea FOMO se scorte basse.
+                            Rispondi SOLO con il testo del post pronto da copiare.`;
+
+                            userPromptText = `Dati per il post social:
+                            - Negozio: "${contesto.store_name}"
+                            - Prodotto: "${contesto.nome}"
+                            - Prezzo: ${contesto.prezzo}€ ${hasDiscount ? `(Sconto del ${discountPercent}%)` : ''}
+                            - Quantità: ${contesto.quantita}
+                            - Descrizione: "${contesto.descrizione}"
+                            - Note Extra: "${contesto.note_extra || 'Creatività libera'}"
+                            - Link: ${contesto.link_shop}
+
+                            ${isLowStock ? '!!! CREA URGENZA: SCORTE QUASI FINITE !!!' : ''}`;
+                        }
+
+                        const messageContent = [
+                            { type: "text", text: userPromptText }
+                        ];
 
             imagesToAnalyze.forEach(url => {
                 messageContent.push({ type: "image_url", image_url: { url: url } });
