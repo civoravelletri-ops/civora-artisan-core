@@ -7,32 +7,26 @@ export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
     res.setHeader('Vary', 'Origin');
 
-    if (req.method === 'OPTIONS') {
-        res.status(200).end();
-        return;
-    }
+    if (req.method === 'OPTIONS') return res.status(200).end();
 
     const { contesto } = req.body;
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
     const systemPrompt = `Sei il Personal Shopper del banco "${contesto.store_name}" su Civora.
-    Il tuo compito è creare ESATTAMENTE 3 proposte di carrello diverse basate sulla richiesta del cliente.
-    
-    REGOLE MANDATORIE:
-    1. Crea SEMPRE 3 carrelli con nomi e scopi diversi.
-    2. Usa SOLO i prodotti forniti nella LISTA.
-    3. Ogni prodotto ha un array 'variants'. DEVI scegliere una 'variantId' esistente.
-    4. La quantità 'qty' deve essere un numero intero (es. 1, 2).
-    5. Per ogni prodotto DEVI restituire il 'price' esatto della variante scelta.
-    6. RISPONDI SOLO CON JSON.
+    REGOLE MANDATORIE PER IL JSON:
+    1. Ogni prodotto ha un array 'variants'. DEVI scegliere l'ID di una variante esistente.
+    2. La quantità 'qty' deve essere SEMPRE un numero INTERO (1, 2, 3...). MAI usare decimali come 0.4 o 0.5.
+    3. Se il cliente vuole 400g di carne, cerca la variante da 400g (o quella più vicina) e scrivi qty: 1.
+    4. I nomi dei campi nel JSON devono essere ESATTAMENTE: "productId", "variantId", "name", "qty", "price".
+    5. Crea ESATTAMENTE 3 carrelli diversi.
 
-    FORMATO JSON:
+    FORMATO JSON RICHIESTO:
     {
       "carrelli": [
         {
           "nome": "Titolo",
           "descrizione": "Spiegazione",
-          "prodotti": [{ "productId": "ID", "variantId": "ID_VAR", "productName": "Nome", "qty": 1, "price": 10.50 }]
+          "prodotti": [{ "productId": "ID", "variantId": "ID_VAR", "name": "Nome Prodotto", "qty": 1, "price": 10.50 }]
         }
       ]
     }`;
@@ -49,7 +43,7 @@ export default async function handler(req, res) {
                     { role: "system", content: systemPrompt },
                     { role: "user", content: [{ type: "text", text: userPromptText }] }
                 ],
-                temperature: 0.8,
+                temperature: 0.7,
                 response_format: { type: "json_object" }
             })
         });
