@@ -7,31 +7,44 @@ export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
     res.setHeader('Vary', 'Origin');
 
-    if (req.method === 'OPTIONS') return res.status(200).end();
+    if (req.method === 'OPTIONS') {
+        res.status(200).end();
+        return;
+    }
 
     const { contesto } = req.body;
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
     const systemPrompt = `Sei il Personal Shopper del banco "${contesto.store_name}" su Civora.
-    REGOLE MANDATORIE PER IL JSON:
-    1. Ogni prodotto ha un array 'variants'. DEVI scegliere l'ID di una variante esistente.
-    2. La quantità 'qty' deve essere SEMPRE un numero INTERO (1, 2, 3...). MAI usare decimali come 0.4 o 0.5.
-    3. Se il cliente vuole 400g di carne, cerca la variante da 400g (o quella più vicina) e scrivi qty: 1.
-    4. I nomi dei campi nel JSON devono essere ESATTAMENTE: "productId", "variantId", "name", "qty", "price".
-    5. Crea ESATTAMENTE 3 carrelli diversi.
+    Il tuo compito è creare 3 carrelli basati sulla richiesta del cliente.
+    
+    REGOLE DI CIVORA PER LE QUANTITÀ:
+    1. Ogni prodotto ha un array di 'varianti'.
+    2. NON INVENTARE pesi o quantità decimali (es. 0.5).
+    3. SCEGLI sempre una variante esistente dall'elenco 'varianti' di ogni prodotto.
+    4. La quantità 'qty' deve essere SEMPRE un numero intero (1, 2, 3...). Indica quanti pezzi di quella specifica variante acquistare.
+    
+    ISTRUZIONI JSON:
+    - Restituisci 'productId' (l'id del prodotto).
+    - Restituisci 'variantId' (l'id della variante scelta).
+    - Restituisci 'productName' (il nome del prodotto).
+    - Restituisci 'qty' (numero intero di pezzi).
+    - Restituisci 'price' (il prezzo di quella specifica variante).
 
-    FORMATO JSON RICHIESTO:
+    FORMATO JSON:
     {
       "carrelli": [
         {
-          "nome": "Titolo",
+          "nome": "Nome Carrello",
           "descrizione": "Spiegazione",
-          "prodotti": [{ "productId": "ID", "variantId": "ID_VAR", "name": "Nome Prodotto", "qty": 1, "price": 10.50 }]
+          "prodotti": [
+            { "productId": "ID", "variantId": "ID_VAR", "productName": "Nome", "qty": 1, "price": 10.50 }
+          ]
         }
       ]
     }`;
 
-    const userPromptText = `RICHIESTA: "${contesto.richiestaUtente}" - LISTA PRODOTTI: ${JSON.stringify(contesto.prodotti)}`;
+    const userPromptText = `RICHIESTA: "${contesto.richiestaUtente}" - LISTA PRODOTTI CON VARIANTI: ${JSON.stringify(contesto.prodotti)}`;
 
     try {
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
