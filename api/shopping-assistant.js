@@ -39,7 +39,7 @@ export default async function handler(req, res) {
     // Prompt per l'AI
     const systemPrompt = `Sei il Personal Shopper esperto del banco "${storeName}" di Civora.
     Il tuo compito è creare 3 proposte di carrello uniche e ottimizzate basate sulla richiesta del cliente.
-    
+
     REGOLE FONDAMENTALI:
     1. Utilizza SOLO i prodotti inclusi nella LISTA PRODOTTI DISPONIBILI. NON INVENTARE PRODOTTI.
     2. Per ogni prodotto suggerito, indica l'ID del prodotto (campo 'id') esattamente come fornito nella lista. Questo è CRUCIALE.
@@ -91,7 +91,7 @@ export default async function handler(req, res) {
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "mixtral-8x7b-32768", // Utilizziamo sempre un modello robusto per questo compito
+                model: "meta-llama/llama-4-scout-17b-16e-instruct",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: [{ type: "text", text: userPromptText }] } // Groq non analizza immagini in modalità JSON
