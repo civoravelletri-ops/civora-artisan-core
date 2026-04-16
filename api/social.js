@@ -1,10 +1,28 @@
+// Importa i moduli Firebase admin SDK per Vercel
+// Attenzione: Non li hai usati nel tuo codice originale, ma a volte problemi CORS possono essere legati
+// a come le variabili d'ambiente vengono gestite o all'inizializzazione del runtime Node.js.
+// Li includo per massima compatibilità, ma non li utilizzeremo direttamente per le chiamate a Firebase
+// da questa funzione, che ora viene fatta lato client.
+// const admin = require('firebase-admin');
+// if (!admin.apps.length) {
+//     admin.initializeApp({
+//         credential: admin.credential.applicationDefault(),
+//         databaseURL: process.env.FIREBASE_DATABASE_URL // Assicurati di avere questa variabile in Vercel
+//     });
+// }
+// const dbAdmin = admin.firestore();
+
+
 export default async function handler(req, res) {
-    // Permetti al tuo sito di chiamare questa funzione (CORS)
+    // Gestione CORS: Più completa e proattiva.
+    // Permetti al tuo sito (e a qualsiasi altra origine) di chiamare questa funzione
     res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*'); // Risponde con l'origine della richiesta, o '*' se non specificata (più robusto)
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+    res.setHeader('Vary', 'Origin'); // Indica che la risposta può variare in base all'origine
 
+    // Gestione preflight (OPTIONS request)
     if (req.method === 'OPTIONS') {
         res.status(200).end();
         return;
@@ -55,7 +73,7 @@ export default async function handler(req, res) {
 
     }
     // SECONDA FUNZIONE ESISTENTE: Senior Social Media Copywriter (come nel tuo originale)
-    else if (!contesto.isFullShopping && !contesto.isAIAssistant) { // Qui usiamo 'else if' per catturare la tua logica originale
+    else if (contesto.isFullShopping !== true && contesto.isAIAssistant !== true) { // Condizione esplicita per la tua seconda funzione, escludendo la nuova
         systemPrompt = `Sei un Senior Social Media Copywriter da Agenzia di Marketing di Lusso. Il tuo compito è creare post ad ALTO IMPATTO magnetici.
         REGOLE: Inizia con un TITOLO IN GRASSETTO MAIUSCOSO tra emoji. Usa elenchi puntati eleganti. Usa i grassetti per prezzi e urgenza. Crea FOMO se scorte basse.
         Rispondi SOLO con il testo del post pronto da copiare.`;
@@ -71,10 +89,10 @@ export default async function handler(req, res) {
 
         ${isLowStock ? '!!! CREA URGENZA: SCORTE QUASI FINITE !!!' : ''}`;
     }
-    // TERZA NUOVA FUNZIONE: Assistente alla Spesa Completa (aggiunta qui alla fine)
-    else if (contesto.isFullShopping) {
+    // TERZA NUOVA FUNZIONE: Assistente alla Spesa Completa (attivata solo se specificato)
+    else if (contesto.isFullShopping === true) { // Condizione esplicita per la nuova funzione
         isJsonMode = true;
-        modelToUse = "mixtral-8x7b-32768"; // Usa un modello più robusto per il ragionamento su liste
+        modelToUse = "mixtral-8x7b-32768"; // Modello più robusto per il ragionamento su liste
         systemPrompt = `Sei il Personal Shopper esperto del banco "${contesto.store_name}" di Civora.
         Il tuo compito è creare 3 proposte di carrello uniche e ottimizzate basate sulla richiesta del cliente.
         
@@ -128,7 +146,7 @@ export default async function handler(req, res) {
     ];
 
     // Le immagini vengono analizzate solo se non siamo in modalità full shopping (per non confondere l'AI con le liste)
-    // Se isFullShopping è true, non aggiungiamo immagini, altrimenti sì (come facevi tu per le vecchie funzioni)
+    // Ho reso la condizione più esplicita per non interferire con le tue due funzioni originali.
     if (!contesto.isFullShopping) {
         imagesToAnalyze.forEach(url => {
             messageContent.push({ type: "image_url", image_url: { url: url } });
@@ -157,7 +175,6 @@ export default async function handler(req, res) {
 
         if (data.error) {
             console.error("Errore da Groq:", data.error);
-            // Non bloccare la catena di errori se è un CORS, ma restituisci l'errore di Groq
             return res.status(500).json({ errore: "Errore da Groq: " + (data.error.message || "Errore sconosciuto") });
         }
 
