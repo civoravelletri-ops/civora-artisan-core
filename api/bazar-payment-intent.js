@@ -97,19 +97,21 @@ async function handleBazarCalculateAndPay(req, res) {
     }
 
     const paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(totalToPay * 100),
-        currency: 'eur',
-        application_fee_amount: Math.round(commission * 100),
-        transfer_data: { destination: vendorData.stripeAccountId },
-        metadata: {
-            vendorId,
-            productId: item.docId,
-            bazarPriceNetto: netPrice.toString(),
-            commissionCivora: commission.toString(),
-            deliveryCost: deliveryCost.toString(),
-            buyerUserId: userId
-        }
-    });
+            amount: Math.round(totalToPay * 100),
+            currency: 'eur',
+            automatic_payment_methods: { enabled: true },
+            application_fee_amount: Math.round(commission * 100),
+            metadata: {
+                vendorId,
+                productId: item.docId,
+                bazarPriceNetto: netPrice.toString(),
+                commissionCivora: commission.toString(),
+                deliveryCost: deliveryCost.toString(),
+                buyerUserId: userId
+            }
+        }, {
+            stripeAccount: vendorData.stripeAccountId, 
+        });
 
     return res.status(200).json({ clientSecret: paymentIntent.client_secret, summary: { realTotal: totalToPay } });
 }
@@ -194,7 +196,7 @@ async function handleBazarFinalizeOrder(req, res) {
             cartItems: [purchasedItem],
             buyerUserId: userId
         });
-    
+
         // ==========================================
         // AUMENTA LA CODA DEL NEGOZIO DI 1
         // ==========================================
