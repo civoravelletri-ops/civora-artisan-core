@@ -1,79 +1,250 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const admin = require('firebase-admin');
 
-// --- INIZIALIZZAZIONE FIREBASE ---
 if (!admin.apps.length) {
     const firebaseConfig = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8'));
     admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
 }
 const db = admin.firestore();
 
-module.exports = async (req, res) => {
-    // CORS HEADERS
+function setCorsHeaders(res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+}
 
+module.exports = async (req, res) => {
+    setCorsHeaders(res);
     if (req.method === 'OPTIONS') return res.status(200).end();
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     const { action } = req.body;
 
     try {
         if (action === 'CALCULATE_AND_PAY') {
-            const { cartItems, vendorId, tempGuestCartRef, clientClaimedTotal } = req.body;
-
-            // 1. Recupera account Stripe del venditore
-            const vendorDoc = await db.collection('vendors').doc(vendorId).get();
-            if (!vendorDoc.exists) throw new Error("Venditore non trovato");
-            const vendorStripeAccountId = vendorDoc.data().stripeAccountId;
-            if (!vendorStripeAccountId) throw new Error("Il venditore non ha Stripe configurato");
-
-            // 2. Calcolo Totale e Commissione Civora (Application Fee)
-            // Nel Bazar, il calcolo della fee viene passato dal frontend o calcolato qui
-            const item = cartItems[0];
-            const price = parseFloat(item.price);
-            const delivery = parseFloat(item.deliveryCost || 0);
-            const commissionRate = parseFloat(item.commissionCivoraPercentage || 0.05);
-            
-            const serverFee = price * commissionRate;
-            const grandTotal = price + delivery;
-
-            // 3. Creazione Payment Intent (Metodo DIRECT: Tasse al Venditore)
-            const paymentIntent = await stripe.paymentIntents.create({
-                amount: Math.round(grandTotal * 100),
-                currency: 'eur',
-                automatic_payment_methods: { enabled: true },
-                application_fee_amount: Math.round(serverFee * 100), // La tua commissione pulita
-                metadata: {
-                    vendorId: vendorId,
-                    type: 'BAZAR_ORDER',
-                    tempCartRef: tempGuestCartRef
-                }
-            }, {
-                stripeAccount: vendorStripeAccountId, // <--- IL VENDITORE PAGA LE TASSE DI STRIPE
-            });
-
-            return res.status(200).json({
-                clientSecret: paymentIntent.client_secret,
-                summary: {
-                    realGoods: price,
-                    realShipping: delivery,
-                    realFee: serverFee,
-                    realTotal: grandTotal
-                }
-            });
+            return await handleBazarCalculateAndPay(req, res);
+        } else if (action === 'FINALIZE_ORDER') {
+            return await handleBazarFinalizeOrder(req, res);
+        } else if (action === 'RELEASE_LOCK') {
+            return await handleBazarReleaseLock(req, res);
         }
-
-        if (action === 'FINALIZE_ORDER') {
-            // Qui andrebbe la logica per creare l'ordine nel database dopo il pagamento
-            // Per ora restituiamo successo per non bloccare il sistema
-            return res.status(200).json({ orderId: "BAZAR-" + Date.now(), orderNumber: "BZ-" + Date.now() });
-        }
-
-        return res.status(400).json({ error: "Azione non riconosciuta" });
-
+        return res.status(400).json({ error: 'Azione sconosciuta' });
     } catch (error) {
-        console.error("ERRORE BAZAR:", error);
-        return res.status(500).json({ error: error.message });
+        console.error("❌ ERRORE BAZAR:", error);
+        return res.status(400).json({ error: error.message || 'Errore interno del server.' });
     }
 };
+
+async function handleBazarCalculateAndPay(req, res) {
+    const { cartItems, vendorId, clientClaimedTotal, userId } = req.body;
+
+    if (!userId) throw new Error("Utente non identificato. Ricarica la pagina per favore.");
+
+    // =========================================================
+    // MODIFICA: RECUPERO LA FEE DINAMICA DA FIREBASE
+    // =========================================================
+    let CIVORA_COMMISSION = 0.07; // Paracadute di sicurezza base
+    try {
+        const configDoc = await db.collection('app_settings').doc('main_config').get();
+        if (configDoc.exists) {
+            const configData = configDoc.data();
+            if (configData.baraz_occasioni_fee !== undefined) {
+                // Prende la stringa "0.05" e la fa diventare numero
+                CIVORA_COMMISSION = parseFloat(configData.baraz_occasioni_fee);
+                console.log(`Fee recuperata da Firebase: ${CIVORA_COMMISSION}`);
+            }
+        }
+    } catch (err) {
+        console.error("Errore recupero fee da Firebase, uso default 0.07:", err);
+    }
+    // =========================================================
+
+    const item = cartItems[0];
+    const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(item.docId);
+
+    let productData;
+    await db.runTransaction(async (transaction) => {
+        const productDoc = await transaction.get(productRef);
+        if (!productDoc.exists) throw new Error("Prodotto non trovato.");
+
+        productData = productDoc.data();
+        const now = admin.firestore.Timestamp.now().toMillis();
+
+        if (productData.status === 'sold' || productData.quantity <= 0) {
+            throw new Error("Prodotto esaurito.");
+        }
+
+        const activeLocks = productData.activeLocks || {};
+        if (!activeLocks[userId] || activeLocks[userId] <= now) {
+            throw new Error("La tua priorità su questo prodotto è scaduta. Riprova dalla vetrina.");
+        }
+    });
+
+    const netPrice = parseFloat(productData.priceNettoVendor || productData.price);
+    const deliveryCost = parseFloat(productData.deliveryCost || 0);
+    // Ora usa la commissione scaricata da Firebase!
+    const commission = parseFloat((netPrice * CIVORA_COMMISSION).toFixed(2));
+    const priceCliente = parseFloat((netPrice + commission).toFixed(2));
+    const totalToPay = parseFloat((priceCliente + deliveryCost).toFixed(2));
+
+    if (Math.abs(totalToPay * 100 - clientClaimedTotal) > 100) {
+        throw new Error("Discrepanza nei prezzi rilevata. Riprova l'acquisto.");
+    }
+
+    const vendorData = (await db.collection('vendors').doc(vendorId).get()).data();
+    if (!vendorData || !vendorData.stripeAccountId) {
+        throw new Error("Il venditore non ha un account Stripe configurato.");
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create({
+        amount: Math.round(totalToPay * 100),
+        currency: 'eur',
+        application_fee_amount: Math.round(commission * 100),
+        transfer_data: { destination: vendorData.stripeAccountId },
+        metadata: {
+            vendorId,
+            productId: item.docId,
+            bazarPriceNetto: netPrice.toString(),
+            commissionCivora: commission.toString(),
+            deliveryCost: deliveryCost.toString(),
+            buyerUserId: userId
+        }
+    });
+
+    return res.status(200).json({ clientSecret: paymentIntent.client_secret, summary: { realTotal: totalToPay } });
+}
+
+async function handleBazarFinalizeOrder(req, res) {
+    const { paymentIntentId, vendorId, productId, userId, customerShippingData, orderNotes, deliveryNotesForRider } = req.body;
+
+    let productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
+    let finalProductData;
+
+    await db.runTransaction(async (transaction) => {
+        const productDoc = await transaction.get(productRef);
+        if (!productDoc.exists) {
+            await stripe.refunds.create({ payment_intent: paymentIntentId });
+            throw new Error("Prodotto non trovato. Rimborso avviato.");
+        }
+
+        finalProductData = productDoc.data();
+        const now = admin.firestore.Timestamp.now().toMillis();
+
+        if (finalProductData.status === 'sold' || finalProductData.quantity <= 0) {
+            await stripe.refunds.create({ payment_intent: paymentIntentId });
+            throw new Error("Prodotto già venduto. Rimborso avviato.");
+        }
+
+        let activeLocks = finalProductData.activeLocks || {};
+        if (!activeLocks[userId] || activeLocks[userId] <= now) {
+            await stripe.refunds.create({ payment_intent: paymentIntentId });
+            throw new Error("La tua priorità è scaduta. Rimborso avviato.");
+        }
+
+        // Rimuovi il lucchetto di questo utente
+        delete activeLocks[userId];
+        let newQuantity = finalProductData.quantity - 1;
+
+        const updateFields = {
+            activeLocks: activeLocks,
+            quantity: newQuantity
+        };
+
+        if (newQuantity <= 0) {
+            updateFields.status = 'sold';
+            updateFields.activeLocks = {}; // Svuota tutti i lucchetti rimasti (ormai inutili)
+        }
+
+        transaction.update(productRef, updateFields);
+    });
+
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    if (!intent || intent.status !== 'succeeded') {
+        throw new Error("Il Payment Intent non è riuscito.");
+    }
+    const soldiVeriPagati = intent.amount / 100;
+
+    const orderRef = db.collection('vendors').doc(vendorId).collection('orders').doc();
+    const orderNumber = `B-${new Date().getTime().toString().slice(-8)}`;
+
+    const purchasedItem = {
+        docId: intent.metadata.productId,
+        quantity: 1,
+        type: 'bazar_product',
+        price: parseFloat(intent.amount / 100 - intent.application_fee_amount / 100).toFixed(2),
+        priceNettoVendor: parseFloat(intent.metadata.bazarPriceNetto),
+        commissionCivoraPercentage: parseFloat(intent.application_fee_amount / 100) / parseFloat(intent.amount / 100 - intent.application_fee_amount / 100),
+        productName: finalProductData.name,
+        vendorId: intent.metadata.vendorId,
+        imageUrl: finalProductData.imageUrls?.[0] || null,
+        deliveryCost: parseFloat(intent.metadata.deliveryCost)
+    };
+
+    await orderRef.set({
+            orderNumber,
+            status: 'pending',
+            vendorId,
+            shippingAddress: customerShippingData,
+            orderNotes: orderNotes || '',
+            deliveryNotesForRider: deliveryNotesForRider || '',
+            paymentIntentId,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            orderCategory: 'bazar',
+            totalAmount: soldiVeriPagati,
+            cartItems: [purchasedItem],
+            buyerUserId: userId
+        });
+    
+        // ==========================================
+        // AUMENTA LA CODA DEL NEGOZIO DI 1
+        // ==========================================
+        await db.collection('vendors').doc(vendorId).update({
+            pending_orders_count: admin.firestore.FieldValue.increment(1)
+        });
+        // ==========================================
+
+    // ==========================================
+    // INVIO SMS MACRODROID BLINDATO
+    // ==========================================
+    try {
+        const vendorDoc = await db.collection('vendors').doc(vendorId).get();
+        const nomeNegozio = vendorDoc.exists ? (vendorDoc.data().store_name || 'Bazar') : 'Bazar';
+        let numeroCliente = customerShippingData.phone.replace(/\s+/g, '');
+        if (!numeroCliente.startsWith('+')) numeroCliente = '+39' + numeroCliente;
+
+        const messaggioSmsCliente = `Ciao da ${nomeNegozio}, grazie per l'acquisto! Il tuo ordine #${orderNumber} e' in elaborazione. Preparati alla chiamata del corriere per ricevere l'ordine.`;
+        const macrodroidUrlCliente = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroCliente)}&message=${encodeURIComponent(messaggioSmsCliente)}`;
+
+        // Aggiunto l'AWAIT qui: Obbliga Vercel ad aspettare che MacroDroid riceva il comando
+        await fetch(macrodroidUrlCliente);
+        console.log("SMS inviato a Macrodroid con successo.");
+
+    } catch (smsError) {
+        console.error("Errore invio SMS:", smsError);
+    }
+    // ==========================================
+
+    return res.status(200).json({ success: true, orderId: orderRef.id, orderNumber });
+}
+
+async function handleBazarReleaseLock(req, res) {
+    const { vendorId, productId, userId } = req.body;
+    if (!vendorId || !productId || !userId) return res.status(400).json({ error: 'Dati mancanti' });
+
+    const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
+
+    await db.runTransaction(async (transaction) => {
+        const productDoc = await transaction.get(productRef);
+        if (productDoc.exists) {
+            const data = productDoc.data();
+            let activeLocks = data.activeLocks || {};
+
+            if (activeLocks[userId] && data.status !== 'sold') {
+                delete activeLocks[userId];
+                transaction.update(productRef, { activeLocks: activeLocks });
+            }
+        }
+    });
+
+    return res.status(200).json({ success: true });
+}
