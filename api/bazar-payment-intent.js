@@ -170,10 +170,7 @@ async function handleBazarFinalizeOrder(req, res) {
     }
     const soldiVeriPagati = intent.amount / 100;
 
-    // --- FIX CIVORA: Salvo l'ordine nella cartella giusta per la Dashboard ---
-        const orderFirebaseId = db.collection('orders').doc().id;
-        const orderRef = db.collection('vendor_orders').doc(vendorId).collection('orders').doc(orderFirebaseId);
-
+       const orderRef = db.collection('vendors').doc(vendorId).collection('orders').doc();
         // Creiamo anche una copia nell'ordine principale per il cliente
         const mainOrderRef = db.collection('orders').doc(orderFirebaseId);
 
@@ -193,7 +190,6 @@ async function handleBazarFinalizeOrder(req, res) {
     };
 
     const orderData = {
-            id: orderFirebaseId,
             orderNumber,
             status: 'pending',
             vendorId,
@@ -202,14 +198,10 @@ async function handleBazarFinalizeOrder(req, res) {
             deliveryNotesForRider: deliveryNotesForRider || '',
             paymentIntentId,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             orderCategory: 'bazar',
-            totalPrice: soldiVeriPagati, // Cambiato in totalPrice per coerenza dashboard
-            items: [purchasedItem], // Cambiato in items per coerenza dashboard
-            buyerUserId: userId,
-            customerName: customerShippingData.name,
-            isPaidOnline: true,
-            ordineVisibile: true
+            totalAmount: soldiVeriPagati,
+            cartItems: [purchasedItem],
+            buyerUserId: userId
         };
 
         // Scrive l'ordine sia nella dashboard del venditore che nella lista globale
