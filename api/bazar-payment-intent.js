@@ -110,10 +110,14 @@ async function handleBazarCalculateAndPay(req, res) {
                 buyerUserId: userId
             }
         }, {
-            stripeAccount: vendorData.stripeAccountId, 
+            stripeAccount: vendorData.stripeAccountId,
         });
 
-    return res.status(200).json({ clientSecret: paymentIntent.client_secret, summary: { realTotal: totalToPay } });
+    return res.status(200).json({ 
+            clientSecret: paymentIntent.client_secret, 
+            vendorStripeAccountId: vendorData.stripeAccountId,
+            summary: { realTotal: totalToPay } 
+        });
 }
 
 async function handleBazarFinalizeOrder(req, res) {
