@@ -113,7 +113,7 @@ async function handleBazarCalculateAndPay(req, res) {
             stripeAccount: vendorData.stripeAccountId,
         });
 
-    return res.status(200).json({
+        return res.status(200).json({
             clientSecret: paymentIntent.client_secret,
             vendorStripeAccountId: vendorData.stripeAccountId,
             summary: { realTotal: totalToPay }
@@ -164,19 +164,19 @@ async function handleBazarFinalizeOrder(req, res) {
         transaction.update(productRef, updateFields);
     });
 
-    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const vendorSnap = await db.collection('vendors').doc(vendorId).get();
+        const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+            stripeAccount: vendorSnap.data().stripeAccountId
+        });
     if (!intent || intent.status !== 'succeeded') {
         throw new Error("Il Payment Intent non è riuscito.");
     }
     const soldiVeriPagati = intent.amount / 100;
 
-       const orderRef = db.collection('vendors').doc(vendorId).collection('orders').doc();
-        // Creiamo anche una copia nell'ordine principale per il cliente
-        const mainOrderRef = db.collection('orders').doc(orderFirebaseId);
+    const orderRef = db.collection('vendors').doc(vendorId).collection('orders').doc();
+    const orderNumber = `B-${new Date().getTime().toString().slice(-8)}`;
 
-        const orderNumber = `B-${new Date().getTime().toString().slice(-8)}`;
-
-        const purchasedItem = {
+    const purchasedItem = {
         docId: intent.metadata.productId,
         quantity: 1,
         type: 'bazar_product',
@@ -189,7 +189,7 @@ async function handleBazarFinalizeOrder(req, res) {
         deliveryCost: parseFloat(intent.metadata.deliveryCost)
     };
 
-    const orderData = {
+    await orderRef.set({
             orderNumber,
             status: 'pending',
             vendorId,
@@ -202,13 +202,7 @@ async function handleBazarFinalizeOrder(req, res) {
             totalAmount: soldiVeriPagati,
             cartItems: [purchasedItem],
             buyerUserId: userId
-        };
-
-        // Scrive l'ordine sia nella dashboard del venditore che nella lista globale
-        const batch = db.batch();
-        batch.set(orderRef, orderData);
-        batch.set(mainOrderRef, orderData);
-        await batch.commit();
+        });
 
         // ==========================================
         // AUMENTA LA CODA DEL NEGOZIO DI 1
