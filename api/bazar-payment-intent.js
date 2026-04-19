@@ -1,259 +1,279 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const admin = require('firebase-admin');
-
-if (!admin.apps.length) {
-    const firebaseConfig = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8'));
-    admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
-}
-const db = admin.firestore();
-
-function setCorsHeaders(res) {
+export default async function handler(req, res) {
+    // Abilita i CORS
+    res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-}
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
-module.exports = async (req, res) => {
-    setCorsHeaders(res);
-    if (req.method === 'OPTIONS') return res.status(200).end();
-    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+    if (req.method === 'OPTIONS') {
+        res.status(200).end();
+        return;
+    }
 
-    const { action } = req.body;
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method Not Allowed' });
+    }
 
     try {
-        if (action === 'CALCULATE_AND_PAY') {
-            return await handleBazarCalculateAndPay(req, res);
-        } else if (action === 'FINALIZE_ORDER') {
-            return await handleBazarFinalizeOrder(req, res);
-        } else if (action === 'RELEASE_LOCK') {
-            return await handleBazarReleaseLock(req, res);
+        const payload = req.body;
+        const GROQ_API_KEY = process.env.GROQ_API_KEY;
+
+        if (!GROQ_API_KEY) {
+            throw new Error("GROQ_API_KEY mancante nelle variabili d'ambiente di Vercel");
         }
-        return res.status(400).json({ error: 'Azione sconosciuta' });
+
+        const AI_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+        // --- SISTEMA DI SMISTAMENTO (ROUTER CHE RISPETTA LA TUA PRIORITÀ) ---
+        // La tua funzione originale è la priorità (se non c'è una "action" specifica)
+        const action = payload.action || 'giudizio';
+
+        // =====================================================================================
+        // AZIONE 1 (PRIORITÀ): IL GIUDIZIO DEL CONCIERGE (IL TUO CODICE ORIGINALE)
+        // =====================================================================================
+        if (action === 'giudizio') {
+            const productData = payload;
+
+            let visualAnalysis = "Nessuna immagine disponibile.";
+            const imagesToAnalyze = productData.allImages && productData.allImages.length > 0
+                                    ? productData.allImages.slice(0, 3)
+                                    : (productData.imageUrl ? [productData.imageUrl] :[]);
+
+            if (imagesToAnalyze.length > 0) {
+                try {
+                    const visionContent =[
+                        { type: 'text', text: "Analizza queste immagini del prodotto (possono essere varianti dello stesso oggetto). Dimmi cosa vedi: colori, materiali, freschezza. Se vedi che è un'opera artigianale o un bouquet, enfatizza la composizione manuale. Se vedi varianti di colore, segnalalo. Questo mi serve per capire se è un pezzo unico o industriale." }
+                    ];
+
+                    imagesToAnalyze.forEach(url => {
+                        visionContent.push({ type: 'image_url', image_url: { url: url } });
+                    });
+
+                    const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${GROQ_API_KEY}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            model: AI_MODEL,
+                            messages:[{ role: 'user', content: visionContent }],
+                            temperature: 0.2
+                        })
+                    });
+                    const visionData = await visionResponse.json();
+                    visualAnalysis = visionData.choices[0]?.message?.content || "Analisi visiva non riuscita.";
+                } catch (vErr) {
+                    console.error("Errore visione:", vErr);
+                    visualAnalysis = "Errore durante l'analisi visiva.";
+                }
+            }
+
+            const promptSystem = `Sei un "Concierge" esperto, un personal shopper imparziale e onesto.
+            REGOLE FONDAMENTALI:
+            1. Se l'analisi visiva o i dati indicano un prodotto ARTIGIANALE (fiori, artigianato, cibo), non cercare il Brand. Valuta l'unicità, la freschezza e l'estetica del pezzo unico.
+            2. Se è un prodotto INDUSTRIALE, valuta marca e specifiche tecniche.
+            3. Sii super onesto: evidenzia pregi e difetti reali (es: stagionalità per i fiori, o vestibilità per abiti).
+            4. Il tono deve essere quello di un esperto che ha visto il prodotto e lo commenta per un amico.
+            5. Ricorda al cliente che acquistando tramite questo negozio fisico locale ha garanzia di originalità, scontrino e assistenza umana reale.
+            6. DEVI RISPONDERE SOLO CON UN OGGETTO JSON VALIDO.
+
+            Formato JSON:
+            {
+                "summary": "Breve riassunto emozionale e onesto...",
+                "pros":["Vantaggio 1", "Vantaggio 2"],
+                "cons": ["Svantaggio reale 1"]
+            }`;
+
+            const promptUser = `Dati del prodotto:
+            - Nome: ${productData.productName}
+            - Categoria: ${productData.productCategory}
+            - Marca: ${productData.brand || 'Artigianale/Non specificata'}
+            - Prezzo: €${productData.price}
+            - Descrizione Negoziante: ${productData.shortDescription || productData.productDescription}
+            - COSA VEDI NELL'IMMAGINE: ${visualAnalysis}`;
+
+            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${GROQ_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: AI_MODEL,
+                    response_format: { type: "json_object" },
+                    messages:[
+                        { role: 'system', content: promptSystem },
+                        { role: 'user', content: promptUser }
+                    ],
+                    temperature: 0.7,
+                })
+            });
+
+            if (!groqResponse.ok) throw new Error(`Errore da Groq: ${await groqResponse.text()}`);
+
+            const data = await groqResponse.json();
+            const aiJudgmentJSON = JSON.parse(data.choices[0].message.content);
+
+            return res.status(200).json(aiJudgmentJSON);
+        }
+
+        // =====================================================================================
+        // AZIONE 2: FORMATTAZIONE REGOLE NEGOZIANTE (IL NUOVO BINARIO 3)
+        // =====================================================================================
+        else if (action === 'formatta_regole_ai') {
+            const promptSystem = `Sei un assistente per negozianti. Il tuo compito è prendere un testo scritto dal negoziante (spesso confuso o in dialetto) che spiega come lui calcola i prezzi dei suoi servizi, e trasformarlo in un elenco puntato HTML chiaro, sintetico e professionale in italiano.
+            Regole:
+            1. Usa SOLO i tag HTML <ul> e <li>. Nessun altro tag, nessun titolo, nessuna introduzione.
+            2. Evidenzia bene se i prezzi sono fissi, al metro, all'ora o extra.
+            3. Non inventare prezzi, usa solo quelli forniti.`;
+
+            const promptUser = `Testo del negoziante:\n${payload.testo_grezzo}`;
+
+            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${GROQ_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: AI_MODEL,
+                    messages:[
+                        { role: 'system', content: promptSystem },
+                        { role: 'user', content: promptUser }
+                    ],
+                    temperature: 0.3,
+                })
+            });
+
+            if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
+
+            const data = await groqResponse.json();
+            const regolePuliteHTML = data.choices[0].message.content;
+
+            return res.status(200).json({ risultato: regolePuliteHTML });
+                    }
+
+                    // =====================================================================================
+                    // AZIONE 3: CHAT AI CONCIERGE (VENDITA E PREVENTIVI REAL-TIME)
+                    // =====================================================================================
+                    else if (action === 'ai_concierge_chat') {
+                                const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription } = payload;
+
+                                const promptSystem = `Sei l'AI Concierge di Civora per il negozio "${vendorName}".
+                                            Servizio: "${serviceName}".
+
+                                            MANUALE PREZZI DA SEGUIRE:
+                                            ${rawInstructions}
+
+                                            ⚠️ REGOLE FONDAMENTALI DI VENDITA (NON SBAGLIARE):
+                                            1. Tu NON puoi processare pagamenti e NON puoi registrare ordini.
+                                            2. Il tuo UNICO modo per far procedere il cliente è scrivere il comando: [PRENOTA:valore]
+                                            3. Quando il cliente è d'accordo sul preventivo, scrivi una frase di conferma e aggiungi SEMPRE il comando [PRENOTA:valore] alla fine del messaggio.
+                                            4. NON dire mai "Pagamento effettuato". Di' invece che la richiesta verrà inviata al negoziante per la conferma finale.
+                                            5. Se il cliente dice "Sì", "Ok", "Procediamo" o accetta il prezzo, tu rispondi: "Ottimo! Clicca sul tasto qui sotto per inviare la tua richiesta di prenotazione al negozio. [PRENOTA:valore]"
+
+                                            ESEMPIO:
+                                            Cliente: "Mi va bene 180 euro."
+                                            Tu: "Perfetto! Clicca pure sul tasto qui sotto per confermare la prenotazione dei 100 inviti. Il negozio riceverà i dettagli e ti contatterà per il pagamento. [PRENOTA:180.00]"
+
+                                            6. Parla in italiano elegante e professionale.`;
+                                const finalMessages = [{ role: 'system', content: promptSystem }];
+                                const recentHistory = chatHistory.slice(-15);
+                                recentHistory.forEach(msg => finalMessages.push(msg));
+
+                                const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Authorization': `Bearer ${GROQ_API_KEY}`,
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify({
+                                        model: AI_MODEL,
+                                        messages: finalMessages,
+                                        temperature: 0.5,
+                                    })
+                                });
+
+                                if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
+
+                                const data = await groqResponse.json();
+                                const rispostaAI = data.choices[0].message.content;
+
+                                return res.status(200).json({ risultato: rispostaAI });
+                                        }
+
+                                        // =====================================================================================
+                                                // AZIONE 4: INVIO SMS OTP TRAMITE MACRODROID (COLLEGAMENTO REALE SMARTPHONE CIVORA)
+                                                // =====================================================================================
+                                                else if (action === 'invia-sms-negoziante') {
+                                                    const { phone, otp, vendorName } = payload;
+                                                    
+                                                    // Pulizia e formattazione numero (come nel bazar)
+                                                    let numeroPulito = phone.replace(/\s+/g, '');
+                                                    if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
+                                        
+                                                    const messaggioSms = `Civora: Il tuo codice per ${vendorName} e' ${otp}. Inseriscilo per confermare la prenotazione.`;
+                                        
+                                                    try {
+                                                        // USA L'ID REALE E IL TRIGGER REALE CHE FUNZIONA SUL TUO TELEFONO
+                                                        const MACRODROID_ID = "51db87e2-5593-48a5-9df5-a59f5dc9cf07";
+                                                        const TRIGGER_NAME = "bazar_sms"; // Usiamo questo che è già configurato sul tuo MacroDroid
+                                                        
+                                                        const urlMacroDroid = `https://trigger.macrodroid.com/${MACRODROID_ID}/${TRIGGER_NAME}?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(messaggioSms)}`;
+                                        
+                                                        await fetch(urlMacroDroid);
+                                        
+                                                        return res.status(200).json({ success: true, message: 'SMS inviato tramite MacroDroid' });
+                                                    } catch (error) {
+                                                        console.error("Errore invio SMS:", error);
+                                                        return res.status(500).json({ error: 'Errore durante invio SMS' });
+                                                    }
+                                                }
+                                        
+                                                // =====================================================================================
+                                                // AZIONE 5: SALVATAGGIO PRENOTAZIONE NEL PROFILO NEGOZIANTE (SOTTOCARTELLA BOOKINGS)
+                                                // =====================================================================================
+                                                else if (action === 'salva-prenotazione-ai') {
+                                                    const { vendorId, ...bookingData } = payload;
+                                        
+                                                    try {
+                                                        // Salvataggio nel database localmente-v3-core
+                                                        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/localmente-v3-core/databases/(default)/documents/vendors/${vendorId}/bookings`;
+                                                        
+                                                        const response = await fetch(firestoreUrl, {
+                                                            method: 'POST',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({
+                                                                fields: {
+                                                                    serviceId: { stringValue: bookingData.serviceId || "" },
+                                                                    serviceName: { stringValue: bookingData.serviceName || "" },
+                                                                    customerPhone: { stringValue: bookingData.customerPhone || "" },
+                                                                    totalPrice: { doubleValue: parseFloat(bookingData.totalPrice) || 0 },
+                                                                    status: { stringValue: "pending_payment" },
+                                                                    type: { stringValue: "ai_chat_booking" },
+                                                                    createdAt: { stringValue: new Date().toISOString() },
+                                                                    chatTranscript: { stringValue: JSON.stringify(bookingData.chatTranscript || []) }
+                                                                }
+                                                            })
+                                                        });
+                                        
+                                                        if (!response.ok) throw new Error("Errore Firebase");
+                                        
+                                                        return res.status(200).json({ success: true });
+                                                    } catch (error) {
+                                                        console.error("Errore salvataggio:", error);
+                                                        return res.status(500).json({ error: 'Errore salvataggio' });
+                                                    }
+                                                }
+
+                                        // Se l'azione non è riconosciuta
+                                        else {
+                                            return res.status(400).json({ error: 'Azione non riconosciuta' });
+                                        }
+
     } catch (error) {
-        console.error("❌ ERRORE BAZAR:", error);
-        return res.status(400).json({ error: error.message || 'Errore interno del server.' });
+        console.error("Errore nel Router Civora:", error);
+        res.status(500).json({ error: error.message });
     }
-};
-
-async function handleBazarCalculateAndPay(req, res) {
-    const { cartItems, vendorId, clientClaimedTotal, userId } = req.body;
-
-    if (!userId) throw new Error("Utente non identificato. Ricarica la pagina per favore.");
-
-    // =========================================================
-    // MODIFICA: RECUPERO LA FEE DINAMICA DA FIREBASE
-    // =========================================================
-    let CIVORA_COMMISSION = 0.07; // Paracadute di sicurezza base
-    try {
-        const configDoc = await db.collection('app_settings').doc('main_config').get();
-        if (configDoc.exists) {
-            const configData = configDoc.data();
-            if (configData.baraz_occasioni_fee !== undefined) {
-                // Prende la stringa "0.05" e la fa diventare numero
-                CIVORA_COMMISSION = parseFloat(configData.baraz_occasioni_fee);
-                console.log(`Fee recuperata da Firebase: ${CIVORA_COMMISSION}`);
-            }
-        }
-    } catch (err) {
-        console.error("Errore recupero fee da Firebase, uso default 0.07:", err);
-    }
-    // =========================================================
-
-    const item = cartItems[0];
-    const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(item.docId);
-
-    let productData;
-    await db.runTransaction(async (transaction) => {
-        const productDoc = await transaction.get(productRef);
-        if (!productDoc.exists) throw new Error("Prodotto non trovato.");
-
-        productData = productDoc.data();
-        const now = admin.firestore.Timestamp.now().toMillis();
-
-        if (productData.status === 'sold' || productData.quantity <= 0) {
-            throw new Error("Prodotto esaurito.");
-        }
-
-        const activeLocks = productData.activeLocks || {};
-        if (!activeLocks[userId] || activeLocks[userId] <= now) {
-            throw new Error("La tua priorità su questo prodotto è scaduta. Riprova dalla vetrina.");
-        }
-    });
-
-    const netPrice = parseFloat(productData.priceNettoVendor || productData.price);
-    const deliveryCost = parseFloat(productData.deliveryCost || 0);
-    // Ora usa la commissione scaricata da Firebase!
-    const commission = parseFloat((netPrice * CIVORA_COMMISSION).toFixed(2));
-    const priceCliente = parseFloat((netPrice + commission).toFixed(2));
-    const totalToPay = parseFloat((priceCliente + deliveryCost).toFixed(2));
-
-    if (Math.abs(totalToPay * 100 - clientClaimedTotal) > 100) {
-        throw new Error("Discrepanza nei prezzi rilevata. Riprova l'acquisto.");
-    }
-
-    const vendorData = (await db.collection('vendors').doc(vendorId).get()).data();
-    if (!vendorData || !vendorData.stripeAccountId) {
-        throw new Error("Il venditore non ha un account Stripe configurato.");
-    }
-
-    const paymentIntent = await stripe.paymentIntents.create({
-            amount: Math.round(totalToPay * 100),
-            currency: 'eur',
-            automatic_payment_methods: { enabled: true },
-            application_fee_amount: Math.round(commission * 100),
-            metadata: {
-                vendorId,
-                productId: item.docId,
-                bazarPriceNetto: netPrice.toString(),
-                commissionCivora: commission.toString(),
-                deliveryCost: deliveryCost.toString(),
-                buyerUserId: userId
-            }
-        }, {
-            stripeAccount: vendorData.stripeAccountId,
-        });
-
-        return res.status(200).json({
-            clientSecret: paymentIntent.client_secret,
-            vendorStripeAccountId: vendorData.stripeAccountId,
-            summary: { realTotal: totalToPay }
-        });
-}
-
-async function handleBazarFinalizeOrder(req, res) {
-    const { paymentIntentId, vendorId, productId, userId, customerShippingData, orderNotes, deliveryNotesForRider } = req.body;
-
-    let productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
-    let finalProductData;
-
-    await db.runTransaction(async (transaction) => {
-        const productDoc = await transaction.get(productRef);
-        if (!productDoc.exists) {
-            await stripe.refunds.create({ payment_intent: paymentIntentId });
-            throw new Error("Prodotto non trovato. Rimborso avviato.");
-        }
-
-        finalProductData = productDoc.data();
-        const now = admin.firestore.Timestamp.now().toMillis();
-
-        if (finalProductData.status === 'sold' || finalProductData.quantity <= 0) {
-            await stripe.refunds.create({ payment_intent: paymentIntentId });
-            throw new Error("Prodotto già venduto. Rimborso avviato.");
-        }
-
-        let activeLocks = finalProductData.activeLocks || {};
-        if (!activeLocks[userId] || activeLocks[userId] <= now) {
-            await stripe.refunds.create({ payment_intent: paymentIntentId });
-            throw new Error("La tua priorità è scaduta. Rimborso avviato.");
-        }
-
-        // Rimuovi il lucchetto di questo utente
-        delete activeLocks[userId];
-        let newQuantity = finalProductData.quantity - 1;
-
-        const updateFields = {
-            activeLocks: activeLocks,
-            quantity: newQuantity
-        };
-
-        if (newQuantity <= 0) {
-            updateFields.status = 'sold';
-            updateFields.activeLocks = {}; // Svuota tutti i lucchetti rimasti (ormai inutili)
-        }
-
-        transaction.update(productRef, updateFields);
-    });
-
-    const vendorSnap = await db.collection('vendors').doc(vendorId).get();
-        const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
-            stripeAccount: vendorSnap.data().stripeAccountId
-        });
-    if (!intent || intent.status !== 'succeeded') {
-        throw new Error("Il Payment Intent non è riuscito.");
-    }
-    const soldiVeriPagati = intent.amount / 100;
-
-    const orderRef = db.collection('vendors').doc(vendorId).collection('orders').doc();
-    const orderNumber = `B-${new Date().getTime().toString().slice(-8)}`;
-
-    const purchasedItem = {
-        docId: intent.metadata.productId,
-        quantity: 1,
-        type: 'bazar_product',
-        price: parseFloat(intent.amount / 100 - intent.application_fee_amount / 100).toFixed(2),
-        priceNettoVendor: parseFloat(intent.metadata.bazarPriceNetto),
-        commissionCivoraPercentage: parseFloat(intent.application_fee_amount / 100) / parseFloat(intent.amount / 100 - intent.application_fee_amount / 100),
-        productName: finalProductData.name,
-        vendorId: intent.metadata.vendorId,
-        imageUrl: finalProductData.imageUrls?.[0] || null,
-        deliveryCost: parseFloat(intent.metadata.deliveryCost)
-    };
-
-    await orderRef.set({
-            orderNumber,
-            status: 'pending',
-            vendorId,
-            shippingAddress: customerShippingData,
-            orderNotes: orderNotes || '',
-            deliveryNotesForRider: deliveryNotesForRider || '',
-            paymentIntentId,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            orderCategory: 'bazar',
-            totalAmount: soldiVeriPagati,
-            cartItems: [purchasedItem],
-            buyerUserId: userId
-        });
-
-        // ==========================================
-        // AUMENTA LA CODA DEL NEGOZIO DI 1
-        // ==========================================
-        await db.collection('vendors').doc(vendorId).update({
-            pending_orders_count: admin.firestore.FieldValue.increment(1)
-        });
-        // ==========================================
-
-    // ==========================================
-    // INVIO SMS MACRODROID BLINDATO
-    // ==========================================
-    try {
-        const vendorDoc = await db.collection('vendors').doc(vendorId).get();
-        const nomeNegozio = vendorDoc.exists ? (vendorDoc.data().store_name || 'Bazar') : 'Bazar';
-        let numeroCliente = customerShippingData.phone.replace(/\s+/g, '');
-        if (!numeroCliente.startsWith('+')) numeroCliente = '+39' + numeroCliente;
-
-        const messaggioSmsCliente = `Ciao da ${nomeNegozio}, grazie per l'acquisto! Il tuo ordine #${orderNumber} e' in elaborazione. Preparati alla chiamata del corriere per ricevere l'ordine.`;
-        const macrodroidUrlCliente = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroCliente)}&message=${encodeURIComponent(messaggioSmsCliente)}`;
-
-        // Aggiunto l'AWAIT qui: Obbliga Vercel ad aspettare che MacroDroid riceva il comando
-        await fetch(macrodroidUrlCliente);
-        console.log("SMS inviato a Macrodroid con successo.");
-
-    } catch (smsError) {
-        console.error("Errore invio SMS:", smsError);
-    }
-    // ==========================================
-
-    return res.status(200).json({ success: true, orderId: orderRef.id, orderNumber });
-}
-
-async function handleBazarReleaseLock(req, res) {
-    const { vendorId, productId, userId } = req.body;
-    if (!vendorId || !productId || !userId) return res.status(400).json({ error: 'Dati mancanti' });
-
-    const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
-
-    await db.runTransaction(async (transaction) => {
-        const productDoc = await transaction.get(productRef);
-        if (productDoc.exists) {
-            const data = productDoc.data();
-            let activeLocks = data.activeLocks || {};
-
-            if (activeLocks[userId] && data.status !== 'sold') {
-                delete activeLocks[userId];
-                transaction.update(productRef, { activeLocks: activeLocks });
-            }
-        }
-    });
-
-    return res.status(200).json({ success: true });
 }
