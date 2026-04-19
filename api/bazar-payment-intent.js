@@ -249,22 +249,23 @@ export default async function handler(req, res) {
                                                 // =====================================================================================
                                                 else if (action === 'invia-sms-negoziante') {
                                                             const { phone, otp, vendorName } = payload;
-                                                            if (!phone) return res.status(400).json({ error: 'Manca il numero.' });
-
-                                                            let numeroSms = phone.replace(/\s+/g, '');
-                                                            if (!numeroSms.startsWith('+')) numeroSms = '+39' + numeroSms;
-
-                                                            const smsText = `Civora: Il tuo codice per ${vendorName} e' ${otp}. Inseriscilo per confermare la prenotazione.`;
-
-                                                            // USA L'URL DIRETTO DI MACRODROID CHE FUNZIONA NEL BAZAR
-                                                            const MACRODROID_URL = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroSms)}&message=${encodeURIComponent(smsText)}`;
-
+                                                            
+                                                            let numeroCliente = phone.replace(/\s+/g, '');
+                                                            if (!numeroCliente.startsWith('+')) numeroCliente = '+39' + numeroCliente;
+                                                
+                                                            const messaggioSmsCliente = `Civora: Il tuo codice per ${vendorName} e' ${otp}. Inseriscilo per confermare la prenotazione.`;
+                                                            
+                                                            // USA L'URL FISICO DEL TUO SMARTPHONE (Copiato dal tuo Bazar)
+                                                            const macrodroidUrlCliente = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroCliente)}&message=${encodeURIComponent(messaggioSmsCliente)}`;
+                                                
                                                             try {
-                                                                await fetch(MACRODROID_URL, { method: 'GET' });
+                                                                // AWAIT OBBLIGATORIO PER FAR PARTIRE IL SEGNALE
+                                                                await fetch(macrodroidUrlCliente);
+                                                                console.log("SMS inviato a Macrodroid con successo.");
                                                                 return res.status(200).json({ success: true });
-                                                            } catch (error) {
-                                                                console.error("Errore invio fisico MacroDroid:", error);
-                                                                return res.status(500).json({ error: 'Errore durante invio SMS al telefono di Civora' });
+                                                            } catch (smsError) {
+                                                                console.error("Errore invio SMS:", smsError);
+                                                                return res.status(500).json({ error: 'Errore invio fisico SMS' });
                                                             }
                                                         }
 
