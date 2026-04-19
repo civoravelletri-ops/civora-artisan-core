@@ -1,12 +1,3 @@
-const admin = require('firebase-admin');
-
-// 1. INIZIALIZZAZIONE FIREBASE ADMIN (Dalle tue chiavi Bazar)
-if (!admin.apps.length) {
-    const firebaseConfig = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8'));
-    admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
-}
-const db = admin.firestore();
-
 export default async function handler(req, res) {
     // Abilita i CORS
     res.setHeader('Access-Control-Allow-Credentials', true);
@@ -32,10 +23,13 @@ export default async function handler(req, res) {
         }
 
         const AI_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+        // --- SISTEMA DI SMISTAMENTO (ROUTER CHE RISPETTA LA TUA PRIORITÀ) ---
+        // La tua funzione originale è la priorità (se non c'è una "action" specifica)
         const action = payload.action || 'giudizio';
 
         // =====================================================================================
-        // AZIONE 1: IL GIUDIZIO DEL CONCIERGE (PRODOTTI FISICI + VISIONE MULTIMODALE)
+        // AZIONE 1 (PRIORITÀ): IL GIUDIZIO DEL CONCIERGE (IL TUO CODICE ORIGINALE)
         // =====================================================================================
         if (action === 'giudizio') {
             const productData = payload;
@@ -71,6 +65,7 @@ export default async function handler(req, res) {
                     visualAnalysis = visionData.choices[0]?.message?.content || "Analisi visiva non riuscita.";
                 } catch (vErr) {
                     console.error("Errore visione:", vErr);
+                    visualAnalysis = "Errore durante l'analisi visiva.";
                 }
             }
 
@@ -78,9 +73,10 @@ export default async function handler(req, res) {
             REGOLE FONDAMENTALI:
             1. Se l'analisi visiva o i dati indicano un prodotto ARTIGIANALE (fiori, artigianato, cibo), non cercare il Brand. Valuta l'unicità, la freschezza e l'estetica del pezzo unico.
             2. Se è un prodotto INDUSTRIALE, valuta marca e specifiche tecniche.
-            3. Sii super onesto: evidenzia pregi e difetti reali.
+            3. Sii super onesto: evidenzia pregi e difetti reali (es: stagionalità per i fiori, o vestibilità per abiti).
             4. Il tono deve essere quello di un esperto che ha visto il prodotto e lo commenta per un amico.
-            5. DEVI RISPONDERE SOLO CON UN OGGETTO JSON VALIDO.
+            5. Ricorda al cliente che acquistando tramite questo negozio fisico locale ha garanzia di originalità, scontrino e assistenza umana reale.
+            6. DEVI RISPONDERE SOLO CON UN OGGETTO JSON VALIDO.
 
             Formato JSON:
             {
@@ -92,6 +88,7 @@ export default async function handler(req, res) {
             const promptUser = `Dati del prodotto:
             - Nome: ${productData.productName}
             - Categoria: ${productData.productCategory}
+            - Marca: ${productData.brand || 'Artigianale/Non specificata'}
             - Prezzo: €${productData.price}
             - Descrizione Negoziante: ${productData.shortDescription || productData.productDescription}
             - COSA VEDI NELL'IMMAGINE: ${visualAnalysis}`;
@@ -113,101 +110,167 @@ export default async function handler(req, res) {
                 })
             });
 
+            if (!groqResponse.ok) throw new Error(`Errore da Groq: ${await groqResponse.text()}`);
+
             const data = await groqResponse.json();
-            return res.status(200).json(JSON.parse(data.choices[0].message.content));
+            const aiJudgmentJSON = JSON.parse(data.choices[0].message.content);
+
+            return res.status(200).json(aiJudgmentJSON);
         }
 
         // =====================================================================================
-        // AZIONE 2: FORMATTAZIONE REGOLE NEGOZIANTE (HTML)
+        // AZIONE 2: FORMATTAZIONE REGOLE NEGOZIANTE (IL NUOVO BINARIO 3)
         // =====================================================================================
         else if (action === 'formatta_regole_ai') {
-            const promptSystem = `Sei un assistente per negozianti. Prendi il testo del negoziante e trasformalo in un elenco puntato HTML <ul> e <li> chiaro, sintetico e professionale. Non inventare prezzi.`;
+            const promptSystem = `Sei un assistente per negozianti. Il tuo compito è prendere un testo scritto dal negoziante (spesso confuso o in dialetto) che spiega come lui calcola i prezzi dei suoi servizi, e trasformarlo in un elenco puntato HTML chiaro, sintetico e professionale in italiano.
+            Regole:
+            1. Usa SOLO i tag HTML <ul> e <li>. Nessun altro tag, nessun titolo, nessuna introduzione.
+            2. Evidenzia bene se i prezzi sono fissi, al metro, all'ora o extra.
+            3. Non inventare prezzi, usa solo quelli forniti.`;
+
             const promptUser = `Testo del negoziante:\n${payload.testo_grezzo}`;
 
             const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+                headers: {
+                    'Authorization': `Bearer ${GROQ_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
                 body: JSON.stringify({
                     model: AI_MODEL,
-                    messages:[{ role: 'system', content: promptSystem }, { role: 'user', content: promptUser }],
-                    temperature: 0.3
+                    messages:[
+                        { role: 'system', content: promptSystem },
+                        { role: 'user', content: promptUser }
+                    ],
+                    temperature: 0.3,
                 })
             });
 
-            const data = await groqResponse.json();
-            return res.status(200).json({ risultato: data.choices[0].message.content });
-        }
-
-        // =====================================================================================
-        // AZIONE 3: CHAT AI CONCIERGE (VENDITA E MEMORIA)
-        // =====================================================================================
-        else if (action === 'ai_concierge_chat') {
-            const { chatHistory, serviceName, vendorName, rawInstructions } = payload;
-
-            const promptSystem = `Sei l'AI Concierge di Civora per il negozio "${vendorName}".
-            Servizio: "${serviceName}". REGOLE PREZZI: ${rawInstructions}.
-
-            ⚠️ REGOLE VENDITA:
-            1. Quando il cliente accetta il preventivo, scrivi SEMPRE alla fine: [PRENOTA:valore].
-            2. NON dire mai "Pagamento effettuato". 
-            3. Usa la cronologia per ricordare le scelte del cliente.
-            4. Parla in italiano elegante e professionale.`;
-
-            const finalMessages = [{ role: 'system', content: promptSystem }, ...chatHistory.slice(-15)];
-
-            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: AI_MODEL,
-                    messages: finalMessages,
-                    temperature: 0.5
-                })
-            });
+            if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
 
             const data = await groqResponse.json();
-            return res.status(200).json({ risultato: data.choices[0].message.content });
-        }
+            const regolePuliteHTML = data.choices[0].message.content;
 
-        // =====================================================================================
-        // AZIONE 4: INVIO SMS OTP TRAMITE MACRODROID (COLLEGAMENTO REALE)
-        // =====================================================================================
-        else if (action === 'invia-sms-negoziante') {
-            const { phone, otp, vendorName } = payload;
-            let numeroPulito = phone.replace(/\s+/g, '');
-            if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
+            return res.status(200).json({ risultato: regolePuliteHTML });
+                    }
 
-            const messaggioSms = `Civora: Il tuo codice per ${vendorName} e' ${otp}. Inseriscilo per confermare la prenotazione.`;
-            const MACRODROID_ID = "51db87e2-5593-48a5-9df5-a59f5dc9cf07";
-            const url = `https://trigger.macrodroid.com/${MACRODROID_ID}/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(messaggioSms)}`;
+                    // =====================================================================================
+                    // AZIONE 3: CHAT AI CONCIERGE (VENDITA E PREVENTIVI REAL-TIME)
+                    // =====================================================================================
+                    else if (action === 'ai_concierge_chat') {
+                                const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription } = payload;
 
-            await fetch(url);
-            return res.status(200).json({ success: true });
-        }
+                                const promptSystem = `Sei l'AI Concierge di Civora per il negozio "${vendorName}".
+                                            Servizio: "${serviceName}".
 
-        // =====================================================================================
-        // AZIONE 5: SALVATAGGIO PRENOTAZIONE AI (FIREBASE ADMIN SDK - SICURO)
-        // =====================================================================================
-        else if (action === 'salva-prenotazione-ai') {
-            const { vendorId, ...bookingData } = payload;
+                                            MANUALE PREZZI DA SEGUIRE:
+                                            ${rawInstructions}
 
-            await db.collection('vendors').doc(vendorId).collection('bookings').add({
-                serviceId: bookingData.serviceId || "",
-                serviceName: bookingData.serviceName || "",
-                customerPhone: bookingData.customerPhone || "",
-                totalPrice: parseFloat(bookingData.totalPrice) || 0,
-                status: "pending_payment",
-                type: "ai_chat_booking",
-                createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                chatTranscript: JSON.stringify(bookingData.chatTranscript || [])
-            });
+                                            ⚠️ REGOLE FONDAMENTALI DI VENDITA (NON SBAGLIARE):
+                                            1. Tu NON puoi processare pagamenti e NON puoi registrare ordini.
+                                            2. Il tuo UNICO modo per far procedere il cliente è scrivere il comando: [PRENOTA:valore]
+                                            3. Quando il cliente è d'accordo sul preventivo, scrivi una frase di conferma e aggiungi SEMPRE il comando [PRENOTA:valore] alla fine del messaggio.
+                                            4. NON dire mai "Pagamento effettuato". Di' invece che la richiesta verrà inviata al negoziante per la conferma finale.
+                                            5. Se il cliente dice "Sì", "Ok", "Procediamo" o accetta il prezzo, tu rispondi: "Ottimo! Clicca sul tasto qui sotto per inviare la tua richiesta di prenotazione al negozio. [PRENOTA:valore]"
 
-            return res.status(200).json({ success: true });
-        }
+                                            ESEMPIO:
+                                            Cliente: "Mi va bene 180 euro."
+                                            Tu: "Perfetto! Clicca pure sul tasto qui sotto per confermare la prenotazione dei 100 inviti. Il negozio riceverà i dettagli e ti contatterà per il pagamento. [PRENOTA:180.00]"
 
-        else {
-            return res.status(400).json({ error: 'Azione non riconosciuta' });
-        }
+                                            6. Parla in italiano elegante e professionale.`;
+                                const finalMessages = [{ role: 'system', content: promptSystem }];
+                                const recentHistory = chatHistory.slice(-15);
+                                recentHistory.forEach(msg => finalMessages.push(msg));
+
+                                const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Authorization': `Bearer ${GROQ_API_KEY}`,
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify({
+                                        model: AI_MODEL,
+                                        messages: finalMessages,
+                                        temperature: 0.5,
+                                    })
+                                });
+
+                                if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
+
+                                const data = await groqResponse.json();
+                                const rispostaAI = data.choices[0].message.content;
+
+                                return res.status(200).json({ risultato: rispostaAI });
+                                        }
+
+                                        // =====================================================================================
+                                                // AZIONE 4: INVIO SMS OTP TRAMITE MACRODROID (COLLEGAMENTO REALE SMARTPHONE CIVORA)
+                                                // =====================================================================================
+                                                else if (action === 'invia-sms-negoziante') {
+                                                    const { phone, otp, vendorName } = payload;
+
+                                                    // Pulizia e formattazione numero (come nel bazar)
+                                                    let numeroPulito = phone.replace(/\s+/g, '');
+                                                    if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
+
+                                                    const messaggioSms = `Civora: Il tuo codice per ${vendorName} e' ${otp}. Inseriscilo per confermare la prenotazione.`;
+
+                                                    try {
+                                                        // USA L'ID REALE E IL TRIGGER REALE CHE FUNZIONA SUL TUO TELEFONO
+                                                        const MACRODROID_ID = "51db87e2-5593-48a5-9df5-a59f5dc9cf07";
+                                                        const TRIGGER_NAME = "bazar_sms"; // Usiamo questo che è già configurato sul tuo MacroDroid
+
+                                                        const urlMacroDroid = `https://trigger.macrodroid.com/${MACRODROID_ID}/${TRIGGER_NAME}?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(messaggioSms)}`;
+
+                                                        await fetch(urlMacroDroid);
+
+                                                        return res.status(200).json({ success: true, message: 'SMS inviato tramite MacroDroid' });
+                                                    } catch (error) {
+                                                        console.error("Errore invio SMS:", error);
+                                                        return res.status(500).json({ error: 'Errore durante invio SMS' });
+                                                    }
+                                                }
+
+                                                // =====================================================================================
+                                                // AZIONE 5: SALVATAGGIO PRENOTAZIONE NEL PROFILO NEGOZIANTE (SOTTOCARTELLA BOOKINGS)
+                                                // =====================================================================================
+                                                else if (action === 'salva-prenotazione-ai') {
+                                                    const { vendorId, ...bookingData } = payload;
+
+                                                    try {
+                                                        // Salvataggio nel database localmente-v3-core
+                                                        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/localmente-v3-core/databases/(default)/documents/vendors/${vendorId}/bookings`;
+
+                                                        const response = await fetch(firestoreUrl, {
+                                                            method: 'POST',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({
+                                                                fields: {
+                                                                    serviceId: { stringValue: bookingData.serviceId || "" },
+                                                                    serviceName: { stringValue: bookingData.serviceName || "" },
+                                                                    customerPhone: { stringValue: bookingData.customerPhone || "" },
+                                                                    totalPrice: { doubleValue: parseFloat(bookingData.totalPrice) || 0 },
+                                                                    status: { stringValue: "pending_payment" },
+                                                                    type: { stringValue: "ai_chat_booking" },
+                                                                    createdAt: { stringValue: new Date().toISOString() },
+                                                                    chatTranscript: { stringValue: JSON.stringify(bookingData.chatTranscript || []) }
+                                                                }
+                                                            })
+                                                        });
+
+                                                        if (!response.ok) throw new Error("Errore Firebase");
+
+                                                        return res.status(200).json({ success: true });
+                                                    } catch (error) {
+                                                        console.error("Errore salvataggio:", error);
+                                                        return res.status(500).json({ error: 'Errore salvataggio' });
+                                                    }
+                                                }
+
+                                        // Se l'azione non è riconosciuta
+                                        else {
+                                            return res.status(400).json({ error: 'Azione non riconosciuta' });
+                                        }
 
     } catch (error) {
         console.error("Errore nel Router Civora:", error);
