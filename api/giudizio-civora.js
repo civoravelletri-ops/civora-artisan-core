@@ -153,55 +153,57 @@ export default async function handler(req, res) {
 
             return res.status(200).json({ risultato: regolePuliteHTML });
                     }
-            
+
                     // =====================================================================================
                     // AZIONE 3: CHAT AI CONCIERGE (VENDITA E PREVENTIVI REAL-TIME)
                     // =====================================================================================
                     else if (action === 'ai_concierge_chat') {
-                        const { userMessage, serviceName, vendorName, rawInstructions, serviceDescription } = payload;
-            
-                        const promptSystem = `Sei l'AI Concierge di Civora, un assistente esperto e cordiale che lavora per il negozio "${vendorName}".
-                        Il tuo compito è aiutare il cliente per il servizio: "${serviceName}".
-            
-                        MANUALE SEGRETO DEL NEGOZIANTE (Segui queste regole per i prezzi):
-                        ${rawInstructions}
-            
-                        DESCRIZIONE DEL SERVIZIO:
-                        ${serviceDescription}
-            
-                        REGOLE DI COMPORTAMENTO:
-                        1. Sii professionale, accogliente e risolutivo.
-                        2. Usa le informazioni nel "Manuale Segreto" per calcolare prezzi o spiegare come funzionano le varianti.
-                        3. Se il cliente fa una richiesta e nel manuale mancano dati per calcolare il prezzo (es. mancano le misure o il tipo di materiale), chiediglieli gentilmente.
-                        4. Se riesci a fare un calcolo basandoti sulle regole, mostralo chiaramente (es. "Il totale sarebbe di 50€, calcolato come...").
-                        5. Mantieni le risposte brevi, umane e formattate bene (usa il grassetto per i prezzi).
-                        6. Non inventare mai regole che non sono scritte nel manuale. Se non sai qualcosa, invita il cliente a lasciare i dettagli in chat per essere ricontattato dal titolare.
-                        7. Parla in italiano corretto, anche se il manuale del negoziante è scritto in dialetto.`;
-            
-                        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                            method: 'POST',
-                            headers: {
-                                'Authorization': `Bearer ${GROQ_API_KEY}`,
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                model: AI_MODEL,
-                                messages: [
-                                    { role: 'system', content: promptSystem },
-                                    { role: 'user', content: userMessage }
-                                ],
-                                temperature: 0.6, // Leggera creatività per essere empatico, ma preciso
-                            })
-                        });
-            
+                                const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription } = payload;
+
+                                const promptSystem = `Sei l'AI Concierge di Civora, un assistente esperto che lavora per "${vendorName}".
+                                Servizio: "${serviceName}".
+
+                                REGOLE PREZZI DEL NEGOZIANTE:
+                                ${rawInstructions}
+
+                                DESCRIZIONE SERVIZIO:
+                                ${serviceDescription}
+
+                                REGOLE CHAT:
+                                1. Usa la cronologia per ricordare le scelte del cliente.
+                                2. Sii cordiale e professionale.
+                                3. Non inventare prezzi. Se non sai, chiedi o invita al contatto umano.
+                                4. Se hai tutti i dati, fai il calcolo finale.
+                                5. Rispondi in italiano elegante.`;
+
+                                // Costruiamo la lista messaggi per l'AI includendo la storia
+                                const finalMessages = [{ role: 'system', content: promptSystem }];
+
+                                // Aggiungiamo i messaggi passati dal front-end (max ultimi 15 per non appesantire)
+                                const recentHistory = chatHistory.slice(-15);
+                                recentHistory.forEach(msg => finalMessages.push(msg));
+
+                                const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Authorization': `Bearer ${GROQ_API_KEY}`,
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify({
+                                        model: AI_MODEL,
+                                        messages: finalMessages, // <-- QUI PASSIAMO TUTTA LA STORIA!
+                                        temperature: 0.5,
+                                    })
+                                });
+
                         if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
-                        
+
                         const data = await groqResponse.json();
                         const rispostaAI = data.choices[0].message.content;
-            
+
                         return res.status(200).json({ risultato: rispostaAI });
                     }
-            
+
                     // Se l'azione non è riconosciuta
                     else {
                         return res.status(400).json({ error: 'Azione non riconosciuta' });
