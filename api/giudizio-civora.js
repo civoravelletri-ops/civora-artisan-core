@@ -160,26 +160,25 @@ export default async function handler(req, res) {
                     else if (action === 'ai_concierge_chat') {
                                 const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription } = payload;
 
-                                const promptSystem = `Sei l'AI Concierge di Civora, un assistente esperto che lavora per "${vendorName}".
+                                const promptSystem = `Sei l'AI Concierge di Civora, l'assistente di lusso di "${vendorName}".
                                 Servizio: "${serviceName}".
 
-                                REGOLE PREZZI DEL NEGOZIANTE:
+                                REGOLE PREZZI:
                                 ${rawInstructions}
 
-                                DESCRIZIONE SERVIZIO:
-                                ${serviceDescription}
+                                COMANDI SPECIALI:
+                                Quando hai definito tutti i dettagli con il cliente e sei pronto a concludere la vendita, DEVI calcolare il prezzo totale e scrivere alla fine del tuo messaggio il comando esatto: [PREZZO:valore]
+                                Esempio: "Perfetto, il totale per il tuo abito è 450€. Procediamo? [PREZZO:450.00]"
 
-                                REGOLE CHAT:
-                                1. Usa la cronologia per ricordare le scelte del cliente.
-                                2. Sii cordiale e professionale.
-                                3. Non inventare prezzi. Se non sai, chiedi o invita al contatto umano.
-                                4. Se hai tutti i dati, fai il calcolo finale.
-                                5. Rispondi in italiano elegante.`;
+                                REGOLE DI COMPORTAMENTO:
+                                1. Sii estremamente cordiale.
+                                2. Usa la cronologia per non fare domande doppie.
+                                3. Una volta che il cliente accetta il prezzo, invia il comando [PREZZO:...] per far apparire il tasto di pagamento.
+                                4. Se mancano info (misure, materiali), chiedile prima di fare il prezzo finale.
+                                5. Non scrivere il comando [PREZZO:...] finché non sei sicuro che il cliente abbia finito le sue richieste.
+                                6. Rispondi in italiano elegante.`;
 
-                                // Costruiamo la lista messaggi per l'AI includendo la storia
                                 const finalMessages = [{ role: 'system', content: promptSystem }];
-
-                                // Aggiungiamo i messaggi passati dal front-end (max ultimi 15 per non appesantire)
                                 const recentHistory = chatHistory.slice(-15);
                                 recentHistory.forEach(msg => finalMessages.push(msg));
 
@@ -191,18 +190,18 @@ export default async function handler(req, res) {
                                     },
                                     body: JSON.stringify({
                                         model: AI_MODEL,
-                                        messages: finalMessages, // <-- QUI PASSIAMO TUTTA LA STORIA!
+                                        messages: finalMessages,
                                         temperature: 0.5,
                                     })
                                 });
 
-                        if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
+                                if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
 
-                        const data = await groqResponse.json();
-                        const rispostaAI = data.choices[0].message.content;
+                                const data = await groqResponse.json();
+                                const rispostaAI = data.choices[0].message.content;
 
-                        return res.status(200).json({ risultato: rispostaAI });
-                    }
+                                return res.status(200).json({ risultato: rispostaAI });
+                            }
 
                     // Se l'azione non è riconosciuta
                     else {
