@@ -1,16 +1,3 @@
-import admin from 'firebase-admin';
-
-// 1. INIZIALIZZAZIONE FIREBASE ADMIN (LOGICA CURA PERSONA)
-if (!admin.apps.length) {
-    const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
-    if (serviceAccount) {
-        admin.initializeApp({
-            credential: admin.credential.cert(JSON.parse(Buffer.from(serviceAccount, 'base64').toString('utf8')))
-        });
-    }
-}
-const db = admin.firestore();
-
 export default async function handler(req, res) {
     // Abilita i CORS
     res.setHeader('Access-Control-Allow-Credentials', true);
@@ -249,22 +236,20 @@ export default async function handler(req, res) {
                                                 // =====================================================================================
                                                 else if (action === 'invia-sms-negoziante') {
                                                             const { phone, otp, vendorName } = payload;
-                                                            if (!phone) return res.status(400).json({ error: 'Manca il numero.' });
 
-                                                            let numeroSms = phone.replace(/\s+/g, '');
-                                                            if (!numeroSms.startsWith('+')) numeroSms = '+39' + numeroSms;
+                                                            let numeroPulito = phone.replace(/\s+/g, '');
+                                                            if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
 
-                                                            const smsText = `Civora: Il tuo codice per ${vendorName} e' ${otp}. Inseriscilo per confermare la prenotazione.`;
+                                                            const messaggioSms = `Civora: Il tuo codice per ${vendorName} e' ${otp}. Inseriscilo per confermare la prenotazione.`;
 
-                                                            // USA L'URL DIRETTO DI MACRODROID CHE FUNZIONA NEL BAZAR
-                                                            const MACRODROID_URL = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroSms)}&message=${encodeURIComponent(smsText)}`;
+                                                            // URL REALE CHE FA SCATTARE IL TUO SMARTPHONE
+                                                            const urlSmsReale = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(messaggioSms)}`;
 
                                                             try {
-                                                                await fetch(MACRODROID_URL, { method: 'GET' });
+                                                                await fetch(urlSmsReale);
                                                                 return res.status(200).json({ success: true });
-                                                            } catch (error) {
-                                                                console.error("Errore invio fisico MacroDroid:", error);
-                                                                return res.status(500).json({ error: 'Errore durante invio SMS al telefono di Civora' });
+                                                            } catch (errSms) {
+                                                                return res.status(500).json({ error: 'Errore invio segnale SMS' });
                                                             }
                                                         }
 
