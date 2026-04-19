@@ -247,27 +247,24 @@ export default async function handler(req, res) {
                                                 // =====================================================================================
                                                 // AZIONE 5: SALVATAGGIO PRENOTAZIONE NEL PROFILO NEGOZIANTE (SOTTOCARTELLA BOOKINGS)
                                                 // =====================================================================================
-                                                else if (action === 'salva-prenotazione-ai') {
-                                                            const { vendorId, ...bookingData } = payload;
-                                                
+                                                else if (action === 'invia-sms-negoziante') {
+                                                            const { phone, otp, vendorName } = payload;
+                                                            if (!phone) return res.status(400).json({ error: 'Manca il numero.' });
+
+                                                            let numeroSms = phone.replace(/\s+/g, '');
+                                                            if (!numeroSms.startsWith('+')) numeroSms = '+39' + numeroSms;
+
+                                                            const smsText = `Civora: Il tuo codice per ${vendorName} e' ${otp}. Inseriscilo per confermare la prenotazione.`;
+
+                                                            // USA L'URL DIRETTO DI MACRODROID CHE FUNZIONA NEL BAZAR
+                                                            const MACRODROID_URL = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroSms)}&message=${encodeURIComponent(smsText)}`;
+
                                                             try {
-                                                                if (!db) throw new Error("Database non inizializzato.");
-                                                
-                                                                await db.collection('vendors').doc(vendorId).collection('bookings').add({
-                                                                    serviceId: bookingData.serviceId || "",
-                                                                    serviceName: bookingData.serviceName || "",
-                                                                    customerPhone: bookingData.customerPhone || "",
-                                                                    totalPrice: parseFloat(bookingData.totalPrice) || 0,
-                                                                    status: "pending_payment",
-                                                                    type: "ai_chat_booking",
-                                                                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                                                                    chatTranscript: JSON.stringify(bookingData.chatTranscript || [])
-                                                                });
-                                                
+                                                                await fetch(MACRODROID_URL, { method: 'GET' });
                                                                 return res.status(200).json({ success: true });
                                                             } catch (error) {
-                                                                console.error("Errore scrittura Firebase:", error);
-                                                                return res.status(500).json({ error: 'Errore salvataggio database' });
+                                                                console.error("Errore invio fisico MacroDroid:", error);
+                                                                return res.status(500).json({ error: 'Errore durante invio SMS al telefono di Civora' });
                                                             }
                                                         }
 
