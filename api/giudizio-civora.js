@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-    // Abilita i CORS per permettere alla tua dashboard di comunicare con Vercel
+    // Abilita i CORS
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -15,106 +15,152 @@ export default async function handler(req, res) {
     }
 
     try {
-        const productData = req.body;
-                const GROQ_API_KEY = process.env.GROQ_API_KEY;
+        const payload = req.body;
+        const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-                if (!GROQ_API_KEY) {
-                    throw new Error("GROQ_API_KEY mancante nelle variabili d'ambiente di Vercel");
+        if (!GROQ_API_KEY) {
+            throw new Error("GROQ_API_KEY mancante nelle variabili d'ambiente di Vercel");
+        }
+
+        const AI_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+        // --- SISTEMA DI SMISTAMENTO (ROUTER CHE RISPETTA LA TUA PRIORITÀ) ---
+        // La tua funzione originale è la priorità (se non c'è una "action" specifica)
+        const action = payload.action || 'giudizio'; 
+
+        // =====================================================================================
+        // AZIONE 1 (PRIORITÀ): IL GIUDIZIO DEL CONCIERGE (IL TUO CODICE ORIGINALE)
+        // =====================================================================================
+        if (action === 'giudizio') {
+            const productData = payload; 
+
+            let visualAnalysis = "Nessuna immagine disponibile.";
+            const imagesToAnalyze = productData.allImages && productData.allImages.length > 0
+                                    ? productData.allImages.slice(0, 3)
+                                    : (productData.imageUrl ? [productData.imageUrl] :[]);
+
+            if (imagesToAnalyze.length > 0) {
+                try {
+                    const visionContent =[
+                        { type: 'text', text: "Analizza queste immagini del prodotto (possono essere varianti dello stesso oggetto). Dimmi cosa vedi: colori, materiali, freschezza. Se vedi che è un'opera artigianale o un bouquet, enfatizza la composizione manuale. Se vedi varianti di colore, segnalalo. Questo mi serve per capire se è un pezzo unico o industriale." }
+                    ];
+
+                    imagesToAnalyze.forEach(url => {
+                        visionContent.push({ type: 'image_url', image_url: { url: url } });
+                    });
+
+                    const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${GROQ_API_KEY}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            model: AI_MODEL,
+                            messages:[{ role: 'user', content: visionContent }],
+                            temperature: 0.2
+                        })
+                    });
+                    const visionData = await visionResponse.json();
+                    visualAnalysis = visionData.choices[0]?.message?.content || "Analisi visiva non riuscita.";
+                } catch (vErr) {
+                    console.error("Errore visione:", vErr);
+                    visualAnalysis = "Errore durante l'analisi visiva.";
                 }
+            }
 
-                // FASE 1: GLI OCCHI (Analisi dell'immagine e delle varianti)
-                        let visualAnalysis = "Nessuna immagine disponibile.";
+            const promptSystem = `Sei un "Concierge" esperto, un personal shopper imparziale e onesto.
+            REGOLE FONDAMENTALI:
+            1. Se l'analisi visiva o i dati indicano un prodotto ARTIGIANALE (fiori, artigianato, cibo), non cercare il Brand. Valuta l'unicità, la freschezza e l'estetica del pezzo unico.
+            2. Se è un prodotto INDUSTRIALE, valuta marca e specifiche tecniche.
+            3. Sii super onesto: evidenzia pregi e difetti reali (es: stagionalità per i fiori, o vestibilità per abiti).
+            4. Il tono deve essere quello di un esperto che ha visto il prodotto e lo commenta per un amico.
+            5. Ricorda al cliente che acquistando tramite questo negozio fisico locale ha garanzia di originalità, scontrino e assistenza umana reale.
+            6. DEVI RISPONDERE SOLO CON UN OGGETTO JSON VALIDO.
 
-                        // Prepariamo i contenuti per l'IA Vision (max 3 immagini per non rallentare troppo)
-                        const imagesToAnalyze = productData.allImages && productData.allImages.length > 0
-                                                ? productData.allImages.slice(0, 3)
-                                                : (productData.imageUrl ? [productData.imageUrl] : []);
+            Formato JSON:
+            {
+                "summary": "Breve riassunto emozionale e onesto...",
+                "pros":["Vantaggio 1", "Vantaggio 2"],
+                "cons": ["Svantaggio reale 1"]
+            }`;
 
-                        if (imagesToAnalyze.length > 0) {
-                            try {
-                                const visionContent = [
-                                    { type: 'text', text: "Analizza queste immagini del prodotto (possono essere varianti dello stesso oggetto). Dimmi cosa vedi: colori, materiali, freschezza. Se vedi che è un'opera artigianale o un bouquet, enfatizza la composizione manuale. Se vedi varianti di colore, segnalalo. Questo mi serve per capire se è un pezzo unico o industriale." }
-                                ];
+            const promptUser = `Dati del prodotto:
+            - Nome: ${productData.productName}
+            - Categoria: ${productData.productCategory}
+            - Marca: ${productData.brand || 'Artigianale/Non specificata'}
+            - Prezzo: €${productData.price}
+            - Descrizione Negoziante: ${productData.shortDescription || productData.productDescription}
+            - COSA VEDI NELL'IMMAGINE: ${visualAnalysis}`;
 
-                                // Aggiungiamo ogni immagine al messaggio per l'IA
-                                imagesToAnalyze.forEach(url => {
-                                    visionContent.push({ type: 'image_url', image_url: { url: url } });
-                                });
+            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${GROQ_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: AI_MODEL,
+                    response_format: { type: "json_object" },
+                    messages:[
+                        { role: 'system', content: promptSystem },
+                        { role: 'user', content: promptUser }
+                    ],
+                    temperature: 0.7,
+                })
+            });
 
-                                const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                                    method: 'POST',
-                                    headers: {
-                                        'Authorization': `Bearer ${GROQ_API_KEY}`,
-                                        'Content-Type': 'application/json'
-                                    },
-                                    body: JSON.stringify({
-                                        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-                                        messages: [{ role: 'user', content: visionContent }],
-                                        temperature: 0.2
-                                    })
-                                });
-                                const visionData = await visionResponse.json();
-                                visualAnalysis = visionData.choices[0]?.message?.content || "Analisi visiva non riuscita.";
-                            } catch (vErr) {
-                                console.error("Errore visione:", vErr);
-                                visualAnalysis = "Errore durante l'analisi visiva.";
-                            }
-                        }
+            if (!groqResponse.ok) throw new Error(`Errore da Groq: ${await groqResponse.text()}`);
 
-                // FASE 2: IL GIUDIZIO DEL CONCIERGE (Il Cervello)
-                const promptSystem = `Sei un "Concierge" esperto, un personal shopper imparziale e onesto.
-                REGOLE FONDAMENTALI:
-                1. Se l'analisi visiva o i dati indicano un prodotto ARTIGIANALE (fiori, artigianato, cibo), non cercare il Brand. Valuta l'unicità, la freschezza e l'estetica del pezzo unico.
-                2. Se è un prodotto INDUSTRIALE, valuta marca e specifiche tecniche.
-                3. Sii super onesto: evidenzia pregi e difetti reali (es: stagionalità per i fiori, o vestibilità per abiti).
-                4. Il tono deve essere quello di un esperto che ha visto il prodotto e lo commenta per un amico.
-                5. Ricorda al cliente che acquistando tramite questo negozio fisico locale ha garanzia di originalità, scontrino e assistenza umana reale.
-                6. DEVI RISPONDERE SOLO CON UN OGGETTO JSON VALIDO.
+            const data = await groqResponse.json();
+            const aiJudgmentJSON = JSON.parse(data.choices[0].message.content);
 
-                Formato JSON:
-                {
-                    "summary": "Breve riassunto emozionale e onesto...",
-                    "pros": ["Vantaggio 1", "Vantaggio 2"],
-                    "cons": ["Svantaggio reale 1"]
-                }`;
+            return res.status(200).json(aiJudgmentJSON);
+        }
 
-                const promptUser = `Dati del prodotto:
-                - Nome: ${productData.productName}
-                - Categoria: ${productData.productCategory}
-                - Marca: ${productData.brand || 'Artigianale/Non specificata'}
-                - Prezzo: €${productData.price}
-                - Descrizione Negoziante: ${productData.shortDescription || productData.productDescription}
-                - COSA VEDI NELL'IMMAGINE: ${visualAnalysis}`;
+        // =====================================================================================
+        // AZIONE 2: FORMATTAZIONE REGOLE NEGOZIANTE (IL NUOVO BINARIO 3)
+        // =====================================================================================
+        else if (action === 'formatta_regole_ai') {
+            const promptSystem = `Sei un assistente per negozianti. Il tuo compito è prendere un testo scritto dal negoziante (spesso confuso o in dialetto) che spiega come lui calcola i prezzi dei suoi servizi, e trasformarlo in un elenco puntato HTML chiaro, sintetico e professionale in italiano. 
+            Regole:
+            1. Usa SOLO i tag HTML <ul> e <li>. Nessun altro tag, nessun titolo, nessuna introduzione.
+            2. Evidenzia bene se i prezzi sono fissi, al metro, all'ora o extra.
+            3. Non inventare prezzi, usa solo quelli forniti.`;
+            
+            const promptUser = `Testo del negoziante:\n${payload.testo_grezzo}`;
 
-                const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${GROQ_API_KEY}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-                        response_format: { type: "json_object" },
-                        messages: [
-                            { role: 'system', content: promptSystem },
-                            { role: 'user', content: promptUser }
-                        ],
-                        temperature: 0.7,
-                    })
-                });
+            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${GROQ_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: AI_MODEL,
+                    messages:[
+                        { role: 'system', content: promptSystem },
+                        { role: 'user', content: promptUser }
+                    ],
+                    temperature: 0.3, 
+                })
+            });
 
-                if (!groqResponse.ok) {
-                    const err = await groqResponse.text();
-                    throw new Error(`Errore da Groq: ${err}`);
-                }
+            if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
+            
+            const data = await groqResponse.json();
+            const regolePuliteHTML = data.choices[0].message.content;
 
-                const data = await groqResponse.json();
-                const aiJudgmentJSON = JSON.parse(data.choices[0].message.content);
+            return res.status(200).json({ risultato: regolePuliteHTML });
+        }
 
-                res.status(200).json(aiJudgmentJSON);
+        // Se l'azione non è riconosciuta
+        else {
+            return res.status(400).json({ error: 'Azione non riconosciuta' });
+        }
 
     } catch (error) {
-        console.error("Errore nella generazione del giudizio Civora:", error);
+        console.error("Errore nel Router Civora:", error);
         res.status(500).json({ error: error.message });
     }
 }
