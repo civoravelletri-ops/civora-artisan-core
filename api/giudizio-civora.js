@@ -201,12 +201,73 @@ export default async function handler(req, res) {
                                 const rispostaAI = data.choices[0].message.content;
 
                                 return res.status(200).json({ risultato: rispostaAI });
-                            }
-
-                    // Se l'azione non è riconosciuta
-                    else {
-                        return res.status(400).json({ error: 'Azione non riconosciuta' });
-                    }
+                                        }
+                                
+                                        // =====================================================================================
+                                        // AZIONE 4: INVIO SMS OTP TRAMITE MACRODROID (PONTE SMARTPHONE)
+                                        // =====================================================================================
+                                        else if (action === 'invia-sms-negoziante') {
+                                            const { phone, otp, vendorName } = payload;
+                                            
+                                            // Messaggio che riceverà il cliente sul suo cellulare
+                                            const messaggioSms = `Civora: Il tuo codice di conferma per ${vendorName} e' ${otp}`;
+                                
+                                            try {
+                                                // QUI IL TUO WEBHOOK DI MACRODROID
+                                                // Sostituisci 'ID_DEL_TUO_SMARTPHONE' con l'ID reale che hai nel tuo MacroDroid
+                                                const MACRODROID_WEBHOOK_URL = `https://trigger.macrodroid.com/IL_TUO_ID_SEGRETO/civora-sms?phone=${phone}&message=${encodeURIComponent(messaggioSms)}`;
+                                
+                                                await fetch(MACRODROID_WEBHOOK_URL);
+                                
+                                                return res.status(200).json({ success: true, message: 'Segnale SMS inviato allo smartphone' });
+                                            } catch (error) {
+                                                console.error("Errore ponte MacroDroid:", error);
+                                                return res.status(500).json({ error: 'Errore invio SMS' });
+                                            }
+                                        }
+                                
+                                        // =====================================================================================
+                                        // AZIONE 5: SALVATAGGIO PRENOTAZIONE NEL PROFILO NEGOZIANTE
+                                        // =====================================================================================
+                                        else if (action === 'salva-prenotazione-ai') {
+                                            const { vendorId, ...bookingData } = payload;
+                                
+                                            try {
+                                                // Usiamo l'API di Firebase (tramite fetch o admin sdk se configurato)
+                                                // Qui simuliamo il salvataggio nella sotto-collezione 'bookings' del negoziante
+                                                // Percorso: vendors / {vendorId} / bookings / {auto-id}
+                                                
+                                                const response = await fetch(`https://firestore.googleapis.com/v1/projects/localmente-v3-core/databases/(default)/documents/vendors/${vendorId}/bookings`, {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({
+                                                        fields: {
+                                                            serviceId: { stringValue: bookingData.serviceId },
+                                                            serviceName: { stringValue: bookingData.serviceName },
+                                                            customerPhone: { stringValue: bookingData.customerPhone },
+                                                            totalPrice: { doubleValue: bookingData.totalPrice },
+                                                            status: { stringValue: bookingData.status },
+                                                            type: { stringValue: bookingData.type },
+                                                            createdAt: { stringValue: bookingData.createdAt },
+                                                            // Salviamo la chat come testo unico per facile lettura del negoziante
+                                                            chatTranscript: { stringValue: JSON.stringify(bookingData.chatTranscript) }
+                                                        }
+                                                    })
+                                                });
+                                
+                                                if (!response.ok) throw new Error("Errore scrittura Firestore");
+                                
+                                                return res.status(200).json({ success: true, message: 'Prenotazione salvata nel profilo negoziante' });
+                                            } catch (error) {
+                                                console.error("Errore salvataggio Firebase:", error);
+                                                return res.status(500).json({ error: 'Errore salvataggio prenotazione' });
+                                            }
+                                        }
+                                
+                                        // Se l'azione non è riconosciuta
+                                        else {
+                                            return res.status(400).json({ error: 'Azione non riconosciuta' });
+                                        }
 
     } catch (error) {
         console.error("Errore nel Router Civora:", error);
