@@ -119,40 +119,48 @@ export default async function handler(req, res) {
         }
 
         // =====================================================================================
-        // AZIONE 2: FORMATTAZIONE REGOLE NEGOZIANTE (IL NUOVO BINARIO 3)
-        // =====================================================================================
-        else if (action === 'formatta_regole_ai') {
-            const promptSystem = `Sei un assistente per negozianti. Il tuo compito è prendere un testo scritto dal negoziante (spesso confuso o in dialetto) che spiega come lui calcola i prezzi dei suoi servizi, e trasformarlo in un elenco puntato HTML chiaro, sintetico e professionale in italiano.
-            Regole:
-            1. Usa SOLO i tag HTML <ul> e <li>. Nessun altro tag, nessun titolo, nessuna introduzione.
-            2. Evidenzia bene se i prezzi sono fissi, al metro, all'ora o extra.
-            3. Non inventare prezzi, usa solo quelli forniti.`;
+                // AZIONE 2: ADDESTRAMENTO E MEMORIA (UNISCE VECCHIE E NUOVE REGOLE)
+                // =====================================================================================
+                else if (action === 'formatta_regole_ai') {
+                    const { testo_grezzo, memoria_precedente } = payload;
 
-            const promptUser = `Testo del negoziante:\n${payload.testo_grezzo}`;
+                    const promptSystem = `Sei l'anima di un assistente esperto. Il tuo compito è AGGIORNARE il manuale operativo di un negozio.
+                    Ti verranno dati:
+                    1. Il manuale attuale (se esiste).
+                    2. Le nuove istruzioni scritte dal negoziante (spesso in dialetto o veloci).
 
-            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${GROQ_API_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    model: AI_MODEL,
-                    messages:[
-                        { role: 'system', content: promptSystem },
-                        { role: 'user', content: promptUser }
-                    ],
-                    temperature: 0.3,
-                })
-            });
+                    REGOLE:
+                    - Unisci le nuove informazioni a quelle vecchie in modo logico.
+                    - Se la nuova istruzione contraddice quella vecchia, dai priorità alla NUOVA.
+                    - Organizza tutto in un elenco HTML <ul> e <li> chiaro e professionale.
+                    - Mantieni i prezzi e i dettagli tecnici con precisione millimetrica.
+                    - Rispondi SOLO con il codice HTML della lista, senza introduzioni.`;
 
-            if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
+                    const promptUser = `MANUALE ATTUALE:\n${memoria_precedente || 'Nessun dato precedente.'}\n\nNUOVE ISTRUZIONI DA AGGIUNGERE:\n${testo_grezzo}`;
 
-            const data = await groqResponse.json();
-            const regolePuliteHTML = data.choices[0].message.content;
+                    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${GROQ_API_KEY}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            model: AI_MODEL,
+                            messages:[
+                                { role: 'system', content: promptSystem },
+                                { role: 'user', content: promptUser }
+                            ],
+                            temperature: 0.3,
+                        })
+                    });
 
-            return res.status(200).json({ risultato: regolePuliteHTML });
-                    }
+                    if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
+
+                    const data = await groqResponse.json();
+                    const regoleAggiornateHTML = data.choices[0].message.content;
+
+                    return res.status(200).json({ risultato: regoleAggiornateHTML });
+                }
 
                     // =====================================================================================
                     // AZIONE 3: CHAT AI CONCIERGE (VENDITA E PREVENTIVI REAL-TIME)
