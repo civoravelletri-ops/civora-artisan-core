@@ -119,47 +119,47 @@ export default async function handler(req, res) {
         }
 
         // =====================================================================================
-                // AZIONE 2: ADDESTRAMENTO E MEMORIA (UNISCE VECCHIE E NUOVE REGOLE)
+                // AZIONE 2: IL CERVELLO DELL'ASSISTENTE (ESTRAZIONE DATI E MEMORIA)
                 // =====================================================================================
                 else if (action === 'formatta_regole_ai') {
                     const { testo_grezzo, memoria_precedente } = payload;
 
-                    const promptSystem = `Sei l'anima di un assistente esperto. Il tuo compito è AGGIORNARE il manuale operativo di un negozio.
-                    Ti verranno dati:
-                    1. Il manuale attuale (se esiste).
-                    2. Le nuove istruzioni scritte dal negoziante (spesso in dialetto o veloci).
+                    const promptSystem = `Sei un analista di dati per negozi. Il tuo compito è AGGIORNARE il cervello di un assistente digitale.
+                    Riceverai nuove istruzioni dal negoziante e dovrai unirle a quelle vecchie.
+
+                    DEVI RISPONDERE ESCLUSIVAMENTE CON UN OGGETTO JSON.
+
+                    Campi da estrarre/aggiornare:
+                    - store_owner: Nome del titolare.
+                    - phone_fixed: Numero di telefono fisso.
+                    - whatsapp: Numero WhatsApp.
+                    - email_business: Email per i clienti.
+                    - compiled_instructions: Tutto il resto delle regole (prezzi, orari, info) formattate in HTML <ul><li> chiaro e professionale.
 
                     REGOLE:
-                    - Unisci le nuove informazioni a quelle vecchie in modo logico.
-                    - Se la nuova istruzione contraddice quella vecchia, dai priorità alla NUOVA.
-                    - Organizza tutto in un elenco HTML <ul> e <li> chiaro e professionale.
-                    - Mantieni i prezzi e i dettagli tecnici con precisione millimetrica.
-                    - Rispondi SOLO con il codice HTML della lista, senza introduzioni.`;
+                    - Se un dato (es. whatsapp) non è presente nel testo nuovo ma c'era nel vecchio, MANTIENI il vecchio.
+                    - Se il testo nuovo dà un nuovo numero, SOSTITUISCI il vecchio.
+                    - compiled_instructions deve essere un unico blocco HTML che unisce tutto in modo logico.`;
 
-                    const promptUser = `MANUALE ATTUALE:\n${memoria_precedente || 'Nessun dato precedente.'}\n\nNUOVE ISTRUZIONI DA AGGIUNGERE:\n${testo_grezzo}`;
+                    const promptUser = `MEMORIA ATTUALE (JSON): ${memoria_precedente || '{}'}\n\nNUOVE ISTRUZIONI: ${testo_grezzo}`;
 
                     const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                         method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${GROQ_API_KEY}`,
-                            'Content-Type': 'application/json'
-                        },
+                        headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             model: AI_MODEL,
-                            messages:[
+                            response_format: { type: "json_object" },
+                            messages: [
                                 { role: 'system', content: promptSystem },
                                 { role: 'user', content: promptUser }
                             ],
-                            temperature: 0.3,
+                            temperature: 0.2,
                         })
                     });
 
                     if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
-
                     const data = await groqResponse.json();
-                    const regoleAggiornateHTML = data.choices[0].message.content;
-
-                    return res.status(200).json({ risultato: regoleAggiornateHTML });
+                    return res.status(200).json({ risultato: JSON.parse(data.choices[0].message.content) });
                 }
 
                     // =====================================================================================
