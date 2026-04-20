@@ -1,3 +1,10 @@
+import admin from 'firebase-admin';
+
+// Queste variabili globali sono usate per assicurarsi che Firebase sia inizializzato una sola volta,
+// anche se la funzione Vercel viene "richiamata a caldo" più volte.
+let initialized = false;
+let firestoreDb = null;
+
 export default async function handler(req, res) {
     // Abilita i CORS
     res.setHeader('Access-Control-Allow-Credentials', true);
@@ -14,6 +21,43 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
+    // --- INIZIALIZZAZIONE LAZY DI FIREBASE ADMIN SDK ---
+    // Questo blocco assicura che Firebase sia inizializzato solo la prima volta che la funzione viene chiamata
+    // (o dopo un "cold start" del server), e che il database 'firestoreDb' sia sempre disponibile.
+    if (!initialized) {
+        try {
+            if (!admin.apps.length) { // Controlla se l'app Firebase Admin è già stata inizializzata
+                const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+                if (!serviceAccount) {
+                    console.error("🔥 ERRORE: Manca FIREBASE_SERVICE_ACCOUNT_KEY.");
+                    return res.status(500).json({ error: 'Firebase Service Account Key missing.' });
+                }
+                admin.initializeApp({
+                    credential: admin.credential.cert(JSON.parse(serviceAccount))
+                });
+            }
+            if (admin.apps.length > 0) {
+                firestoreDb = admin.firestore(); // Assegna l'istanza di Firestore alla variabile globale
+                initialized = true; // Imposta il flag a 'true' per indicare che l'inizializzazione è avvenuta con successo
+            } else {
+                console.error("🔥 Errore: Firebase Admin App non inizializzata dopo il tentativo.");
+                return res.status(500).json({ error: 'Firebase Admin App non inizializzata.' });
+            }
+        } catch (error) {
+            console.error("🔥 Errore Init Firebase nell'handler:", error);
+            return res.status(500).json({ error: `DB non operativo. Errore di inizializzazione: ${error.message}` });
+        }
+    }
+
+    // Ora 'firestoreDb' dovrebbe essere sempre inizializzato.
+    // Assegniamo 'db' come alias locale per comodità, così il resto del codice non deve cambiare molto.
+    const db = firestoreDb; 
+    
+    if (!db) { // Ulteriore controllo di sicurezza, se per qualche ragione 'firestoreDb' è ancora nullo.
+        console.error("DB non operativo. Firebase Admin SDK non è stato inizializzato con successo all'uscita del blocco.");
+        return res.status(500).json({ error: 'DB non operativo.' });
+    }
+
     try {
         const payload = req.body;
         const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -22,10 +66,10 @@ export default async function handler(req, res) {
             throw new Error("GROQ_API_KEY mancante nelle variabili d'ambiente di Vercel");
         }
 
-        const AI_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+        // CONFERMATO: Il tuo modello AI perfetto per il 2026.
+        const AI_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'; 
 
         // --- SISTEMA DI SMISTAMENTO (ROUTER CHE RISPETTA LA TUA PRIORITÀ) ---
-        // La tua funzione originale è la priorità (se non c'è una "action" specifica)
         const action = payload.action || 'giudizio';
 
         // =====================================================================================
@@ -122,13 +166,15 @@ export default async function handler(req, res) {
         // AZIONE 2: FORMATTAZIONE REGOLE NEGOZIANTE (IL NUOVO BINARIO 3)
         // =====================================================================================
         else if (action === 'formatta_regole_ai') {
+            const { testo_grezzo } = payload; 
+
             const promptSystem = `Sei un assistente per negozianti. Il tuo compito è prendere un testo scritto dal negoziante (spesso confuso o in dialetto) che spiega come lui calcola i prezzi dei suoi servizi, e trasformarlo in un elenco puntato HTML chiaro, sintetico e professionale in italiano.
             Regole:
             1. Usa SOLO i tag HTML <ul> e <li>. Nessun altro tag, nessun titolo, nessuna introduzione.
             2. Evidenzia bene se i prezzi sono fissi, al metro, all'ora o extra.
             3. Non inventare prezzi, usa solo quelli forniti.`;
 
-            const promptUser = `Testo del negoziante:\n${payload.testo_grezzo}`;
+            const promptUser = `Testo del negoziante:\n${testo_grezzo}`;
 
             const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
@@ -152,135 +198,135 @@ export default async function handler(req, res) {
             const regolePuliteHTML = data.choices[0].message.content;
 
             return res.status(200).json({ risultato: regolePuliteHTML });
-                    }
+        }
 
-                    // =====================================================================================
-                    // AZIONE 3: CHAT AI CONCIERGE (VENDITA E PREVENTIVI REAL-TIME)
-                    // =====================================================================================
-                    else if (action === 'ai_concierge_chat') {
-                                const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription } = payload;
+        // =====================================================================================
+        // AZIONE 3: CHAT AI CONCIERGE (VENDITA E PREVENTIVI REAL-TIME)
+        // =====================================================================================
+        else if (action === 'ai_concierge_chat') {
+            const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription } = payload; 
 
-                                const promptSystem = `Sei l'AI Concierge di Civora per il negozio "${vendorName}".
-                                            Servizio: "${serviceName}".
+            const promptSystem = `Sei l'AI Concierge di Civora per il negozio "${vendorName}".
+                        Servizio: "${serviceName}".
 
-                                            MANUALE PREZZI DA SEGUIRE:
-                                            ${rawInstructions}
+                        MANUALE PREZZI DA SEGUIRE:
+                        ${rawInstructions}
 
-                                            ⚠️ REGOLE FONDAMENTALI DI VENDITA (NON SBAGLIARE):
-                                            1. Tu NON puoi processare pagamenti e NON puoi registrare ordini.
-                                            2. Il tuo UNICO modo per far procedere il cliente è scrivere il comando: [PRENOTA:valore]
-                                            3. Quando il cliente è d'accordo sul preventivo, scrivi una frase di conferma e aggiungi SEMPRE il comando [PRENOTA:valore] alla fine del messaggio.
-                                            4. NON dire mai "Pagamento effettuato". Di' invece che la richiesta verrà inviata al negoziante per la conferma finale.
-                                            5. Se il cliente dice "Sì", "Ok", "Procediamo" o accetta il prezzo, tu rispondi: "Ottimo! Clicca sul tasto qui sotto per inviare la tua richiesta di prenotazione al negozio. [PRENOTA:valore]"
+                        ⚠️ REGOLE FONDAMENTALI DI VENDITA (NON SBAGLIARE):
+                        1. Tu NON puoi processare pagamenti e NON puoi registrare ordini.
+                        2. Il tuo UNICO modo per far procedere il cliente è scrivere il comando: [PRENOTA:valore]
+                        3. Quando il cliente è d'accordo sul preventivo, scrivi una frase di conferma e aggiungi SEMPRE il comando [PRENOTA:valore] alla fine del messaggio.
+                        4. NON dire mai "Pagamento effettuato". Di' invece che la richiesta verrà inviata al negoziante per la conferma finale.
+                        5. Se il cliente dice "Sì", "Ok", "Procediamo" o accetta il prezzo, tu rispondi: "Ottimo! Clicca sul tasto qui sotto per inviare la tua richiesta di prenotazione al negozio. [PRENOTA:valore]"
 
-                                            ESEMPIO:
-                                            Cliente: "Mi va bene 180 euro."
-                                            Tu: "Perfetto! Clicca pure sul tasto qui sotto per confermare la prenotazione dei 100 inviti. Il negozio riceverà i dettagli e ti contatterà per il pagamento. [PRENOTA:180.00]"
+                        ESEMPIO:
+                        Cliente: "Mi va bene 180 euro."
+                        Tu: "Perfetto! Clicca pure sul tasto qui sotto per confermare la prenotazione dei 100 inviti. Il negozio riceverà i dettagli e ti contatterà per il pagamento. [PRENOTA:180.00]"
 
-                                            6. Parla in italiano elegante e professionale.`;
-                                const finalMessages = [{ role: 'system', content: promptSystem }];
-                                const recentHistory = chatHistory.slice(-15);
-                                recentHistory.forEach(msg => finalMessages.push(msg));
+                        6. Parla in italiano elegante e professionale.`;
+            const finalMessages = [{ role: 'system', content: promptSystem }];
+            const recentHistory = chatHistory.slice(-15);
+            recentHistory.forEach(msg => finalMessages.push(msg));
 
-                                const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                                    method: 'POST',
-                                    headers: {
-                                        'Authorization': `Bearer ${GROQ_API_KEY}`,
-                                        'Content-Type': 'application/json'
-                                    },
-                                    body: JSON.stringify({
-                                        model: AI_MODEL,
-                                        messages: finalMessages,
-                                        temperature: 0.5,
-                                    })
-                                });
+            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${GROQ_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: AI_MODEL,
+                    messages: finalMessages,
+                    temperature: 0.5,
+                })
+            });
 
-                                if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
+            if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
 
-                                const data = await groqResponse.json();
-                                const rispostaAI = data.choices[0].message.content;
+            const data = await groqResponse.json();
+            const rispostaAI = data.choices[0].message.content;
 
-                                return res.status(200).json({ risultato: rispostaAI });
-                                        }
+            return res.status(200).json({ risultato: rispostaAI });
+        }
+        
+        // =====================================================================================
+        // AZIONE 4: INVIO SMS OTP TRAMITE MACRODROID (PONTE SMARTPHONE) - AGGIORNATO CON IL TUO URL
+        // =====================================================================================
+        else if (action === 'invia-sms-negoziante') {
+            const { phone, otp, vendorName } = payload;
+            
+            // Messaggio che riceverà il cliente sul suo cellulare
+            const messaggioSms = `Civora: Il tuo codice di conferma per ${vendorName} e' ${otp}`;
+            
+            // RECUPERO IL TUO INDIRIZZO MACRODROID DALLE VARIABILI D'AMBIENTE
+            const MACRODROID_WEBHOOK_URL = process.env.SMS_GATEWAY_URL; 
 
-                                        // =====================================================================================
-                                                // AZIONE 4: INVIO SMS OTP TRAMITE MACRODROID (PONTE SMARTPHONE) - AGGIORNATO CON IL TUO URL
-                                                // =====================================================================================
-                                                else if (action === 'invia-sms-negoziante') {
-                                                    const { phone, otp, vendorName } = payload;
+            if (!MACRODROID_WEBHOOK_URL) {
+                console.error("SMS_GATEWAY_URL non configurato nelle variabili d'ambiente di Vercel.");
+                return res.status(500).json({ error: 'Configurazione SMS MacroDroid mancante. Controlla le variabili d\'ambiente di Vercel.' });
+            }
 
-                                                    // Messaggio che riceverà il cliente sul suo cellulare
-                                                    const messaggioSms = `Civora: Il tuo codice di conferma per ${vendorName} e' ${otp}`;
+            try {
+                // CHIAMIAMO IL TUO WEBHOOK DI MACRODROID CON I PARAMETRI CORRETTI
+                const finalMacroDroidUrl = `${MACRODROID_WEBHOOK_URL}?phone=${encodeURIComponent(phone)}&message=${encodeURIComponent(messaggioSms)}`;
+                
+                // Per il debug, possiamo stampare l'URL che viene chiamato (verrà visualizzato nei log di Vercel)
+                console.log("Chiamando MacroDroid Webhook per invio SMS:", finalMacroDroidUrl);
 
-                                                    // RECUPERO IL TUO INDIRIZZO MACRODROID DALLE VARIABILI D'AMBIENTE
-                                                    const MACRODROID_WEBHOOK_URL = process.env.SMS_GATEWAY_URL;
+                const macroDroidResponse = await fetch(finalMacroDroidUrl);
 
-                                                    if (!MACRODROID_WEBHOOK_URL) {
-                                                        console.error("SMS_GATEWAY_URL non configurato nelle variabili d'ambiente di Vercel.");
-                                                        return res.status(500).json({ error: 'Configurazione SMS MacroDroid mancante. Controlla le variabili d\'ambiente di Vercel.' });
-                                                    }
+                if (!macroDroidResponse.ok) {
+                    // Se MacroDroid non risponde "OK", catturiamo più dettagli sull'errore
+                    const responseText = await macroDroidResponse.text();
+                    console.error("MacroDroid Webhook non ha risposto OK:", macroDroidResponse.status, responseText);
+                    throw new Error(`MacroDroid ha risposto con errore: ${responseText || macroDroidResponse.statusText}`);
+                }
+            
+                return res.status(200).json({ success: true, message: 'Segnale SMS inviato allo smartphone tramite MacroDroid.' });
+            } catch (error) {
+                console.error("Errore invio SMS tramite MacroDroid:", error);
+                // Dettagliamo l'errore per il frontend
+                return res.status(500).json({ error: `Errore invio SMS: ${error.message}` });
+            }
+        }
+                                
+        // =====================================================================================
+        // AZIONE 5: SALVATAGGIO PRENOTAZIONE NEL PROFILO NEGOZIANTE - AGGIUSTATO PER ERRORE 500
+        // =====================================================================================
+        else if (action === 'salva-prenotazione-ai') {
+            // Estraiamo solo i dati che vogliamo salvare nel documento di Firebase
+            const { vendorId, chatTranscript, serviceId, serviceName, customerPhone, totalPrice } = payload;
 
-                                                    try {
-                                                        // CHIAMIAMO IL TUO WEBHOOK DI MACRODROID CON I PARAMETRI CORRETTI
-                                                        const finalMacroDroidUrl = `${MACRODROID_WEBHOOK_URL}?phone=${encodeURIComponent(phone)}&message=${encodeURIComponent(messaggioSms)}`;
+            try {
+                // USIAMO IL METODO PIÙ ROBUSTO PER SALVARE SU FIREBASE CON L'ADMIN SDK
+                // Questo dovrebbe risolvere l'errore 500 che stavi vedendo.
+                const bookingsCollectionRef = db.collection('vendors').doc(vendorId).collection('bookings');
 
-                                                        // Per il debug, possiamo stampare l'URL che viene chiamato (verrà visualizzato nei log di Vercel)
-                                                        console.log("Chiamando MacroDroid Webhook:", finalMacroDroidUrl);
+                await bookingsCollectionRef.add({
+                    serviceId: serviceId,
+                    serviceName: serviceName,
+                    customerPhone: customerPhone,
+                    totalPrice: totalPrice, // Assicurati che totalPrice sia un numero
+                    chatTranscript: JSON.stringify(chatTranscript), // Salva la chat completa come stringa JSON
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(), // Usa il timestamp del server
+                    status: 'pending-ai-quote', // Nuovo status per le prenotazioni generate da AI
+                    type: 'ai_concierge_booking', // Tipo specifico per identificare questa prenotazione AI
+                    vendorId: vendorId // Aggiungiamo vendorId anche nel documento di booking per facilitare le query
+                    // Puoi aggiungere altri campi qui se necessario, es. customerEmail, customerName se li passi nel payload
+                });
 
-                                                        const macroDroidResponse = await fetch(finalMacroDroidUrl);
+                return res.status(200).json({ success: true, message: 'Prenotazione AI salvata con successo.' });
+            } catch (error) {
+                console.error("Errore salvataggio prenotazione AI in Firebase:", error);
+                // Dettagliamo l'errore per il debug
+                return res.status(500).json({ error: 'Errore salvataggio prenotazione AI', details: error.message });
+            }
+        }
 
-                                                        if (!macroDroidResponse.ok) {
-                                                            // Se MacroDroid non risponde "OK", catturiamo più dettagli sull'errore
-                                                            const responseText = await macroDroidResponse.text();
-                                                            console.error("MacroDroid Webhook non ha risposto OK:", macroDroidResponse.status, responseText);
-                                                            throw new Error(`MacroDroid ha risposto con errore: ${responseText || macroDroidResponse.statusText}`);
-                                                        }
-
-                                                        return res.status(200).json({ success: true, message: 'Segnale SMS inviato allo smartphone tramite MacroDroid.' });
-                                                    } catch (error) {
-                                                        console.error("Errore invio SMS tramite MacroDroid:", error);
-                                                        // Dettagliamo l'errore per il frontend
-                                                        return res.status(500).json({ error: `Errore invio SMS: ${error.message}` });
-                                                    }
-                                                }
-
-                                        // =====================================================================================
-                                                // AZIONE 5: SALVATAGGIO PRENOTAZIONE NEL PROFILO NEGOZIANTE - AGGIUSTATO PER ERRORE 500
-                                                // =====================================================================================
-                                                else if (action === 'salva-prenotazione-ai') {
-                                                    // Estraiamo solo i dati che vogliamo salvare nel documento di Firebase
-                                                    const { vendorId, chatTranscript, serviceId, serviceName, customerPhone, totalPrice } = payload;
-
-                                                    try {
-                                                        // USIAMO IL METODO PIÙ ROBUSTO PER SALVARE SU FIREBASE CON L'ADMIN SDK
-                                                        // Questo dovrebbe risolvere l'errore 500 che stavi vedendo.
-                                                        const bookingsCollectionRef = db.collection('vendors').doc(vendorId).collection('bookings');
-
-                                                        await bookingsCollectionRef.add({
-                                                            serviceId: serviceId,
-                                                            serviceName: serviceName,
-                                                            customerPhone: customerPhone,
-                                                            totalPrice: totalPrice, // Assicurati che totalPrice sia un numero
-                                                            chatTranscript: JSON.stringify(chatTranscript), // Salva la chat completa come stringa JSON
-                                                            createdAt: admin.firestore.FieldValue.serverTimestamp(), // Usa il timestamp del server
-                                                            status: 'pending-ai-quote', // Nuovo status per le prenotazioni generate da AI
-                                                            type: 'ai_concierge_booking', // Tipo specifico per identificare questa prenotazione AI
-                                                            vendorId: vendorId // Aggiungiamo vendorId anche nel documento di booking per facilitare le query
-                                                            // Puoi aggiungere altri campi qui se necessario, es. customerEmail, customerName se li passi nel payload
-                                                        });
-
-                                                        return res.status(200).json({ success: true, message: 'Prenotazione AI salvata con successo.' });
-                                                    } catch (error) {
-                                                        console.error("Errore salvataggio prenotazione AI in Firebase:", error);
-                                                        // Dettagliamo l'errore per il debug
-                                                        return res.status(500).json({ error: 'Errore salvataggio prenotazione AI', details: error.message });
-                                                    }
-                                                }
-
-                                        // Se l'azione non è riconosciuta
-                                        else {
-                                            return res.status(400).json({ error: 'Azione non riconosciuta' });
-                                        }
+        // Se l'azione non è riconosciuta
+        else {
+            return res.status(400).json({ error: 'Azione non riconosciuta' });
+        }
 
     } catch (error) {
         console.error("Errore nel Router Civora:", error);
