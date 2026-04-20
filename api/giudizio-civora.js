@@ -250,12 +250,12 @@ export default async function handler(req, res) {
                                                 else if (action === 'salva-prenotazione-ai') {
                                                     // Estraiamo solo i dati che vogliamo salvare nel documento di Firebase
                                                     const { vendorId, chatTranscript, serviceId, serviceName, customerPhone, totalPrice } = payload;
-                                        
+
                                                     try {
                                                         // USIAMO IL METODO PIÙ ROBUSTO PER SALVARE SU FIREBASE CON L'ADMIN SDK
                                                         // Questo dovrebbe risolvere l'errore 500 che stavi vedendo.
                                                         const bookingsCollectionRef = db.collection('vendors').doc(vendorId).collection('bookings');
-                                        
+
                                                         await bookingsCollectionRef.add({
                                                             serviceId: serviceId,
                                                             serviceName: serviceName,
@@ -268,7 +268,7 @@ export default async function handler(req, res) {
                                                             vendorId: vendorId // Aggiungiamo vendorId anche nel documento di booking per facilitare le query
                                                             // Puoi aggiungere altri campi qui se necessario, es. customerEmail, customerName se li passi nel payload
                                                         });
-                                        
+
                                                         return res.status(200).json({ success: true, message: 'Prenotazione AI salvata con successo.' });
                                                     } catch (error) {
                                                         console.error("Errore salvataggio prenotazione AI in Firebase:", error);
