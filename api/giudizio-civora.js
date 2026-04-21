@@ -1,6 +1,37 @@
+import admin from 'firebase-admin';
+
+// Inizializzazione Firebase Admin per le azioni di salvataggio (Action 5)
+if (!admin.apps.length) {
+    admin.initializeApp({
+        credential: admin.credential.cert({
+            projectId: process.env.FIREBASE_PROJECT_ID,
+            clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+            privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        }),
+    });
+}
+
+const db = admin.firestore();
+import admin from 'firebase-admin';
+
+if (!admin.apps.length) {
+    admin.initializeApp({
+        credential: admin.credential.cert({
+            projectId: process.env.FIREBASE_PROJECT_ID,
+            clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+            privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        }),
+    });
+}
+
+const db = admin.firestore();
+
 export default async function handler(req, res) {
     // Abilita i CORS
     res.setHeader('Access-Control-Allow-Credentials', true);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
@@ -166,63 +197,63 @@ export default async function handler(req, res) {
                                         // AZIONE 3: CHAT AI CONCIERGE (VENDITA E PREVENTIVI REAL-TIME)
                                         // =====================================================================================
                                         else if (action === 'ai_concierge_chat') {
-                                                    const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription, isTrisActive, deliveryStrategy } = payload;
-                    
-                                                    // Definiamo il messaggio logistico in base alle impostazioni del profilo
-                                                    let logisticInstructions = "";
-                                                    if (isTrisActive) {
-                                                        logisticInstructions = `
-                                                        ✅ IL MODELLO TRIS È ATTIVO PER QUESTO NEGOZIO.
-                                                        Spiega al cliente che può pagare ora e:
-                                                        - Se è una riparazione: Un Rider passerà a ritirare l'oggetto (Strategia: ${deliveryStrategy}).
-                                                        - Se sono fotocopie/documenti: Può caricare i file subito dopo il pagamento per trovarli pronti in negozio ed evitare la fila.
-                                                        - Specifica che la sicurezza è garantita da contenitori anti-manomissione.`;
-                                                    } else {
-                                                        logisticInstructions = `
-                                                        ❌ IL MODELLO TRIS NON È ATTIVO. 
-                                                        Informa il cliente che dopo il pagamento dovrà recarsi fisicamente in negozio per consegnare l'oggetto o usufruire del servizio.`;
-                                                    }
-                    
-                                                    const promptSystem = `Sei l'AI Concierge di Civora per il negozio "${vendorName}".
-                                                                Servizio richiesto: "${serviceName}".
-                    
-                                                                MANUALE PREZZI E REGOLE DEL NEGOZIO:
-                                                                ${rawInstructions}
-                    
-                                                                ISTRUZIONI LOGISTICHE (IMPORTANTE):
-                                                                ${logisticInstructions}
-                    
-                                                                ⚠️ REGOLE DI CHIUSURA VENDITA:
-                                                                1. Tu NON processi pagamenti. Il tuo compito è convincere il cliente e generare il preventivo.
-                                                                2. Il tuo UNICO comando per attivare il pagamento è: [PRENOTA:valore]
-                                                                3. Quando il cliente accetta il prezzo, proponigli i vantaggi logistici (TRIS o Caricamento File) e chiudi con [PRENOTA:valore].
-                                                                4. NON inventare prezzi. Se non sono nel manuale, chiedi dettagli al cliente.
-                                                                5. Usa un tono da "Commesso Senior": esperto, cordiale, che risolve problemi.`;
-                    
-                                                    const finalMessages = [{ role: 'system', content: promptSystem }];
-                                                    const recentHistory = chatHistory.slice(-15);
-                                                    recentHistory.forEach(msg => finalMessages.push(msg));
-                    
-                                                    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                                                        method: 'POST',
-                                                        headers: {
-                                                            'Authorization': `Bearer ${GROQ_API_KEY}`,
-                                                            'Content-Type': 'application/json'
-                                                        },
-                                                        body: JSON.stringify({
-                                                            model: AI_MODEL,
-                                                            messages: finalMessages,
-                                                            temperature: 0.5,
-                                                        })
-                                                    });
-                    
-                                                    if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
-                    
-                                                    const data = await groqResponse.json();
-                                                    const rispostaAI = data.choices[0].message.content;
-                    
-                                                    return res.status(200).json({ risultato: rispostaAI });
-                                                            }
+                                            const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription, isTrisActive, deliveryStrategy } = payload;
+
+                                            // Definiamo il messaggio logistico in base alle impostazioni del profilo del negoziante
+                                            let logisticInstructions = "";
+                                            if (isTrisActive) {
+                                                logisticInstructions = `
+                                                ✅ IL MODELLO TRIS È ATTIVO PER QUESTO NEGOZIO.
+                                                Spiega al cliente che può pagare ora e:
+                                                - Se è una riparazione: Un Rider passerà a ritirare l'oggetto a casa (Logistica: ${deliveryStrategy}).
+                                                - Se sono fotocopie/documenti: Può caricare i file subito dopo il pagamento per trovarli già stampati ed evitare la fila.
+                                                - Specifica che la sicurezza del ritiro è garantita da contenitori con lucchetto anti-manomissione.`;
+                                            } else {
+                                                logisticInstructions = `
+                                                ❌ IL MODELLO TRIS NON È ATTIVO.
+                                                Informa il cliente che dopo il pagamento dovrà recarsi fisicamente in negozio per consegnare l'oggetto o ritirare il lavoro.`;
+                                            }
+
+                                            const promptSystem = `Sei l'AI Concierge di Civora per il negozio "${vendorName}".
+                                                        Servizio richiesto: "${serviceName}".
+
+                                                        MANUALE PREZZI E REGOLE DEL NEGOZIO:
+                                                        ${rawInstructions}
+
+                                                        ISTRUZIONI LOGISTICHE DA COMUNICARE:
+                                                        ${logisticInstructions}
+
+                                                        ⚠️ REGOLE DI CHIUSURA VENDITA:
+                                                        1. Tu NON processi pagamenti. Il tuo compito è convincere il cliente e generare il preventivo finale.
+                                                        2. Il tuo UNICO modo per far procedere il cliente al pagamento è scrivere il comando: [PRENOTA:valore]
+                                                        3. Quando il cliente accetta il prezzo, spiegagli i vantaggi logistici (TRIS o Salva-fila) e scrivi SEMPRE il comando [PRENOTA:valore] alla fine del messaggio.
+                                                        4. NON inventare prezzi. Se non sono nel manuale, chiedi dettagli al cliente per calcolarli.
+                                                        5. Usa un tono da "Commesso Esperto": cordiale, rassicurante e professionale.`;
+
+                                            const finalMessages = [{ role: 'system', content: promptSystem }];
+                                            const recentHistory = chatHistory.slice(-15);
+                                            recentHistory.forEach(msg => finalMessages.push(msg));
+
+                                            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Authorization': `Bearer ${GROQ_API_KEY}`,
+                                                    'Content-Type': 'application/json'
+                                                },
+                                                body: JSON.stringify({
+                                                    model: AI_MODEL,
+                                                    messages: finalMessages,
+                                                    temperature: 0.5,
+                                                })
+                                            });
+
+                                            if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
+
+                                            const data = await groqResponse.json();
+                                            const rispostaAI = data.choices[0].message.content;
+
+                                            return res.status(200).json({ risultato: rispostaAI });
+                                        }
                                 const finalMessages = [{ role: 'system', content: promptSystem }];
                                 const recentHistory = chatHistory.slice(-15);
                                 recentHistory.forEach(msg => finalMessages.push(msg));
@@ -293,29 +324,25 @@ export default async function handler(req, res) {
                                                 // AZIONE 5: SALVATAGGIO PRENOTAZIONE NEL PROFILO NEGOZIANTE - AGGIUSTATO PER ERRORE 500
                                                 // =====================================================================================
                                                 else if (action === 'salva-prenotazione-ai') {
-                                                    // Estraiamo solo i dati che vogliamo salvare nel documento di Firebase
-                                                    const { vendorId, chatTranscript, serviceId, serviceName, customerPhone, totalPrice } = payload;
-
-                                                    try {
-                                                        // USIAMO IL METODO PIÙ ROBUSTO PER SALVARE SU FIREBASE CON L'ADMIN SDK
-                                                        // Questo dovrebbe risolvere l'errore 500 che stavi vedendo.
-                                                        const bookingsCollectionRef = db.collection('vendors').doc(vendorId).collection('bookings');
-
-                                                        await bookingsCollectionRef.add({
-                                                            serviceId: serviceId,
-                                                            serviceName: serviceName,
-                                                            customerPhone: customerPhone,
-                                                            totalPrice: totalPrice, // Assicurati che totalPrice sia un numero
-                                                            chatTranscript: JSON.stringify(chatTranscript), // Salva la chat completa come stringa JSON
-                                                            createdAt: admin.firestore.FieldValue.serverTimestamp(), // Usa il timestamp del server
-                                                            status: 'pending-ai-quote', // Nuovo status per le prenotazioni generate da AI
-                                                            type: 'ai_concierge_booking', // Tipo specifico per identificare questa prenotazione AI
-                                                            vendorId: vendorId // Aggiungiamo vendorId anche nel documento di booking per facilitare le query
-                                                            // Puoi aggiungere altri campi qui se necessario, es. customerEmail, customerName se li passi nel payload
-                                                        });
-
-                                                        return res.status(200).json({ success: true, message: 'Prenotazione AI salvata con successo.' });
-                                                    } catch (error) {
+                                                                        const { vendorId, chatTranscript, serviceId, serviceName, customerPhone, totalPrice } = payload;
+                                                
+                                                                        try {
+                                                                            const bookingsCollectionRef = db.collection('vendors').doc(vendorId).collection('bookings');
+                                                
+                                                                            await bookingsCollectionRef.add({
+                                                                                serviceId: serviceId,
+                                                                                serviceName: serviceName,
+                                                                                customerPhone: customerPhone,
+                                                                                totalPrice: parseFloat(totalPrice),
+                                                                                chatTranscript: JSON.stringify(chatTranscript),
+                                                                                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                                                                                status: 'pending-ai-quote',
+                                                                                type: 'ai_concierge_booking',
+                                                                                vendorId: vendorId
+                                                                            });
+                                                
+                                                                            return res.status(200).json({ success: true, message: 'Prenotazione AI salvata con successo.' });
+                                                                        } catch (error) {
                                                         console.error("Errore salvataggio prenotazione AI in Firebase:", error);
                                                         // Dettagliamo l'errore per il debug
                                                         return res.status(500).json({ error: 'Errore salvataggio prenotazione AI', details: error.message });
