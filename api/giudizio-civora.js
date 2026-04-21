@@ -163,29 +163,66 @@ export default async function handler(req, res) {
                 }
 
                     // =====================================================================================
-                    // AZIONE 3: CHAT AI CONCIERGE (VENDITA E PREVENTIVI REAL-TIME)
-                    // =====================================================================================
-                    else if (action === 'ai_concierge_chat') {
-                                const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription } = payload;
-
-                                const promptSystem = `Sei l'AI Concierge di Civora per il negozio "${vendorName}".
-                                            Servizio: "${serviceName}".
-
-                                            MANUALE PREZZI DA SEGUIRE:
-                                            ${rawInstructions}
-
-                                            ⚠️ REGOLE FONDAMENTALI DI VENDITA (NON SBAGLIARE):
-                                            1. Tu NON puoi processare pagamenti e NON puoi registrare ordini.
-                                            2. Il tuo UNICO modo per far procedere il cliente è scrivere il comando: [PRENOTA:valore]
-                                            3. Quando il cliente è d'accordo sul preventivo, scrivi una frase di conferma e aggiungi SEMPRE il comando [PRENOTA:valore] alla fine del messaggio.
-                                            4. NON dire mai "Pagamento effettuato". Di' invece che la richiesta verrà inviata al negoziante per la conferma finale.
-                                            5. Se il cliente dice "Sì", "Ok", "Procediamo" o accetta il prezzo, tu rispondi: "Ottimo! Clicca sul tasto qui sotto per inviare la tua richiesta di prenotazione al negozio. [PRENOTA:valore]"
-
-                                            ESEMPIO:
-                                            Cliente: "Mi va bene 180 euro."
-                                            Tu: "Perfetto! Clicca pure sul tasto qui sotto per confermare la prenotazione dei 100 inviti. Il negozio riceverà i dettagli e ti contatterà per il pagamento. [PRENOTA:180.00]"
-
-                                            6. Parla in italiano elegante e professionale.`;
+                                        // AZIONE 3: CHAT AI CONCIERGE (VENDITA E PREVENTIVI REAL-TIME)
+                                        // =====================================================================================
+                                        else if (action === 'ai_concierge_chat') {
+                                                    const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription, isTrisActive, deliveryStrategy } = payload;
+                    
+                                                    // Definiamo il messaggio logistico in base alle impostazioni del profilo
+                                                    let logisticInstructions = "";
+                                                    if (isTrisActive) {
+                                                        logisticInstructions = `
+                                                        ✅ IL MODELLO TRIS È ATTIVO PER QUESTO NEGOZIO.
+                                                        Spiega al cliente che può pagare ora e:
+                                                        - Se è una riparazione: Un Rider passerà a ritirare l'oggetto (Strategia: ${deliveryStrategy}).
+                                                        - Se sono fotocopie/documenti: Può caricare i file subito dopo il pagamento per trovarli pronti in negozio ed evitare la fila.
+                                                        - Specifica che la sicurezza è garantita da contenitori anti-manomissione.`;
+                                                    } else {
+                                                        logisticInstructions = `
+                                                        ❌ IL MODELLO TRIS NON È ATTIVO. 
+                                                        Informa il cliente che dopo il pagamento dovrà recarsi fisicamente in negozio per consegnare l'oggetto o usufruire del servizio.`;
+                                                    }
+                    
+                                                    const promptSystem = `Sei l'AI Concierge di Civora per il negozio "${vendorName}".
+                                                                Servizio richiesto: "${serviceName}".
+                    
+                                                                MANUALE PREZZI E REGOLE DEL NEGOZIO:
+                                                                ${rawInstructions}
+                    
+                                                                ISTRUZIONI LOGISTICHE (IMPORTANTE):
+                                                                ${logisticInstructions}
+                    
+                                                                ⚠️ REGOLE DI CHIUSURA VENDITA:
+                                                                1. Tu NON processi pagamenti. Il tuo compito è convincere il cliente e generare il preventivo.
+                                                                2. Il tuo UNICO comando per attivare il pagamento è: [PRENOTA:valore]
+                                                                3. Quando il cliente accetta il prezzo, proponigli i vantaggi logistici (TRIS o Caricamento File) e chiudi con [PRENOTA:valore].
+                                                                4. NON inventare prezzi. Se non sono nel manuale, chiedi dettagli al cliente.
+                                                                5. Usa un tono da "Commesso Senior": esperto, cordiale, che risolve problemi.`;
+                    
+                                                    const finalMessages = [{ role: 'system', content: promptSystem }];
+                                                    const recentHistory = chatHistory.slice(-15);
+                                                    recentHistory.forEach(msg => finalMessages.push(msg));
+                    
+                                                    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                                                        method: 'POST',
+                                                        headers: {
+                                                            'Authorization': `Bearer ${GROQ_API_KEY}`,
+                                                            'Content-Type': 'application/json'
+                                                        },
+                                                        body: JSON.stringify({
+                                                            model: AI_MODEL,
+                                                            messages: finalMessages,
+                                                            temperature: 0.5,
+                                                        })
+                                                    });
+                    
+                                                    if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
+                    
+                                                    const data = await groqResponse.json();
+                                                    const rispostaAI = data.choices[0].message.content;
+                    
+                                                    return res.status(200).json({ risultato: rispostaAI });
+                                                            }
                                 const finalMessages = [{ role: 'system', content: promptSystem }];
                                 const recentHistory = chatHistory.slice(-15);
                                 recentHistory.forEach(msg => finalMessages.push(msg));
