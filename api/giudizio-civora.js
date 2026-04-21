@@ -12,7 +12,7 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
-import admin from 'firebase-admin';
+const admin = require('firebase-admin');
 
 if (!admin.apps.length) {
     admin.initializeApp({
@@ -26,7 +26,7 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
     // Abilita i CORS
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -325,10 +325,10 @@ export default async function handler(req, res) {
                                                 // =====================================================================================
                                                 else if (action === 'salva-prenotazione-ai') {
                                                                         const { vendorId, chatTranscript, serviceId, serviceName, customerPhone, totalPrice } = payload;
-                                                
+
                                                                         try {
                                                                             const bookingsCollectionRef = db.collection('vendors').doc(vendorId).collection('bookings');
-                                                
+
                                                                             await bookingsCollectionRef.add({
                                                                                 serviceId: serviceId,
                                                                                 serviceName: serviceName,
@@ -340,7 +340,7 @@ export default async function handler(req, res) {
                                                                                 type: 'ai_concierge_booking',
                                                                                 vendorId: vendorId
                                                                             });
-                                                
+
                                                                             return res.status(200).json({ success: true, message: 'Prenotazione AI salvata con successo.' });
                                                                         } catch (error) {
                                                         console.error("Errore salvataggio prenotazione AI in Firebase:", error);
