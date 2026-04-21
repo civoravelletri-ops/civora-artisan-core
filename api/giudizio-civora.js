@@ -1,4 +1,4 @@
-import admin from 'firebase-admin';
+const admin = require('firebase-admin');
 
 // Inizializzazione Firebase Admin per le azioni di salvataggio (Action 5)
 if (!admin.apps.length) {
@@ -12,7 +12,8 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
-const admin = require('firebase-admin');
+
+module.exports = async function handler(req, res) {
 
 if (!admin.apps.length) {
     admin.initializeApp({
