@@ -1,19 +1,4 @@
-const admin = require('firebase-admin');
-
-// Inizializzazione Firebase Admin per le azioni di salvataggio
-if (!admin.apps.length) {
-    admin.initializeApp({
-        credential: admin.credential.cert({
-            projectId: process.env.FIREBASE_PROJECT_ID,
-            clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-            privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-        }),
-    });
-}
-
-const db = admin.firestore();
-
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
     // Abilita i CORS
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -38,6 +23,9 @@ module.exports = async function handler(req, res) {
         }
 
         const AI_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+        // --- SISTEMA DI SMISTAMENTO (ROUTER CHE RISPETTA LA TUA PRIORITÀ) ---
+        // La tua funzione originale è la priorità (se non c'è una "action" specifica)
         const action = payload.action || 'giudizio';
 
         // =====================================================================================
@@ -131,165 +119,179 @@ module.exports = async function handler(req, res) {
         }
 
         // =====================================================================================
-        // AZIONE 2: IL CERVELLO DELL'ASSISTENTE (ESTRAZIONE DATI E MEMORIA)
-        // =====================================================================================
-        else if (action === 'formatta_regole_ai') {
-            const { testo_grezzo, memoria_precedente } = payload;
+                // AZIONE 2: IL CERVELLO DELL'ASSISTENTE (ESTRAZIONE DATI E MEMORIA)
+                // =====================================================================================
+                else if (action === 'formatta_regole_ai') {
+                    const { testo_grezzo, memoria_precedente } = payload;
 
-            const promptSystem = `Sei un analista di dati per negozi. Il tuo compito è AGGIORNARE il cervello di un assistente digitale.
-            Riceverai nuove istruzioni dal negoziante e dovrai unirle a quelle vecchie.
+                    const promptSystem = `Sei un analista di dati per negozi. Il tuo compito è AGGIORNARE il cervello di un assistente digitale.
+                    Riceverai nuove istruzioni dal negoziante e dovrai unirle a quelle vecchie.
 
-            DEVI RISPONDERE ESCLUSIVAMENTE CON UN OGGETTO JSON.
+                    DEVI RISPONDERE ESCLUSIVAMENTE CON UN OGGETTO JSON.
 
-            Campi da estrarre/aggiornare:
-            - store_owner: Nome del titolare.
-            - phone_fixed: Numero di telefono fisso.
-            - whatsapp: Numero WhatsApp.
-            - email_business: Email per i clienti.
-            - compiled_instructions: Tutto il resto delle regole (prezzi, orari, info) formattate in HTML <ul><li> chiaro e professionale.
+                    Campi da estrarre/aggiornare:
+                    - store_owner: Nome del titolare.
+                    - phone_fixed: Numero di telefono fisso.
+                    - whatsapp: Numero WhatsApp.
+                    - email_business: Email per i clienti.
+                    - compiled_instructions: Tutto il resto delle regole (prezzi, orari, info) formattate in HTML <ul><li> chiaro e professionale.
 
-            REGOLE:
-            - Se un dato (es. whatsapp) non è presente nel testo nuovo ma c'era nel vecchio, MANTIENI il vecchio.
-            - Se il testo nuovo dà un nuovo numero, SOSTITUISCI il vecchio.
-            - compiled_instructions deve essere un unico blocco HTML che unisce tutto in modo logico.`;
+                    REGOLE:
+                    - Se un dato (es. whatsapp) non è presente nel testo nuovo ma c'era nel vecchio, MANTIENI il vecchio.
+                    - Se il testo nuovo dà un nuovo numero, SOSTITUISCI il vecchio.
+                    - compiled_instructions deve essere un unico blocco HTML che unisce tutto in modo logico.`;
 
-            const promptUser = `MEMORIA ATTUALE (JSON): ${memoria_precedente || '{}'}\n\nNUOVE ISTRUZIONI: ${testo_grezzo}`;
+                    const promptUser = `MEMORIA ATTUALE (JSON): ${memoria_precedente || '{}'}\n\nNUOVE ISTRUZIONI: ${testo_grezzo}`;
 
-            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: AI_MODEL,
-                    response_format: { type: "json_object" },
-                    messages:[
-                        { role: 'system', content: promptSystem },
-                        { role: 'user', content: promptUser }
-                    ],
-                    temperature: 0.2,
-                })
-            });
+                    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: AI_MODEL,
+                            response_format: { type: "json_object" },
+                            messages: [
+                                { role: 'system', content: promptSystem },
+                                { role: 'user', content: promptUser }
+                            ],
+                            temperature: 0.2,
+                        })
+                    });
 
-            if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
-            const data = await groqResponse.json();
-            return res.status(200).json({ risultato: JSON.parse(data.choices[0].message.content) });
-        }
+                    if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
+                    const data = await groqResponse.json();
+                    return res.status(200).json({ risultato: JSON.parse(data.choices[0].message.content) });
+                }
 
-        // =====================================================================================
-        // AZIONE 3: CHAT AI CONCIERGE (VENDITA E PREVENTIVI REAL-TIME CON TRIS)
-        // =====================================================================================
-        else if (action === 'ai_concierge_chat') {
-            const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription, isTrisActive, deliveryStrategy } = payload;
+                    // =====================================================================================
+                    // AZIONE 3: CHAT AI CONCIERGE (VENDITA E PREVENTIVI REAL-TIME)
+                    // =====================================================================================
+                    else if (action === 'ai_concierge_chat') {
+                                const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription } = payload;
 
-            // Definiamo il messaggio logistico in base alle impostazioni del profilo del negoziante
-            let logisticInstructions = "";
-            if (isTrisActive) {
-                logisticInstructions = `
-                ✅ IL MODELLO TRIS È ATTIVO PER QUESTO NEGOZIO.
-                Spiega al cliente che può pagare ora e:
-                - Se è una riparazione: Un Rider passerà a ritirare l'oggetto a casa (Logistica: ${deliveryStrategy}).
-                - Se sono fotocopie/documenti: Può caricare i file subito dopo il pagamento per trovarli già stampati ed evitare la fila.
-                - Specifica che la sicurezza del ritiro è garantita da contenitori con lucchetto anti-manomissione.`;
-            } else {
-                logisticInstructions = `
-                ❌ IL MODELLO TRIS NON È ATTIVO. 
-                Informa il cliente che dopo il pagamento dovrà recarsi fisicamente in negozio per consegnare l'oggetto o ritirare il lavoro.`;
-            }
+                                const promptSystem = `Sei l'AI Concierge di Civora per il negozio "${vendorName}".
+                                            Servizio: "${serviceName}".
 
-            const promptSystem = `Sei l'AI Concierge di Civora per il negozio "${vendorName}".
-                        Servizio richiesto: "${serviceName}".
+                                            MANUALE PREZZI DA SEGUIRE:
+                                            ${rawInstructions}
 
-                        MANUALE PREZZI E REGOLE DEL NEGOZIO:
-                        ${rawInstructions}
+                                            ⚠️ REGOLE FONDAMENTALI DI VENDITA (NON SBAGLIARE):
+                                            1. Tu NON puoi processare pagamenti e NON puoi registrare ordini.
+                                            2. Il tuo UNICO modo per far procedere il cliente è scrivere il comando: [PRENOTA:valore]
+                                            3. Quando il cliente è d'accordo sul preventivo, scrivi una frase di conferma e aggiungi SEMPRE il comando [PRENOTA:valore] alla fine del messaggio.
+                                            4. NON dire mai "Pagamento effettuato". Di' invece che la richiesta verrà inviata al negoziante per la conferma finale.
+                                            5. Se il cliente dice "Sì", "Ok", "Procediamo" o accetta il prezzo, tu rispondi: "Ottimo! Clicca sul tasto qui sotto per inviare la tua richiesta di prenotazione al negozio. [PRENOTA:valore]"
 
-                        ISTRUZIONI LOGISTICHE DA COMUNICARE:
-                        ${logisticInstructions}
+                                            ESEMPIO:
+                                            Cliente: "Mi va bene 180 euro."
+                                            Tu: "Perfetto! Clicca pure sul tasto qui sotto per confermare la prenotazione dei 100 inviti. Il negozio riceverà i dettagli e ti contatterà per il pagamento. [PRENOTA:180.00]"
 
-                        ⚠️ REGOLE DI CHIUSURA VENDITA:
-                        1. Tu NON processi pagamenti. Il tuo compito è convincere il cliente e generare il preventivo finale.
-                        2. Il tuo UNICO modo per far procedere il cliente al pagamento è scrivere il comando: [PRENOTA:valore]
-                        3. Quando il cliente accetta il prezzo, spiegagli i vantaggi logistici (TRIS o Salva-fila) e scrivi SEMPRE il comando [PRENOTA:valore] alla fine del messaggio.
-                        4. NON inventare prezzi. Se non sono nel manuale, chiedi dettagli al cliente per calcolarli.
-                        5. Usa un tono da "Commesso Esperto": cordiale, rassicurante e professionale.`;
+                                            6. Parla in italiano elegante e professionale.`;
+                                const finalMessages = [{ role: 'system', content: promptSystem }];
+                                const recentHistory = chatHistory.slice(-15);
+                                recentHistory.forEach(msg => finalMessages.push(msg));
 
-            const finalMessages = [{ role: 'system', content: promptSystem }];
-            const recentHistory = chatHistory.slice(-15);
-            recentHistory.forEach(msg => finalMessages.push(msg));
+                                const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Authorization': `Bearer ${GROQ_API_KEY}`,
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify({
+                                        model: AI_MODEL,
+                                        messages: finalMessages,
+                                        temperature: 0.5,
+                                    })
+                                });
 
-            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${GROQ_API_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    model: AI_MODEL,
-                    messages: finalMessages,
-                    temperature: 0.5,
-                })
-            });
+                                if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
 
-            if (!groqResponse.ok) throw new Error(`Errore Groq: ${await groqResponse.text()}`);
+                                const data = await groqResponse.json();
+                                const rispostaAI = data.choices[0].message.content;
 
-            const data = await groqResponse.json();
-            const rispostaAI = data.choices[0].message.content;
+                                return res.status(200).json({ risultato: rispostaAI });
+                                        }
 
-            return res.status(200).json({ risultato: rispostaAI });
-        }
+                                        // =====================================================================================
+                                                // AZIONE 4: INVIO SMS OTP TRAMITE MACRODROID (PONTE SMARTPHONE) - AGGIORNATO CON IL TUO URL
+                                                // =====================================================================================
+                                                else if (action === 'invia-sms-negoziante') {
+                                                    const { phone, otp, vendorName } = payload;
 
-        // =====================================================================================
-        // AZIONE 4: INVIO SMS OTP TRAMITE MACRODROID (PONTE SMARTPHONE)
-        // =====================================================================================
-        else if (action === 'invia-sms-negoziante') {
-            const { phone, otp, vendorName } = payload;
+                                                    // Messaggio che riceverà il cliente sul suo cellulare
+                                                    const messaggioSms = `Civora: Il tuo codice di conferma per ${vendorName} e' ${otp}`;
 
-            const messaggioSms = `Civora: Il tuo codice di conferma per ${vendorName} e' ${otp}`;
-            const MACRODROID_WEBHOOK_URL = process.env.SMS_GATEWAY_URL;
+                                                    // RECUPERO IL TUO INDIRIZZO MACRODROID DALLE VARIABILI D'AMBIENTE
+                                                    const MACRODROID_WEBHOOK_URL = process.env.SMS_GATEWAY_URL;
 
-            if (!MACRODROID_WEBHOOK_URL) {
-                console.error("SMS_GATEWAY_URL non configurato.");
-                return res.status(500).json({ error: 'Configurazione SMS MacroDroid mancante.' });
-            }
+                                                    if (!MACRODROID_WEBHOOK_URL) {
+                                                        console.error("SMS_GATEWAY_URL non configurato nelle variabili d'ambiente di Vercel.");
+                                                        return res.status(500).json({ error: 'Configurazione SMS MacroDroid mancante. Controlla le variabili d\'ambiente di Vercel.' });
+                                                    }
 
-            const finalMacroDroidUrl = `${MACRODROID_WEBHOOK_URL}?phone=${encodeURIComponent(phone)}&message=${encodeURIComponent(messaggioSms)}`;
-            const macroDroidResponse = await fetch(finalMacroDroidUrl);
+                                                    try {
+                                                        // CHIAMIAMO IL TUO WEBHOOK DI MACRODROID CON I PARAMETRI CORRETTI
+                                                        const finalMacroDroidUrl = `${MACRODROID_WEBHOOK_URL}?phone=${encodeURIComponent(phone)}&message=${encodeURIComponent(messaggioSms)}`;
 
-            if (!macroDroidResponse.ok) {
-                const responseText = await macroDroidResponse.text();
-                throw new Error(`MacroDroid ha risposto con errore: ${responseText || macroDroidResponse.statusText}`);
-            }
+                                                        // Per il debug, possiamo stampare l'URL che viene chiamato (verrà visualizzato nei log di Vercel)
+                                                        console.log("Chiamando MacroDroid Webhook:", finalMacroDroidUrl);
 
-            return res.status(200).json({ success: true, message: 'Segnale SMS inviato allo smartphone.' });
-        }
+                                                        const macroDroidResponse = await fetch(finalMacroDroidUrl);
 
-        // =====================================================================================
-        // AZIONE 5: SALVATAGGIO PRENOTAZIONE NEL PROFILO NEGOZIANTE
-        // =====================================================================================
-        else if (action === 'salva-prenotazione-ai') {
-            const { vendorId, chatTranscript, serviceId, serviceName, customerPhone, totalPrice } = payload;
-            const bookingsCollectionRef = db.collection('vendors').doc(vendorId).collection('bookings');
+                                                        if (!macroDroidResponse.ok) {
+                                                            // Se MacroDroid non risponde "OK", catturiamo più dettagli sull'errore
+                                                            const responseText = await macroDroidResponse.text();
+                                                            console.error("MacroDroid Webhook non ha risposto OK:", macroDroidResponse.status, responseText);
+                                                            throw new Error(`MacroDroid ha risposto con errore: ${responseText || macroDroidResponse.statusText}`);
+                                                        }
 
-            await bookingsCollectionRef.add({
-                serviceId: serviceId,
-                serviceName: serviceName,
-                customerPhone: customerPhone,
-                totalPrice: parseFloat(totalPrice),
-                chatTranscript: JSON.stringify(chatTranscript),
-                createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                status: 'pending-ai-quote',
-                type: 'ai_concierge_booking',
-                vendorId: vendorId
-            });
+                                                        return res.status(200).json({ success: true, message: 'Segnale SMS inviato allo smartphone tramite MacroDroid.' });
+                                                    } catch (error) {
+                                                        console.error("Errore invio SMS tramite MacroDroid:", error);
+                                                        // Dettagliamo l'errore per il frontend
+                                                        return res.status(500).json({ error: `Errore invio SMS: ${error.message}` });
+                                                    }
+                                                }
 
-            return res.status(200).json({ success: true, message: 'Prenotazione AI salvata con successo.' });
-        }
+                                        // =====================================================================================
+                                                // AZIONE 5: SALVATAGGIO PRENOTAZIONE NEL PROFILO NEGOZIANTE - AGGIUSTATO PER ERRORE 500
+                                                // =====================================================================================
+                                                else if (action === 'salva-prenotazione-ai') {
+                                                    // Estraiamo solo i dati che vogliamo salvare nel documento di Firebase
+                                                    const { vendorId, chatTranscript, serviceId, serviceName, customerPhone, totalPrice } = payload;
 
-        // Se l'azione non è riconosciuta
-        else {
-            return res.status(400).json({ error: 'Azione non riconosciuta' });
-        }
+                                                    try {
+                                                        // USIAMO IL METODO PIÙ ROBUSTO PER SALVARE SU FIREBASE CON L'ADMIN SDK
+                                                        // Questo dovrebbe risolvere l'errore 500 che stavi vedendo.
+                                                        const bookingsCollectionRef = db.collection('vendors').doc(vendorId).collection('bookings');
+
+                                                        await bookingsCollectionRef.add({
+                                                            serviceId: serviceId,
+                                                            serviceName: serviceName,
+                                                            customerPhone: customerPhone,
+                                                            totalPrice: totalPrice, // Assicurati che totalPrice sia un numero
+                                                            chatTranscript: JSON.stringify(chatTranscript), // Salva la chat completa come stringa JSON
+                                                            createdAt: admin.firestore.FieldValue.serverTimestamp(), // Usa il timestamp del server
+                                                            status: 'pending-ai-quote', // Nuovo status per le prenotazioni generate da AI
+                                                            type: 'ai_concierge_booking', // Tipo specifico per identificare questa prenotazione AI
+                                                            vendorId: vendorId // Aggiungiamo vendorId anche nel documento di booking per facilitare le query
+                                                            // Puoi aggiungere altri campi qui se necessario, es. customerEmail, customerName se li passi nel payload
+                                                        });
+
+                                                        return res.status(200).json({ success: true, message: 'Prenotazione AI salvata con successo.' });
+                                                    } catch (error) {
+                                                        console.error("Errore salvataggio prenotazione AI in Firebase:", error);
+                                                        // Dettagliamo l'errore per il debug
+                                                        return res.status(500).json({ error: 'Errore salvataggio prenotazione AI', details: error.message });
+                                                    }
+                                                }
+
+                                        // Se l'azione non è riconosciuta
+                                        else {
+                                            return res.status(400).json({ error: 'Azione non riconosciuta' });
+                                        }
 
     } catch (error) {
         console.error("Errore nel Router Civora:", error);
-        return res.status(500).json({ error: error.message });
+        res.status(500).json({ error: error.message });
     }
-};
+}
