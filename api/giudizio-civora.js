@@ -325,25 +325,37 @@ module.exports = async function handler(req, res) {
                                                 // AZIONE 5: SALVATAGGIO PRENOTAZIONE NEL PROFILO NEGOZIANTE - AGGIUSTATO PER ERRORE 500
                                                 // =====================================================================================
                                                 else if (action === 'salva-prenotazione-ai') {
-                                                                        const { vendorId, chatTranscript, serviceId, serviceName, customerPhone, totalPrice } = payload;
-
-                                                                        try {
-                                                                            const bookingsCollectionRef = db.collection('vendors').doc(vendorId).collection('bookings');
-
-                                                                            await bookingsCollectionRef.add({
-                                                                                serviceId: serviceId,
-                                                                                serviceName: serviceName,
-                                                                                customerPhone: customerPhone,
-                                                                                totalPrice: parseFloat(totalPrice),
-                                                                                chatTranscript: JSON.stringify(chatTranscript),
-                                                                                createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                                                                                status: 'pending-ai-quote',
-                                                                                type: 'ai_concierge_booking',
-                                                                                vendorId: vendorId
-                                                                            });
-
-                                                                            return res.status(200).json({ success: true, message: 'Prenotazione AI salvata con successo.' });
-                                                                        } catch (error) {
+                                                            const { vendorId, chatTranscript, serviceId, serviceName, customerPhone, totalPrice } = payload;
+                                                            try {
+                                                                const bookingsCollectionRef = db.collection('vendors').doc(vendorId).collection('bookings');
+                                                
+                                                                await bookingsCollectionRef.add({
+                                                                    serviceId: serviceId,
+                                                                    serviceName: serviceName,
+                                                                    customerPhone: customerPhone,
+                                                                    totalPrice: parseFloat(totalPrice),
+                                                                    chatTranscript: JSON.stringify(chatTranscript),
+                                                                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                                                                    status: 'pending-ai-quote',
+                                                                    type: 'ai_concierge_booking',
+                                                                    vendorId: vendorId
+                                                                });
+                                                
+                                                                return res.status(200).json({ success: true, message: 'Prenotazione AI salvata con successo.' });
+                                                            } catch (error) {
+                                                                console.error("Errore salvataggio prenotazione AI:", error);
+                                                                return res.status(500).json({ error: 'Errore salvataggio prenotazione AI', details: error.message });
+                                                            }
+                                                        }
+                                                        else {
+                                                            return res.status(400).json({ error: 'Azione non riconosciuta' });
+                                                        }
+                                                
+                                                    } catch (error) {
+                                                        console.error("Errore nel Router Civora:", error);
+                                                        res.status(500).json({ error: error.message });
+                                                    }
+                                                };
                                                         console.error("Errore salvataggio prenotazione AI in Firebase:", error);
                                                         // Dettagliamo l'errore per il debug
                                                         return res.status(500).json({ error: 'Errore salvataggio prenotazione AI', details: error.message });
