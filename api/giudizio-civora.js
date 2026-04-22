@@ -42,8 +42,16 @@ export default async function handler(req, res) {
             if (imagesToAnalyze.length > 0) {
                 try {
                     const visionContent =[
-                        { type: 'text', text: "Analizza queste immagini del prodotto (possono essere varianti dello stesso oggetto). Dimmi cosa vedi: colori, materiali, freschezza. Se vedi che è un'opera artigianale o un bouquet, enfatizza la composizione manuale. Se vedi varianti di colore, segnalalo. Questo mi serve per capire se è un pezzo unico o industriale." }
-                    ];
+                                            {
+                                                type: 'text',
+                                                text: `AGISCI COME UN SISTEMA DI VISIONE UNIVERSALE PER UN ASSISTENTE DI NEGOZIO.
+                                                Analizza le immagini e comportati così:
+                                                1. SE VEDI TESTO O APPUNTI: Trascrivili parola per parola. È fondamentale per l'addestramento.
+                                                2. SE VEDI UN PRODOTTO: Descrivi materiali, stile, colori e punti di forza.
+                                                3. SE VEDI UN LISTINO: Estrai nomi dei servizi e prezzi.
+                                                Non fare preamboli, vai dritto al contenuto utile.`
+                                            }
+                                        ];
 
                     imagesToAnalyze.forEach(url => {
                         visionContent.push({ type: 'image_url', image_url: { url: url } });
@@ -69,21 +77,19 @@ export default async function handler(req, res) {
                 }
             }
 
-            const promptSystem = `Sei un "Concierge" esperto, un personal shopper imparziale e onesto.
-            REGOLE FONDAMENTALI:
-            1. Se l'analisi visiva o i dati indicano un prodotto ARTIGIANALE (fiori, artigianato, cibo), non cercare il Brand. Valuta l'unicità, la freschezza e l'estetica del pezzo unico.
-            2. Se è un prodotto INDUSTRIALE, valuta marca e specifiche tecniche.
-            3. Sii super onesto: evidenzia pregi e difetti reali (es: stagionalità per i fiori, o vestibilità per abiti).
-            4. Il tono deve essere quello di un esperto che ha visto il prodotto e lo commenta per un amico.
-            5. Ricorda al cliente che acquistando tramite questo negozio fisico locale ha garanzia di originalità, scontrino e assistenza umana reale.
-            6. DEVI RISPONDERE SOLO CON UN OGGETTO JSON VALIDO.
+            const promptSystem = `Sei l'AI Core di Civora. Il tuo compito è analizzare i dati visivi e testuali per aiutare il negoziante o il cliente.
+                        REGOLE DI ANALISI:
+                        1. Se l'input contiene TRASCRIZIONI DI APPUNTI o REGOLE: Il tuo "summary" deve essere la lista pulita e ordinata di quelle regole per addestrare l'assistente Jonny.
+                        2. Se l'input riguarda un PRODOTTO: Comportati come un Concierge onesto, evidenziando pregi (pros) e difetti (cons).
+                        3. Se vedi dati ARTIGIANALI: Enfatizza l'unicità e il lavoro manuale.
+                        4. DEVI SEMPRE RISPONDERE SOLO CON UN OGGETTO JSON VALIDO.
 
-            Formato JSON:
-            {
-                "summary": "Breve riassunto emozionale e onesto...",
-                "pros":["Vantaggio 1", "Vantaggio 2"],
-                "cons": ["Svantaggio reale 1"]
-            }`;
+                        Formato JSON:
+                        {
+                            "summary": "Contenuto principale (regole estratte o descrizione prodotto)...",
+                            "pros":["Punto di forza 1 o nota importante 1", "Punto di forza 2"],
+                            "cons": ["Eventuale criticità o limite"]
+                        }`;
 
             const promptUser = `Dati del prodotto:
             - Nome: ${productData.productName}
@@ -167,7 +173,7 @@ export default async function handler(req, res) {
                                         // =====================================================================================
                                         else if (action === 'ai_concierge_chat') {
                                             const { chatHistory, serviceName, vendorName, rawInstructions, serviceDescription, isTrisActive, deliveryStrategy } = payload;
-                    
+
                                             // Definiamo il messaggio logistico in base alle impostazioni del profilo del negoziante
                                             let logisticInstructions = "";
                                             if (isTrisActive) {
@@ -179,30 +185,30 @@ export default async function handler(req, res) {
                                                 - Specifica che la sicurezza del ritiro è garantita da contenitori con lucchetto anti-manomissione.`;
                                             } else {
                                                 logisticInstructions = `
-                                                ❌ IL MODELLO TRIS NON È ATTIVO. 
+                                                ❌ IL MODELLO TRIS NON È ATTIVO.
                                                 Informa il cliente che dopo il pagamento dovrà recarsi fisicamente in negozio per consegnare l'oggetto o ritirare il lavoro.`;
                                             }
-                    
+
                                             const promptSystem = `Sei l'AI Concierge di Civora per il negozio "${vendorName}".
                                                         Servizio richiesto: "${serviceName}".
-                    
+
                                                         MANUALE PREZZI E REGOLE DEL NEGOZIO:
                                                         ${rawInstructions}
-                    
+
                                                         ISTRUZIONI LOGISTICHE DA COMUNICARE:
                                                         ${logisticInstructions}
-                    
+
                                                         ⚠️ REGOLE DI CHIUSURA VENDITA:
                                                         1. Tu NON processi pagamenti. Il tuo compito è convincere il cliente e generare il preventivo finale.
                                                         2. Il tuo UNICO modo per far procedere il cliente al pagamento è scrivere il comando:[PRENOTA:valore]
                                                         3. Quando il cliente accetta il prezzo, spiegagli i vantaggi logistici (TRIS o Salva-fila) e scrivi SEMPRE il comando[PRENOTA:valore] alla fine del messaggio.
                                                         4. NON inventare prezzi. Se non sono nel manuale, chiedi dettagli al cliente per calcolarli.
                                                         5. Usa un tono da "Commesso Esperto": cordiale, rassicurante e professionale.`;
-                    
+
                                             const finalMessages =[{ role: 'system', content: promptSystem }];
                                             const recentHistory = chatHistory.slice(-15);
                                             recentHistory.forEach(msg => finalMessages.push(msg));
-                    
+
                                             const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                                                 method: 'POST',
                                                 headers: {
@@ -215,12 +221,12 @@ export default async function handler(req, res) {
                                                     temperature: 0.5,
                                                 })
                                             });
-                    
+
                                             if (!groqResponse.ok) throw new Error(`Errore da Groq: ${await groqResponse.text()}`);
-                    
+
                                             const data = await groqResponse.json();
                                             const rispostaAI = data.choices[0].message.content;
-                    
+
                                             return res.status(200).json({ risultato: rispostaAI });
                                         }
 
