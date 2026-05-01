@@ -193,25 +193,26 @@ export default async function handler(req, res) {
         // NUOVO: SE È UNA RICHIESTA VISIVA (FOTO)
         let responseFormat = null;
         if (campo === "visione_immagine") {
-            aiModel = "meta-llama/llama-4-scout-17b-16e-instruct"; // ID ESATTO DAI DOCS
-            responseFormat = { "type": "json_object" }; // ATTIVA MODALITÀ JSON
-            messages = [
-                {
-                    role: "user",
-                    content: [
+                    // Utilizziamo il modello Vision ufficiale di Groq
+                    aiModel = "llama-3.2-11b-vision-preview"; 
+                    responseFormat = { "type": "json_object" }; // ATTIVA MODALITÀ JSON
+                    messages = [
                         {
-                            type: "text",
-                            text: "Analizza questa immagine di un prodotto. Crea un titolo (max 60 caratteri) e una descrizione (3-4 righe). Rispondi in formato JSON con chiavi 'titolo' e 'descrizione'."
-                        },
-                        {
-                            type: "image_url",
-                            image_url: { url: contesto.imageUrl }
+                            role: "user",
+                            content: [
+                                {
+                                    type: "text",
+                                    text: "Analizza questa immagine di un prodotto per un mercatino dell'usato o bazar. Crea un titolo accattivante (max 60 caratteri), una descrizione persuasiva (3-4 righe) e stima un prezzo netto realistico per la vendita (restituisci solo il numero). Rispondi ESCLUSIVAMENTE in formato JSON con chiavi: 'titolo', 'descrizione', 'prezzo'."
+                                },
+                                {
+                                    type: "image_url",
+                                    image_url: { url: contesto.imageUrl }
+                                }
+                            ]
                         }
-                    ]
+                    ];
+                    temperature = 0.5;
                 }
-            ];
-            temperature = 0.3; // Specific for vision, often lower for structured output
-        }
 
         try {
             const bodyRequest = {
