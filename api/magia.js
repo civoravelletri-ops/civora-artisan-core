@@ -194,7 +194,7 @@ export default async function handler(req, res) {
         let responseFormat = null;
         if (campo === "visione_immagine") {
                     // Utilizziamo il modello Vision ufficiale di Groq
-                    aiModel = "llama-3.2-11b-vision-preview"; 
+                    aiModel = "meta-llama/llama-4-scout-17b-16e-instruct"; 
                     responseFormat = { "type": "json_object" }; // ATTIVA MODALITÀ JSON
                     messages = [
                         {
