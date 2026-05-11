@@ -33,12 +33,15 @@ export default async function handler(req, res) {
                 Enfatizza la salute e il benessere degli animali, la competenza del personale e la tranquillità dei proprietari.
                 Usa un linguaggio chiaro, rassicurante e informativo, adatto a un settore medico-veterinario.`;
         } else if (currentSector === "agrigarden") {
-                        systemPrompt = `Sei l'Assistente Digitale di Civora per AgriGarden.
-                        Il tuo tono non è mai formale, ma ispiratore, rustico, umano e sincero.
-                        Parli a nome di un vivaista esperto che ama la terra.
-                        Usa parole come 'radici', 'passione', 'tradizione', 'natura', 'cura'.
-                        NON scrivere mai come un venditore di un magazzino freddo.
-                        Se ti viene chiesto di generare diverse versioni del manifesto aziendale, rispondi sempre con un array JSON di 4 stringhe diverse.`;
+                    systemPrompt = `Sei l'Assistente Digitale di Civora per AgriGarden.
+                    Il tuo tono è ispiratore, rustico, umano e sincero.
+                    Usa parole come 'radici', 'passione', 'tradizione', 'natura', 'cura'.
+                    Se ti viene chiesto di generare la filosofia aziendale ("storia_azienda"), rispondi ESCLUSIVAMENTE con un array JSON di 4 stringhe diverse:
+                    1. Poetica ed Emozionale
+                    2. Concreta ed Esperta
+                    3. Familiare ed Accogliente
+                    4. Breve e d'Impatto
+                    Non aggiungere altro testo. Esempio:["Testo 1", "Testo 2", "Testo 3", "Testo 4"]`;
                 } else { // Prompt generico per altri settori non specificati
                         systemPrompt = `Sei un esperto di marketing per negozi locali e il tuo compito è generare contenuti specifici per prodotti e servizi commerciali.
                         Utilizza un linguaggio semplice, persuasivo e adatto a un pubblico locale.`;
@@ -151,6 +154,13 @@ export default async function handler(req, res) {
                 }
                 temperature = 0.6; // Manteniamo la stessa temperatura per l'accuratezza
             }
+
+            // === LOGICA SPECIFICA AGRIGARDEN (Storia Aziendale) ===
+                        else if (campo === "storia_azienda") {
+                            const testoPartenza = (contesto.testo || "").trim();
+                            userPromptContent = `Riscrivi questa filosofia aziendale per un vivaio, rendendola autentica e profonda: "${testoPartenza}".`;
+                            temperature = 0.7;
+                        }
             // === LOGICA PER PRODOTTI (Bazar / Business) ===
             else if (campo.includes("descrizione_breve") || campo.includes("descrizione_completa") || campo.includes("tags") || campo.includes("keywords") || campo.includes("titolo")) {
                 // Questa logica si applica a prodotti e servizi generici (non cura_persona o veterinario)
@@ -255,7 +265,7 @@ export default async function handler(req, res) {
             }
 
             let testoGenerato = data.choices[0].message.content.trim();
-            
+
                         // Se il settore è agrigarden, proviamo a vedere se l'IA ha restituito un JSON o una lista
                         if (currentSector === "agrigarden") {
                             try {
