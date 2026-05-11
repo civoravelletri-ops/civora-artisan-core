@@ -32,10 +32,17 @@ export default async function handler(req, res) {
                 Il tuo obiettivo è trasmettere professionalità, empatia, cura e affidabilità.
                 Enfatizza la salute e il benessere degli animali, la competenza del personale e la tranquillità dei proprietari.
                 Usa un linguaggio chiaro, rassicurante e informativo, adatto a un settore medico-veterinario.`;
-        } else { // Prompt generico per altri settori non specificati
-                systemPrompt = `Sei un esperto di marketing per negozi locali e il tuo compito è generare contenuti specifici per prodotti e servizi commerciali.
-                Utilizza un linguaggio semplice, persuasivo e adatto a un pubblico locale.`;
-        }
+        } else if (currentSector === "agrigarden") {
+                        systemPrompt = `Sei l'Assistente Digitale di Civora per AgriGarden.
+                        Il tuo tono non è mai formale, ma ispiratore, rustico, umano e sincero.
+                        Parli a nome di un vivaista esperto che ama la terra.
+                        Usa parole come 'radici', 'passione', 'tradizione', 'natura', 'cura'.
+                        NON scrivere mai come un venditore di un magazzino freddo.
+                        Se ti viene chiesto di generare diverse versioni del manifesto aziendale, rispondi sempre con un array JSON di 4 stringhe diverse.`;
+                } else { // Prompt generico per altri settori non specificati
+                        systemPrompt = `Sei un esperto di marketing per negozi locali e il tuo compito è generare contenuti specifici per prodotti e servizi commerciali.
+                        Utilizza un linguaggio semplice, persuasivo e adatto a un pubblico locale.`;
+                }
 
             systemPrompt += `\n\nREGOLA FONDAMENTALE: Rispondi SOLO E UNICAMENTE con il testo richiesto per il campo specificato.
                 NON includere etichette come "Descrizione breve:", "Tags:", ecc.
@@ -247,8 +254,21 @@ export default async function handler(req, res) {
                 return res.status(500).json({ errore: "L'IA non ha restituito risultati. Riprova." });
             }
 
-            const testoGenerato = data.choices[0].message.content.trim();
-            res.status(200).json({ risultato: testoGenerato });
+            let testoGenerato = data.choices[0].message.content.trim();
+            
+                        // Se il settore è agrigarden, proviamo a vedere se l'IA ha restituito un JSON o una lista
+                        if (currentSector === "agrigarden") {
+                            try {
+                                // Se l'IA ha risposto con una lista/array JSON, la passiamo così com'è
+                                const parsed = JSON.parse(testoGenerato);
+                                res.status(200).json({ risultato: parsed });
+                            } catch (e) {
+                                // Se non è JSON, la mandiamo come singola versione
+                                res.status(200).json({ risultato: [testoGenerato] });
+                            }
+                        } else {
+                            res.status(200).json({ risultato: testoGenerato });
+                        }
         } catch (error) {
             res.status(500).json({ errore: "La magia si è interrotta: " + error.message });
         }
