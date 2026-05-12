@@ -15,23 +15,22 @@ export default async function handler(req, res) {
     const { contesto, action } = req.body;
         const GROQ_API_KEY = process.env.GROQ_API_KEY;
     
+        if (!GROQ_API_KEY) {
+            return res.status(500).json({ error: "API Key mancante sul server." });
+        }
+    
         // --- NUOVA LOGICA: IL BOTANICO DIGITALE ---
         if (action === 'botanico') {
-            const systemPrompt = `Sei il Botanico Digitale e assistente alle vendite del vivaio "${contesto.storeName}" su Civora.
-            Il tuo obiettivo è rispondere alle domande del cliente sul giardinaggio e CONSIGLIARE I PRODOTTI disponibili in negozio.
+            const systemPrompt = `Sei il Botanico Digitale, l'esperto assistente alle vendite del vivaio "${contesto.storeName || 'Vivaio'}" su Civora.
+            Rispondi alla domanda del cliente in modo cortese, molto breve (max 3 frasi) e nella lingua: ${contesto.lang || 'it'}.
             
-            REGOLE:
-            1. Rispondi in modo amichevole, esperto ma conciso (max 3 frasi).
-            2. Rispondi nella lingua richiesta: ${contesto.lang}.
-            3. Se il cliente cerca qualcosa, guarda l'elenco dei prodotti disponibili e proponili menzionando il nome e il prezzo.
+            IL TUO SCOPO PRINCIPALE: Consigliare i prodotti che hai in negozio. 
+            Leggi attentamente questa lista dei tuoi prodotti: ${JSON.stringify(contesto.prodotti_semplificati)}
             
-            LISTA PRODOTTI DISPONIBILI IN NEGOZIO ORA: 
-            ${JSON.stringify(contesto.prodotti_semplificati)}
-    
-            FORMATO JSON OBBLIGATORIO PER LA RISPOSTA:
-            {
-              "risposta": "Testo della tua risposta amichevole e dei consigli qui."
-            }`;
+            Se la domanda del cliente riguarda qualcosa che puoi risolvere con uno dei tuoi prodotti, consiglialo nominandolo e dicendo il prezzo.
+            
+            DEVI RISPONDERE SOLO CON UN OGGETTO JSON VALIDO, con una singola chiave "risposta". Esempio:
+            {"risposta": "Ciao! Per tagliare l'erba ti consiglio il nostro Tagliaerba Super a 150€. È ottimo per i giardini medi!"}`;
     
             const userPromptText = `DOMANDA DEL CLIENTE: "${contesto.query}"`;
     
@@ -40,40 +39,57 @@ export default async function handler(req, res) {
                     method: "POST",
                     headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        model: "llama3-70b-8192", // Modello Groq velocissimo e intelligente per le chat
+                        model: "mixtral-8x7b-32768", // Mixtral è molto più bravo a generare JSON pulito rispetto a Llama3 base
                         messages:[
                             { role: "system", content: systemPrompt },
                             { role: "user", content: [{ type: "text", text: userPromptText }] }
                         ],
-                        temperature: 0.6,
+                        temperature: 0.5,
                         response_format: { type: "json_object" }
                     })
                 });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`Errore API Groq: ${errorData.error?.message || 'Sconosciuto'}`);
+                }
+    
                 const data = await response.json();
-                const jsonResp = JSON.parse(data.choices[0].message.content);
-                res.status(200).json(jsonResp);
+                const aiContent = data.choices[0].message.content;
+                
+                let jsonResp;
+                try {
+                    jsonResp = JSON.parse(aiContent);
+                } catch (parseError) {
+                    console.error("Errore Parsing JSON Botanico. Risposta grezza:", aiContent);
+                    // Fallback: se sbaglia il JSON, cerchiamo di estrarre comunque una risposta a forza
+                    jsonResp = { risposta: "Ho trovato qualcosa per te, ma c'è stato un problema di formattazione. Chiedimi di nuovo in un altro modo!" };
+                }
+    
+                return res.status(200).json(jsonResp);
+    
             } catch (error) {
-                res.status(500).json({ error: error.message });
+                console.error("Errore Generale Botanico:", error);
+                return res.status(500).json({ error: error.message });
             }
     
         } 
         // --- VECCHIA LOGICA: CREAZIONE CARRELLI (Intatta) ---
         else {
-            const systemPrompt = `Sei il Personal Shopper del banco "${contesto.store_name}" su Civora.
-            Il tuo compito è creare ESATTAMENTE 3 carrelli diversi basati sulla richiesta del cliente (es. 1. Essenziale, 2. Completo, 3. Premium/Gourmet).
+            const systemPrompt = `Sei il Personal Shopper del banco "${contesto.store_name || 'Negozio'}" su Civora.
+            Il tuo compito è creare ESATTAMENTE 3 carrelli diversi basati sulla richiesta del cliente.
             
-            REGOLE DI CIVORA PER LE QUANTITÀ:
+            REGOLE:
             1. Ogni prodotto ha un array di 'varianti'.
-            2. NON INVENTARE pesi o quantità decimali (es. 0.5).
-            3. SCEGLI sempre una variante esistente dall'elenco 'varianti' di ogni prodotto.
-            4. La quantità 'qty' deve essere SEMPRE un numero intero (1, 2, 3...). Indica quanti pezzi acquistare.
+            2. SCEGLI sempre una variante esistente dall'elenco.
+            3. La quantità 'qty' deve essere SEMPRE un numero intero (1, 2, 3...).
     
-            FORMATO JSON OBBLIGATORIO (L'ARRAY 'carrelli' DEVE AVERE ESATTAMENTE 3 OGGETTI):
+            FORMATO JSON OBBLIGATORIO:
             {
               "carrelli":[
                 {
                   "nome": "Spesa Essenziale",
-                  "descrizione": "Il minimo indispensabile perfetto per la tua richiesta.",
+                  "descrizione": "Il minimo indispensabile.",
                   "prodotti":[
                     { "productId": "ID", "variantId": "ID_VAR", "productName": "Nome", "qty": 1, "price": 10.50 }
                   ]
@@ -81,26 +97,41 @@ export default async function handler(req, res) {
               ]
             }`;
     
-            const userPromptText = `RICHIESTA: "${contesto.richiestaUtente}" - LISTA PRODOTTI CON VARIANTI: ${JSON.stringify(contesto.prodotti)}`;
+            const userPromptText = `RICHIESTA: "${contesto.richiestaUtente}" - PRODOTTI: ${JSON.stringify(contesto.prodotti)}`;
     
             try {
                 const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                     method: "POST",
                     headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        model: "meta-llama/llama-4-scout-17b-16e-instruct",
+                        model: "mixtral-8x7b-32768", // Usiamo Mixtral anche qui per coerenza e stabilità del JSON
                         messages:[
                             { role: "system", content: systemPrompt },
                             { role: "user", content: [{ type: "text", text: userPromptText }] }
                         ],
-                        temperature: 0.7,
+                        temperature: 0.5,
                         response_format: { type: "json_object" }
                     })
                 });
+                
+                if (!response.ok) {
+                     const errorData = await response.json();
+                     throw new Error(`Errore API Groq: ${errorData.error?.message || 'Sconosciuto'}`);
+                }
+    
                 const data = await response.json();
-                res.status(200).json(JSON.parse(data.choices[0].message.content));
+                
+                let finalJson;
+                try {
+                    finalJson = JSON.parse(data.choices[0].message.content);
+                } catch (e) {
+                    throw new Error("L'Intelligenza Artificiale ha restituito un formato non valido.");
+                }
+                
+                return res.status(200).json(finalJson);
             } catch (error) {
-                res.status(500).json({ errore: error.message });
+                console.error("Errore Personal Shopper:", error);
+                return res.status(500).json({ errore: error.message });
             }
         }
-}
+    }
