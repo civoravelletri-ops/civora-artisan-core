@@ -248,10 +248,14 @@ export default async function handler(req, res) {
             { role: "user", content: userPromptContent }
         ];
 
-        let aiModel = "llama-3.1-8b-instant"; // Modello standard per il testo
-        
-                // NUOVO: SE È UNA RICHIESTA VISIVA (FOTO)
+        let aiModel = "llama-3.3-70b-versatile"; // Usiamo un modello più intelligente per evitare errori
                 let responseFormat = null;
+
+                // Attiviamo la modalità JSON per le spedizioni o per la visione immagine
+                if (task === "visione_immagine" || task === "estimate_shipping_attributes") {
+                    responseFormat = { "type": "json_object" };
+                }
+
                 if (task === "visione_immagine") {
                     // Utilizziamo il modello Vision ufficiale di Groq
                     aiModel = "meta-llama/llama-4-scout-17b-16e-instruct"; 
@@ -309,11 +313,24 @@ export default async function handler(req, res) {
 
             let testoGenerato = data.choices[0].message.content.trim();
 
-                        // 1. SE È LA NUOVA STIMA SPEDIZIONE: Restituiamo il JSON pulito
-                        if (task === "estimate_shipping_attributes") {
-                            const cleanJson = testoGenerato.replace(/```json/g, "").replace(/```/g, "").trim();
-                            return res.status(200).json({ risultato: cleanJson });
-                        }
+                        // 1. SE È LA NUOVA STIMA SPEDIZIONE: Estraiamo SOLO il JSON se l'IA ha parlato troppo
+                                    if (task === "estimate_shipping_attributes") {
+                                        try {
+                                            // Cerchiamo l'inizio e la fine delle parentesi graffe per isolare il JSON dalle chiacchiere
+                                            const start = testoGenerato.indexOf('{');
+                                            const end = testoGenerato.lastIndexOf('}');
+                                            if (start !== -1 && end !== -1) {
+                                                testoGenerato = testoGenerato.substring(start, end + 1);
+                                            }
+                                            // Verifichiamo che sia JSON valido prima di mandarlo
+                                            JSON.parse(testoGenerato); 
+                                            return res.status(200).json({ risultato: testoGenerato });
+                                        } catch (e) {
+                                            // Se fallisce, mandiamo l'originale pulito dai backticks
+                                            const fallback = testoGenerato.replace(/```json/g, "").replace(/```/g, "").trim();
+                                            return res.status(200).json({ risultato: fallback });
+                                        }
+                                    }
 
                         // 2. SE È IL SETTORE AGRIGARDEN: Gestiamo l'array (per la storia o testi multipli)
                         if (currentSector === "agrigarden") {
