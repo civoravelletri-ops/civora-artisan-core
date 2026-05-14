@@ -10,9 +10,11 @@ export default async function handler(req, res) {
         return;
     }
 
-    const { campo, contesto } = req.body;
+    // Estraiamo campo (usato per testi) o action (usato per spedizioni)
+        const { campo, action, contesto } = req.body;
+        const task = action || campo;
 
-    // Recuperiamo la chiave che metteremo tra poco su Vercel
+        // Recuperiamo la chiave che metteremo tra poco su Vercel
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
     // Prepariamo il messaggio per l'IA (Tono differenziato tra i vari settori)
@@ -191,13 +193,34 @@ export default async function handler(req, res) {
                 }
             }
             // === LOGICA PER VISIONE D'IMMAGINE ===
-            else if (campo === "visione_immagine") {
-                // Questo è già gestito con un blocco `if (campo === "visione_immagine")` più avanti per la modifica di `messages` e `aiModel`
-                // Lasciamo vuoto qui perché la logica per messages è speciale.
-            }
-            else {
-                userPromptContent = `Genera un contenuto per il campo "${campo}" relativo a "${contesto.nome}" della categoria "${contesto.categoria}".`;
-            }
+                        else if (task === "visione_immagine") {
+                            // Gestito sotto nel blocco speciale
+                        }
+                        // === NUOVA LOGICA: STIMA PESO E DIMENSIONI (SPEDIZIONE) ===
+                        else if (task === "estimate_shipping_attributes") {
+                            systemPrompt = `Sei un esperto di logistica e spedizioni e-commerce.
+                            Il tuo compito è stimare il peso reale (in kg) e le dimensioni dell'imballaggio (in cm) per un prodotto.
+                            Sii realistico: considera anche il peso del vaso/terra per le piante o della scatola/protezioni per i macchinari.`;
+
+                            userPromptContent = `Estima peso e dimensioni per la spedizione di questo prodotto:
+                            Nome: "${contesto.productName}"
+                            Categoria: "${contesto.productCategory}"
+                            Tipo: "${contesto.productType}"
+                            Descrizione: "${contesto.productShortDescription || contesto.productDescription || ''}"
+                            ${contesto.brand ? 'Marca: ' + contesto.brand : ''}
+                            ${contesto.enginePower ? 'Potenza: ' + contesto.enginePower : ''}
+
+                            REGOLE DI RISPOSTA:
+                            Rispondi ESCLUSIVAMENTE con un oggetto JSON valido.
+                            Non aggiungere testo prima o dopo.
+                            Usa queste chiavi: "weight" (numero in kg), "length" (numero in cm), "width" (numero in cm), "height" (numero in cm).
+                            Esempio: {"weight": 1.5, "length": 30, "width": 20, "height": 15}`;
+
+                            temperature = 0.3; // Più bassa per avere dati più precisi e meno creativi
+                        }
+                        else {
+                            userPromptContent = `Genera un contenuto per il campo "${task}" relativo a "${contesto.nome || contesto.productName}" della categoria "${contesto.categoria || contesto.productCategory}".`;
+                        }
 
 
         let messages = [
@@ -265,18 +288,25 @@ export default async function handler(req, res) {
             }
 
             let testoGenerato = data.choices[0].message.content.trim();
-
-                        // Se il settore è agrigarden, proviamo a vedere se l'IA ha restituito un JSON o una lista
-                        if (currentSector === "agrigarden") {
+            
+                        // Se è una stima di spedizione, vogliamo restituire il JSON pulito come stringa
+                        // in modo che il frontend possa fare JSON.parse(data.risultato)
+                        if (task === "estimate_shipping_attributes") {
+                            // Rimuove eventuali blocchi di codice markdown se presenti (es. ```json ... ```)
+                            const cleanJson = testoGenerato.replace(/```json/g, "").replace(/```/g, "").trim();
+                            return res.status(200).json({ risultato: cleanJson });
+                        }
+            
+                        // Se il settore è agrigarden (e non è una stima spedizione), gestiamo le liste
+                        if (currentSector === "agrigarden" && task === "storia_azienda") {
                             try {
-                                // Se l'IA ha risposto con una lista/array JSON, la passiamo così com'è
                                 const parsed = JSON.parse(testoGenerato);
                                 res.status(200).json({ risultato: parsed });
                             } catch (e) {
-                                // Se non è JSON, la mandiamo come singola versione
                                 res.status(200).json({ risultato: [testoGenerato] });
                             }
                         } else {
+                            // Risposta standard per tutti gli altri campi di testo
                             res.status(200).json({ risultato: testoGenerato });
                         }
         } catch (error) {
