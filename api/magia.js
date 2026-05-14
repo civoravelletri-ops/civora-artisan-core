@@ -183,35 +183,55 @@ export default async function handler(req, res) {
 
                             temperature = 0.3;
                         }
-                        // === LOGICA PER PRODOTTI (Bazar / Business) ===
-                        else if (task.includes("descrizione_breve") || task.includes("descrizione_completa") || task.includes("tags") || task.includes("keywords") || task.includes("titolo")) {
-                            // Questa logica si applica a prodotti e servizi generici (non cura_persona o veterinario)
-                            userPromptContent = `Il prodotto base è "${contesto.nome || contesto.productName}". Categoria: "${contesto.categoria || contesto.productCategory}". Marca: "${contesto.marca || contesto.brand || ''}". Prezzo: "${contesto.prezzo || ''}€".`;
+                        // === NUOVA LOGICA: STIMA PESO E DIMENSIONI (SPEDIZIONE) ===
+                                    else if (task === "estimate_shipping_attributes") {
+                                        systemPrompt = `Sei un esperto di logistica e spedizioni e-commerce.
+                                        Il tuo compito è stimare il peso reale (in kg) e le dimensioni dell'imballaggio (in cm) per un prodotto.
+                                        Sii realistico: considera anche il peso del vaso/terra per le piante o della scatola/protezioni per i macchinari.`;
 
-                if (campo === "descrizione_breve") {
-                    userPromptContent += `\nGenera uno slogan accattivante (max 150 caratteri) per la "Descrizione Breve".`;
-                } else if (campo === "descrizione_completa") {
-                    userPromptContent += `\nGenera una descrizione dettagliata di 3-4 paragrafi per la "Descrizione Completa".`;
-                } else if (campo === "tags") {
-                    userPromptContent += `\nGenera 5-7 tag separati da virgola.`;
-                } else if (campo === "keywords") {
-                    userPromptContent += `\nGenera 7-10 parole chiave SEO separate da virgola.`;
-                } else if (campo === "titolo") {
-                    userPromptContent += `\nGenera un titolo commerciale irresistibile (max 60 caratteri).`;
-                }
-            }
-            // === LOGICA PER SERVIZI TECNICI (Artigiani/Servizi Business - Non Cura Persona/Veterinario) ===
-                        else if (task.includes("servizio") || task.includes("tags_servizio")) {
-                userPromptContent = `Il servizio si chiama "${contesto.nome}". Categoria: "${contesto.categoria}". ${contesto.priceContext || ''}`;
+                                        userPromptContent = `Estima peso e dimensioni per la spedizione di questo prodotto:
+                                        Nome: "${contesto.productName || contesto.nome}"
+                                        Categoria: "${contesto.productCategory || contesto.categoria}"
+                                        Tipo: "${contesto.productType}"
+                                        Descrizione: "${contesto.productShortDescription || contesto.productDescription || ''}"
+                                        ${contesto.brand ? 'Marca: ' + contesto.brand : ''}
 
-                if (campo === "descrizione_breve_servizio") {
-                    userPromptContent += `\nGenera uno slogan tecnico/commerciale di massimo 150 caratteri.`;
-                } else if (campo === "descrizione_completa_servizio") {
-                    userPromptContent += `\nGenera una descrizione professionale di 3-4 paragrafi che spieghi l'efficacia del servizio.`;
-                } else if (campo === "tags_servizio") {
-                    userPromptContent += `\nGenera 5-7 parole chiave tecniche separate da virgola.`;
-                }
-            }
+                                        REGOLE DI RISPOSTA:
+                                        Rispondi ESCLUSIVAMENTE con un oggetto JSON valido.
+                                        Non aggiungere testo prima o dopo.
+                                        Usa queste chiavi: "weight" (numero in kg), "length" (numero in cm), "width" (numero in cm), "height" (numero in cm).
+                                        Esempio: {"weight": 1.5, "length": 30, "width": 20, "height": 15}`;
+
+                                        temperature = 0.3;
+                                    }
+                                    // === LOGICA PER PRODOTTI (Bazar / Business) ===
+                                    else if (task.includes("descrizione_breve") || task.includes("descrizione_completa") || task.includes("tags") || task.includes("keywords") || task.includes("titolo")) {
+                                        userPromptContent = `Il prodotto base è "${contesto.nome || contesto.productName}". Categoria: "${contesto.categoria || contesto.productCategory}". Marca: "${contesto.marca || contesto.brand || ''}". Prezzo: "${contesto.prezzo || ''}€".`;
+
+                                        if (task === "descrizione_breve") {
+                                            userPromptContent += `\nGenera uno slogan accattivante (max 150 caratteri) per la "Descrizione Breve".`;
+                                        } else if (task === "descrizione_completa") {
+                                            userPromptContent += `\nGenera una descrizione dettagliata di 3-4 paragrafi per la "Descrizione Completa".`;
+                                        } else if (task === "tags") {
+                                            userPromptContent += `\nGenera 5-7 tag separati da virgola.`;
+                                        } else if (task === "keywords") {
+                                            userPromptContent += `\nGenera 7-10 parole chiave SEO separate da virgola.`;
+                                        } else if (task === "titolo") {
+                                            userPromptContent += `\nGenera un titolo commerciale irresistibile (max 60 caratteri).`;
+                                        }
+                                    }
+                                    // === LOGICA PER SERVIZI TECNICI (Artigiani/Servizi Business) ===
+                                    else if (task.includes("servizio") || task.includes("tags_servizio")) {
+                                        userPromptContent = `Il servizio si chiama "${contesto.nome}". Categoria: "${contesto.categoria}". ${contesto.priceContext || ''}`;
+
+                                        if (task === "descrizione_breve_servizio") {
+                                            userPromptContent += `\nGenera uno slogan tecnico/commerciale di massimo 150 caratteri.`;
+                                        } else if (task === "descrizione_completa_servizio") {
+                                            userPromptContent += `\nGenera una descrizione professionale di 3-4 paragrafi che spieghi l'efficacia del servizio.`;
+                                        } else if (task === "tags_servizio") {
+                                            userPromptContent += `\nGenera 5-7 parole chiave tecniche separate da virgola.`;
+                                        }
+                                    }
             // === LOGICA PER VISIONE D'IMMAGINE ===
                         else if (task === "visione_immagine") {
                             // Gestito sotto nel blocco speciale
