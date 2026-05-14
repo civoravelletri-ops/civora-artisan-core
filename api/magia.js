@@ -248,10 +248,10 @@ export default async function handler(req, res) {
             { role: "user", content: userPromptContent }
         ];
 
-        let aiModel = "llama-3.3-70b-versatile"; // Usiamo un modello più intelligente per evitare errori
+        let aiModel = "llama-3.1-8b-instant"; // RIPRISTINATO IL TUO MODELLO ORIGINALE
                 let responseFormat = null;
 
-                // Attiviamo la modalità JSON per le spedizioni o per la visione immagine
+                // Attiviamo la modalità JSON ufficiale di Groq per evitare testi inutili
                 if (task === "visione_immagine" || task === "estimate_shipping_attributes") {
                     responseFormat = { "type": "json_object" };
                 }
@@ -323,7 +323,7 @@ export default async function handler(req, res) {
                                                 testoGenerato = testoGenerato.substring(start, end + 1);
                                             }
                                             // Verifichiamo che sia JSON valido prima di mandarlo
-                                            JSON.parse(testoGenerato); 
+                                            JSON.parse(testoGenerato);
                                             return res.status(200).json({ risultato: testoGenerato });
                                         } catch (e) {
                                             // Se fallisce, mandiamo l'originale pulito dai backticks
