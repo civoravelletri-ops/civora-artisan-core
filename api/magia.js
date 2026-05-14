@@ -163,10 +163,30 @@ export default async function handler(req, res) {
                             userPromptContent = `Riscrivi questa filosofia aziendale per un vivaio, rendendola autentica e profonda: "${testoPartenza}".`;
                             temperature = 0.7;
                         }
-            // === LOGICA PER PRODOTTI (Bazar / Business) ===
-            else if (campo.includes("descrizione_breve") || campo.includes("descrizione_completa") || campo.includes("tags") || campo.includes("keywords") || campo.includes("titolo")) {
-                // Questa logica si applica a prodotti e servizi generici (non cura_persona o veterinario)
-                userPromptContent = `Il prodotto base è "${contesto.nome}". Categoria: "${contesto.categoria}". Marca: "${contesto.marca}". Prezzo: "${contesto.prezzo}€".`;
+            // === NUOVA LOGICA: STIMA PESO E DIMENSIONI (SPEDIZIONE) ===
+                        else if (task === "estimate_shipping_attributes") {
+                            systemPrompt = `Sei un esperto di logistica e spedizioni e-commerce.
+                            Il tuo compito è stimare il peso reale (in kg) e le dimensioni dell'imballaggio (in cm) per un prodotto.
+                            Sii realistico: considera anche il peso del vaso/terra per le piante o della scatola/protezioni per i macchinari.`;
+
+                            userPromptContent = `Estima peso e dimensioni per la spedizione di questo prodotto:
+                            Nome: "${contesto.productName || contesto.nome}"
+                            Categoria: "${contesto.productCategory || contesto.categoria}"
+                            Tipo: "${contesto.productType}"
+                            Descrizione: "${contesto.productShortDescription || contesto.productDescription || ''}"
+                            ${contesto.brand ? 'Marca: ' + contesto.brand : ''}
+
+                            REGOLE DI RISPOSTA:
+                            Rispondi ESCLUSIVAMENTE con un oggetto JSON valido.
+                            Usa queste chiavi: "weight" (numero in kg), "length" (numero in cm), "width" (numero in cm), "height" (numero in cm).
+                            Esempio: {"weight": 1.5, "length": 30, "width": 20, "height": 15}`;
+
+                            temperature = 0.3;
+                        }
+                        // === LOGICA PER PRODOTTI (Bazar / Business) ===
+                        else if (task.includes("descrizione_breve") || task.includes("descrizione_completa") || task.includes("tags") || task.includes("keywords") || task.includes("titolo")) {
+                            // Questa logica si applica a prodotti e servizi generici (non cura_persona o veterinario)
+                            userPromptContent = `Il prodotto base è "${contesto.nome || contesto.productName}". Categoria: "${contesto.categoria || contesto.productCategory}". Marca: "${contesto.marca || contesto.brand || ''}". Prezzo: "${contesto.prezzo || ''}€".`;
 
                 if (campo === "descrizione_breve") {
                     userPromptContent += `\nGenera uno slogan accattivante (max 150 caratteri) per la "Descrizione Breve".`;
@@ -181,7 +201,7 @@ export default async function handler(req, res) {
                 }
             }
             // === LOGICA PER SERVIZI TECNICI (Artigiani/Servizi Business - Non Cura Persona/Veterinario) ===
-            else if (campo.includes("servizio") || campo.includes("tags_servizio")) {
+                        else if (task.includes("servizio") || task.includes("tags_servizio")) {
                 userPromptContent = `Il servizio si chiama "${contesto.nome}". Categoria: "${contesto.categoria}". ${contesto.priceContext || ''}`;
 
                 if (campo === "descrizione_breve_servizio") {
@@ -229,10 +249,10 @@ export default async function handler(req, res) {
         ];
 
         let aiModel = "llama-3.1-8b-instant"; // Modello standard per il testo
-
-        // NUOVO: SE È UNA RICHIESTA VISIVA (FOTO)
-        let responseFormat = null;
-        if (campo === "visione_immagine") {
+        
+                // NUOVO: SE È UNA RICHIESTA VISIVA (FOTO)
+                let responseFormat = null;
+                if (task === "visione_immagine") {
                     // Utilizziamo il modello Vision ufficiale di Groq
                     aiModel = "meta-llama/llama-4-scout-17b-16e-instruct"; 
                     responseFormat = { "type": "json_object" }; // ATTIVA MODALITÀ JSON
@@ -288,13 +308,13 @@ export default async function handler(req, res) {
             }
 
             let testoGenerato = data.choices[0].message.content.trim();
-            
+
                         // 1. SE È LA NUOVA STIMA SPEDIZIONE: Restituiamo il JSON pulito
                         if (task === "estimate_shipping_attributes") {
                             const cleanJson = testoGenerato.replace(/```json/g, "").replace(/```/g, "").trim();
                             return res.status(200).json({ risultato: cleanJson });
                         }
-            
+
                         // 2. SE È IL SETTORE AGRIGARDEN: Gestiamo l'array (per la storia o testi multipli)
                         if (currentSector === "agrigarden") {
                             try {
@@ -304,11 +324,11 @@ export default async function handler(req, res) {
                                 return res.status(200).json({ risultato: [testoGenerato] });
                             }
                         }
-            
+
                         // 3. PER TUTTI GLI ALTRI SETTORI (Bazar, Vet, Wellness, ecc.):
                         // Restituiamo il testo semplice come è sempre stato.
                         res.status(200).json({ risultato: testoGenerato });
-            
+
                     } catch (error) {
                         res.status(500).json({ errore: "La magia si è interrotta: " + error.message });
                     }
