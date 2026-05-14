@@ -289,27 +289,27 @@ export default async function handler(req, res) {
 
             let testoGenerato = data.choices[0].message.content.trim();
             
-                        // Se è una stima di spedizione, vogliamo restituire il JSON pulito come stringa
-                        // in modo che il frontend possa fare JSON.parse(data.risultato)
+                        // 1. SE È LA NUOVA STIMA SPEDIZIONE: Restituiamo il JSON pulito
                         if (task === "estimate_shipping_attributes") {
-                            // Rimuove eventuali blocchi di codice markdown se presenti (es. ```json ... ```)
                             const cleanJson = testoGenerato.replace(/```json/g, "").replace(/```/g, "").trim();
                             return res.status(200).json({ risultato: cleanJson });
                         }
             
-                        // Se il settore è agrigarden (e non è una stima spedizione), gestiamo le liste
-                        if (currentSector === "agrigarden" && task === "storia_azienda") {
+                        // 2. SE È IL SETTORE AGRIGARDEN: Gestiamo l'array (per la storia o testi multipli)
+                        if (currentSector === "agrigarden") {
                             try {
                                 const parsed = JSON.parse(testoGenerato);
-                                res.status(200).json({ risultato: parsed });
+                                return res.status(200).json({ risultato: parsed });
                             } catch (e) {
-                                res.status(200).json({ risultato: [testoGenerato] });
+                                return res.status(200).json({ risultato: [testoGenerato] });
                             }
-                        } else {
-                            // Risposta standard per tutti gli altri campi di testo
-                            res.status(200).json({ risultato: testoGenerato });
                         }
-        } catch (error) {
-            res.status(500).json({ errore: "La magia si è interrotta: " + error.message });
-        }
-    }
+            
+                        // 3. PER TUTTI GLI ALTRI SETTORI (Bazar, Vet, Wellness, ecc.):
+                        // Restituiamo il testo semplice come è sempre stato.
+                        res.status(200).json({ risultato: testoGenerato });
+            
+                    } catch (error) {
+                        res.status(500).json({ errore: "La magia si è interrotta: " + error.message });
+                    }
+                }
