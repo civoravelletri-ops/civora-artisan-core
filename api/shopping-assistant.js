@@ -100,21 +100,71 @@ async function handleTeachAICollaborator(req, res, groqApiKey) {
 // ==================================================================
 // 4. LOGICA CLIENTE (BOTANICO)
 // ==================================================================
-async function handleBotanicoClient(req, res, groqApiKey) {
-    const { contesto } = req.body;
-    let structuredMemory = {};
-    let generalInstructions = "";
+aasync function handleBotanicoClient(req, res, groqApiKey) { // ASSICURATI CHE "async" SIA PRESENTE QUI
+     const { contesto } = req.body;
+     let structuredMemory = {};
+     let generalInstructions = "";
+     const tone = (structuredMemory.tono_di_voce_ai || "amichevole e cordiale"); // Prende il tono dalla memoria strutturata
 
-    if (contesto.vendorId) {
-        try {
-            const aiMemoryDoc = await db.collection('vendors').doc(contesto.vendorId).collection('ai_assistant').doc('memory').get();
-            if (aiMemoryDoc.exists) {
-                const data = aiMemoryDoc.data();
-                structuredMemory = data.structured_memory || {};
-                generalInstructions = data.instructions_i18n?.[contesto.lang] || data.instructions || "";
-            }
-        } catch (e) { console.error("Errore lettura DB", e); }
-    }
+     if (contesto.vendorId) {
+         try {
+             const aiMemoryDoc = await db.collection('vendors').doc(contesto.vendorId).collection('ai_assistant').doc('memory').get();
+             if (aiMemoryDoc.exists) {
+                 const data = aiMemoryDoc.data();
+                 structuredMemory = data.structured_memory || {};
+                 generalInstructions = data.instructions_i18n?.[contesto.lang] || data.instructions || "";
+             }
+         } catch (e) { console.error("Errore lettura DB", e); }
+     }
+
+     const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Il tuo tono deve essere ${tone}.
+
+     CONTESTO MEMORIA AI: ${JSON.stringify(structuredMemory)}.
+     ISTRUZIONI GENERALI DEL NEGOZIO: ${generalInstructions}.
+     PRODOTTI DISPONIBILI (nome, prezzo, categoria, quantitÃ ): ${JSON.stringify(contesto.prodotti_semplificati)}.
+
+     REGOLE DI RISPOSTA:
+     1. Rispondi SEMPRE in ${contesto.lang || 'it'}.
+     2. Se il cliente esprime il desiderio di "parlare con il proprietario", "essere richiamato", "negoziare", o se la sua richiesta va oltre le tue capacitÃ  attuali di gestione (es. ordini enormi per matrimoni con dettagli complessi, richieste molto specifiche e non standard), DEVI proporre l'escalation al proprietario.
+     3. Quando proponi l'escalation, DEVI chiedere al cliente di fornire il suo "nome" e "numero di telefono".
+     4. Dopo aver ricevuto nome e numero, DEVI chiedere se vuole aggiungere "altre note" per il proprietario.
+     5. Se il cliente aggiunge "altre note", DEVI aggiornare il riepilogo della conversazione includendole.
+     6. Se il cliente ha un carrello attivo o ha fatto una richiesta specifica che ha generato un'offerta AI (quindi con un "sigillo" in valid_offers), DEVI fare riferimento a quella proposta nel riassunto.
+     7. Mantieni le risposte il piÃ¹ concise possibile, rispettando il tono del negozio.
+     8. Rispondi SEMPRE e SOLO con un oggetto JSON nel formato:
+        {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto"|"aggiungi_note_contatto",
+         "message": "messaggio al cliente",
+         "fields_needed": ["nome", "telefono"] (solo per "chiedi_contatto"),
+         "customer_name": "nome del cliente" (se giÃ  estratto o fornito),
+         "customer_phone": "telefono del cliente" (se giÃ  estratto o fornito),
+         "conversation_summary_for_owner": "riassunto interno della conversazione per il proprietario" (solo per "conferma_contatto" o "aggiungi_note_contatto"),
+         "additional_notes_for_owner": "note aggiuntive dal cliente per il proprietario" (solo per "aggiungi_note_contatto")}
+     9. NON inventare prezzi o sconti che non siano esplicitamente nelle regole del vivaio o che tu non abbia giÃ  proposto con un "sigillo".
+
+     Il cliente ha giÃ  fornito le seguenti informazioni (se disponibili):
+     Nome: ${contesto.customerName || 'N/D'}
+     Telefono: ${contesto.customerPhone || 'N/D'}
+     Riassunto conversazione precedente: ${contesto.previousConversationSummary || 'Nessuno.'}
+     Offerta AI (se presente): ${contesto.activeAiOffer ? JSON.stringify(contesto.activeAiOffer) : 'Nessuna.'}
+     `;
+
+     const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
+     let parsedResponse;
+     try {
+         parsedResponse = JSON.parse(aiResponse);
+         if (!parsedResponse.action || !["risposta_normale", "chiedi_contatto", "conferma_contatto", "aggiungi_note_contatto"].includes(parsedResponse.action)) {
+             throw new Error("Formato JSON non valido: campo 'action' mancante o non riconosciuto.");
+         }
+     } catch (e) {
+         console.error("Errore parsing risposta AI Botanico:", aiResponse, e);
+         return res.status(500).json({
+             action: "risposta_normale",
+             message: `Mi dispiace, c'è stato un problema tecnico e non riesco a elaborare la tua richiesta in questo momento. Riprova piÃ¹ tardi.`,
+             reasoning: `AI response not valid JSON or invalid action: ${aiResponse}`
+         });
+     }
+     return res.status(200).json(parsedResponse);
+ }
 
     const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Il tuo tono deve essere ${tone || "amichevole e cordiale"}.
 
