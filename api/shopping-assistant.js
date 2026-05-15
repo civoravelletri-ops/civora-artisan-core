@@ -1,7 +1,7 @@
 // api/shopping-assistant.js
 
 const admin = require('firebase-admin');
-const SUPPORTED_LANGUAGES = ['en', 'fr', 'de', 'es', 'ru', 'ro', 'sq', 'hi', 'ar', 'zh']; // 'it' lo gestiamo a parte
+const SUPPORTED_LANGUAGES = ['en', 'fr', 'de', 'es', 'ru', 'ro', 'sq', 'hi', 'ar', 'zh'];
 
 // ==================================================================
 // 1. INIZIALIZZAZIONE FIREBASE
@@ -19,53 +19,60 @@ if (!admin.apps.length) {
 } else { db = admin.firestore(); }
 
 // ==================================================================
-// 2. FUNZIONE CORE API (MODELLO 70B - PIÙ POTENTE)
+// 2. FUNZIONE CORE API (llama-3.3-70b-versatile)
 // ==================================================================
-async function callGroqAPI(systemPrompt, userPromptText, groqApiKey, temperature = 0.1, response_format = { type: "text" }) {
+async function callGroqAPI(systemPrompt, userPromptText, groqApiKey, temperature = 0.1, isJson = false) {
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-            model: "llama-3.3-70b-versatile", // USARE QUESTO: HA LIMITI PIÙ ALTI (30k TPM)
-            messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPromptText }],
+            model: "llama-3.3-70b-versatile",
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPromptText }
+            ],
             temperature: temperature,
-            response_format: response_format
+            response_format: isJson ? { type: "json_object" } : { type: "text" }
         })
     });
+
     if (!response.ok) {
         const err = await response.json();
-        throw new Error(err.error?.message || "Errore API");
+        throw new Error(err.error?.message || "Errore API Groq");
     }
     const data = await response.json();
     return data.choices[0].message.content.trim();
 }
 
 // ==================================================================
-// 3. LOGICA ADDESTRAMENTO (OTTIMIZZATA: 1 SOLA CHIAMATA PER TUTTE LE LINGUE)
+// 3. LOGICA ADDESTRAMENTO (CORAZZATA)
 // ==================================================================
 async function handleTeachAICollaborator(req, res, groqApiKey) {
-    const { rawInstructions, currentMemory, vendorDashboardLang } = req.body;
+    const { rawInstructions, currentMemory, vendorId } = req.body;
 
-    // A. TRADUCI IN ITALIANO SE NECESSARIO
-    const instructionsInItalian = await callGroqAPI("Traduci in italiano. Rispondi solo col testo.", rawInstructions, groqApiKey);
+    // A. TRADUZIONE IN ITALIANO
+    const itPrompt = "Sei un traduttore. Traduci il testo in italiano perfetto. Rispondi SOLO con la traduzione.";
+    const instructionsInItalian = await callGroqAPI(itPrompt, rawInstructions, groqApiKey);
     
-    // B. ESTRAZIONE STRUTTURATA (JSON)
-    const structPrompt = `Sei un assistente esperto. Estrai dati JSON. Campi: anno_fondazione, specialita_vivaio (array), filosofia_generale, regole_sconti_quantita (mappa), personale (array), orari_speciali, tono_di_voce_ai, discount_strategy_rules (array), customer_psychology_rules (array), forbidden_words (array), preferred_words (array), descrizione_generale_vivaio.`;
-    const structUser = `TESTO: "${instructionsInItalian}"\nMEMORIA: "${currentMemory || ''}"`;
-    const structResp = await callGroqAPI(structPrompt, structUser, groqApiKey, 0.2, { type: "json_object" });
+    // B. ESTRAZIONE STRUTTURATA (OBLIGATORIO JSON)
+    const structPrompt = `Sei un analista dati. Estrai un oggetto JSON dal testo. 
+    REGOLE: Rispondi SOLO con JSON. Campi: anno_fondazione, specialita_vivaio (array), filosofia_generale, regole_sconti_quantita (mappa), personale (array), orari_speciali, tono_di_voce_ai, discount_strategy_rules (array), customer_psychology_rules (array), forbidden_words (array), preferred_words (array), descrizione_generale_vivaio.`;
+    
+    const structUser = `TESTO NUOVO: "${instructionsInItalian}"\nMEMORIA VECCHIA: "${currentMemory || ''}"`;
+    const structResp = await callGroqAPI(structPrompt, structUser, groqApiKey, 0.1, true);
     const structuredMemory = JSON.parse(structResp);
 
     // C. RIASSUNTO FLUIDO (ITALIANO)
-    const summaryPrompt = `Consolida le istruzioni in un testo fluido in italiano per la memoria dell'AI. Inizia con 'Ho imparato che...'`;
-    const summaryUser = `NUOVO: "${instructionsInItalian}"\nVECCHIO: "${currentMemory || ''}"`;
-    const newMemory_it = await callGroqAPI(summaryPrompt, summaryUser, groqApiKey, 0.3);
+    const summaryPrompt = "Crea un testo fluido in italiano che riassuma la memoria dell'AI. Inizia con 'Ho imparato che...'";
+    const newMemory_it = await callGroqAPI(summaryPrompt, JSON.stringify(structuredMemory), groqApiKey, 0.3);
 
-    // D. TRADUZIONE MASSIVA (UNA SOLA CHIAMATA PER 10 LINGUE!) - Così non andiamo in Rate Limit
-    const translatePrompt = `Traduci il testo fornito in queste lingue: ${SUPPORTED_LANGUAGES.join(', ')}. Rispondi SOLO con un oggetto JSON dove le chiavi sono i codici lingua.`;
-    const translateResp = await callGroqAPI(translatePrompt, newMemory_it, groqApiKey, 0.1, { type: "json_object" });
+    // D. TRADUZIONE MASSIVA (JSON)
+    const translatePrompt = `Traduci in queste lingue: ${SUPPORTED_LANGUAGES.join(', ')}. 
+    REGOLE: Rispondi SOLO con un oggetto JSON dove le chiavi sono i codici lingua.`;
+    
+    const translateResp = await callGroqAPI(translatePrompt, newMemory_it, groqApiKey, 0.1, true);
     const translations = JSON.parse(translateResp);
     
-    // Uniamo l'italiano alla mappa
     const newInstructions_i18n = { it: newMemory_it, ...translations };
 
     return res.status(200).json({
@@ -84,16 +91,20 @@ async function handleBotanicoClient(req, res, groqApiKey) {
     let generalInstructions = "";
 
     if (contesto.vendorId) {
-        const aiMemoryDoc = await db.collection('vendors').doc(contesto.vendorId).collection('ai_assistant').doc('memory').get();
-        if (aiMemoryDoc.exists) {
-            const data = aiMemoryDoc.data();
-            structuredMemory = data.structured_memory || {};
-            generalInstructions = data.instructions_i18n?.[contesto.lang] || data.instructions || "";
-        }
+        try {
+            const aiMemoryDoc = await db.collection('vendors').doc(contesto.vendorId).collection('ai_assistant').doc('memory').get();
+            if (aiMemoryDoc.exists) {
+                const data = aiMemoryDoc.data();
+                structuredMemory = data.structured_memory || {};
+                generalInstructions = data.instructions_i18n?.[contesto.lang] || data.instructions || "";
+            }
+        } catch (e) { console.error("Errore lettura DB", e); }
     }
 
-    const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Tono velletrano amichevole. CONTESTO: ${JSON.stringify(structuredMemory)}. ISTRUZIONI: ${generalInstructions}. PRODOTTI: ${JSON.stringify(contesto.prodotti_semplificati)}. Rispondi in ${contesto.lang || 'it'} (max 3 frasi). SOLO JSON {"risposta": "testo"}`;
-    const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.5, { type: "json_object" });
+    const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Tono amichevole. CONTESTO: ${JSON.stringify(structuredMemory)}. ISTRUZIONI: ${generalInstructions}. PRODOTTI: ${JSON.stringify(contesto.prodotti_semplificati)}. 
+    REGOLE: Rispondi in ${contesto.lang || 'it'} (max 3 frasi). Rispondi SOLO con un oggetto JSON {"risposta": "tuo testo"}`;
+    
+    const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.5, true);
     return res.status(200).json(JSON.parse(aiResponse));
 }
 
@@ -102,8 +113,8 @@ async function handleBotanicoClient(req, res, groqApiKey) {
 // ==================================================================
 async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
     const { contesto } = req.body;
-    const systemPrompt = `Sei il Personal Shopper. Crea 3 carrelli JSON basati su: ${contesto.richiestaUtente}. Prodotti: ${JSON.stringify(contesto.prodotti)}`;
-    const aiResponse = await callGroqAPI(systemPrompt, "Genera carrelli", groqApiKey, 0.5, { type: "json_object" });
+    const systemPrompt = `Sei un Personal Shopper. Crea 3 carrelli spesa. Rispondi SOLO con un oggetto JSON {"carrelli": [...]}. Richiesta: ${contesto.richiestaUtente}. Prodotti: ${JSON.stringify(contesto.prodotti)}`;
+    const aiResponse = await callGroqAPI(systemPrompt, "Genera carrelli", groqApiKey, 0.5, true);
     return res.status(200).json(JSON.parse(aiResponse));
 }
 
@@ -117,6 +128,7 @@ export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') return res.status(200).end();
+
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
     if (!GROQ_API_KEY) return res.status(500).json({ error: "API Key mancante" });
 
@@ -129,7 +141,7 @@ export default async function handler(req, res) {
             default: return res.status(400).json({ error: 'Azione sconosciuta' });
         }
     } catch (error) {
-        console.error(error);
+        console.error("Errore Handler:", error);
         return res.status(500).json({ error: error.message });
     }
 }
