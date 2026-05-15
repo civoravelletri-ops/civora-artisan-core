@@ -55,23 +55,23 @@ async function handleTeachAICollaborator(req, res, groqApiKey) {
     const instructionsInItalian = await callGroqAPI(itPrompt, rawInstructions, groqApiKey);
 
     // B. ESTRAZIONE STRUTTURATA (OBLIGATORIO JSON)
-    const structPrompt = `Sei un analista dati. Estrai un oggetto JSON dal testo.
-    REGOLE: Rispondi SOLO con JSON.
-    Campi:
-    - anno_fondazione (stringa, l'anno di fondazione del vivaio, es. "1982")
-    - specialita_vivaio (array di stringhe, le specialitÃ  del vivaio, es. ["rose antiche", "piante grasse"])
-    - filosofia_generale (stringa, la filosofia del negozio, es. "coltiviamo con amore e passione")
-    - regole_sconti_quantita (array di oggetti con: min_qty (numero), percentage (numero), description (stringa), es. [{"min_qty": 100, "percentage": 20, "description": "sconto del 20% su 100 rose"}])
-    - personale (array di stringhe, nomi e ruoli chiave, es. ["Marco (esperto di bonsai)", "Giulia (responsabile consegne)"])
-    - orari_speciali (stringa, descrizione di orari particolari o festivitÃ )
-    - tono_di_voce_ai (stringa, lo stile di comunicazione dell'AI, es. "familiare e cordiale", "professionale e diretto")
-    - discount_strategy_rules (array di stringhe, regole generali per gli sconti)
-    - customer_psychology_rules (array di stringhe, regole su come trattare i clienti)
-    - forbidden_words (array di stringhe, parole che l'AI non deve usare)
-    - preferred_words (array di stringhe, parole che l'AI dovrebbe preferire)
-    - descrizione_generale_vivaio (stringa, un riassunto generale del vivaio)
-    - range_prezzi_display (stringa, un range di prezzi tipico dei prodotti del vivaio, es. "€ 5,00 - € 150,00" se ricavabile, altrimenti "N/D")
-    - comprensione_percentuale (numero intero da 0 a 100, una stima di quanto l'AI ha compreso i dettagli forniti, sempre 98 se il testo è ricco di informazioni).`;
+        const structPrompt = `Sei un analista dati. Estrai un oggetto JSON dal testo.
+        REGOLE: Rispondi SOLO con JSON.
+        Campi:
+        - anno_fondazione (stringa, l'anno di fondazione del vivaio, es. "1982")
+        - specialita_vivaio (array di stringhe, le specialitÃ  del vivaio, es. ["rose antiche", "piante grasse"])
+        - filosofia_generale (stringa, la filosofia del negozio, es. "coltiviamo con amore e passione")
+        - regole_sconti_quantita (array di oggetti con: min_qty (numero), percentage (numero), description (stringa), es. [{"min_qty": 100, "percentage": 20, "description": "sconto del 20% su 100 rose"}])
+        - personale (array di stringhe, nomi e ruoli chiave, es. ["Marco (esperto di bonsai)", "Giulia (responsabile consegne)"])
+        - orari_speciali (stringa, descrizione di orari particolari o festivitÃ )
+        - tono_di_voce_ai (stringa, lo stile di comunicazione dell'AI, es. "familiare e cordiale", "professionale e diretto")
+        - discount_strategy_rules (array di stringhe, regole generali per gli sconti)
+        - customer_psychology_rules (array di stringhe, regole su come trattare i clienti)
+        - forbidden_words (array di stringhe, parole che l'AI non deve usare)
+        - preferred_words (array di stringhe, parole che l'AI dovrebbe preferire)
+        - descrizione_generale_vivaio (stringa, un riassunto generale del vivaio)
+        - range_prezzi_display (stringa, un range di prezzi tipico dei prodotti del vivaio, es. "€ 5,00 - € 150,00" se ricavabile, altrimenti "N/D")
+        - comprensione_percentuale (numero intero da 0 a 100, una stima di quanto l'AI ha compreso i dettagli forniti, sempre 98 se il testo è ricco di informazioni).`;
 
     const structUser = `TESTO NUOVO: "${instructionsInItalian}"\nMEMORIA VECCHIA: "${currentMemory || ''}"`;
     const structResp = await callGroqAPI(structPrompt, structUser, groqApiKey, 0.1, true);
@@ -100,76 +100,182 @@ async function handleTeachAICollaborator(req, res, groqApiKey) {
 // ==================================================================
 // 4. LOGICA CLIENTE (BOTANICO)
 // ==================================================================
-async function handleBotanicoClient(req, res, groqApiKey) { // CORRETTO: "async"
-    const { contesto } = req.body;
-    let structuredMemory = {};
-    let generalInstructions = "";
-    const tone = (contesto.structuredMemory && contesto.structuredMemory.tono_di_voce_ai) || "amichevole e cordiale"; // Prende il tono dalla memoria strutturata
+aasync function handleBotanicoClient(req, res, groqApiKey) { // ASSICURATI CHE "async" SIA PRESENTE QUI
+     const { contesto } = req.body;
+     let structuredMemory = {};
+     let generalInstructions = "";
+     const tone = (structuredMemory.tono_di_voce_ai || "amichevole e cordiale"); // Prende il tono dalla memoria strutturata
 
-    if (contesto.vendorId) {
+     if (contesto.vendorId) {
+         try {
+             const aiMemoryDoc = await db.collection('vendors').doc(contesto.vendorId).collection('ai_assistant').doc('memory').get();
+             if (aiMemoryDoc.exists) {
+                 const data = aiMemoryDoc.data();
+                 structuredMemory = data.structured_memory || {};
+                 generalInstructions = data.instructions_i18n?.[contesto.lang] || data.instructions || "";
+             }
+         } catch (e) { console.error("Errore lettura DB", e); }
+     }
+
+     const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Il tuo tono deve essere ${tone}.
+
+     CONTESTO MEMORIA AI: ${JSON.stringify(structuredMemory)}.
+     ISTRUZIONI GENERALI DEL NEGOZIO: ${generalInstructions}.
+     PRODOTTI DISPONIBILI (nome, prezzo, categoria, quantitÃ ): ${JSON.stringify(contesto.prodotti_semplificati)}.
+
+     REGOLE DI RISPOSTA:
+     1. Rispondi SEMPRE in ${contesto.lang || 'it'}.
+     2. Se il cliente esprime il desiderio di "parlare con il proprietario", "essere richiamato", "negoziare", o se la sua richiesta va oltre le tue capacitÃ  attuali di gestione (es. ordini enormi per matrimoni con dettagli complessi, richieste molto specifiche e non standard), DEVI proporre l'escalation al proprietario.
+     3. Quando proponi l'escalation, DEVI chiedere al cliente di fornire il suo "nome" e "numero di telefono".
+     4. Dopo aver ricevuto nome e numero, DEVI chiedere se vuole aggiungere "altre note" per il proprietario.
+     5. Se il cliente aggiunge "altre note", DEVI aggiornare il riepilogo della conversazione includendole.
+     6. Se il cliente ha un carrello attivo o ha fatto una richiesta specifica che ha generato un'offerta AI (quindi con un "sigillo" in valid_offers), DEVI fare riferimento a quella proposta nel riassunto.
+     7. Mantieni le risposte il piÃ¹ concise possibile, rispettando il tono del negozio.
+     8. Rispondi SEMPRE e SOLO con un oggetto JSON nel formato:
+        {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto"|"aggiungi_note_contatto",
+         "message": "messaggio al cliente",
+         "fields_needed": ["nome", "telefono"] (solo per "chiedi_contatto"),
+         "customer_name": "nome del cliente" (se giÃ  estratto o fornito),
+         "customer_phone": "telefono del cliente" (se giÃ  estratto o fornito),
+         "conversation_summary_for_owner": "riassunto interno della conversazione per il proprietario" (solo per "conferma_contatto" o "aggiungi_note_contatto"),
+         "additional_notes_for_owner": "note aggiuntive dal cliente per il proprietario" (solo per "aggiungi_note_contatto")}
+     9. NON inventare prezzi o sconti che non siano esplicitamente nelle regole del vivaio o che tu non abbia giÃ  proposto con un "sigillo".
+
+     Il cliente ha giÃ  fornito le seguenti informazioni (se disponibili):
+     Nome: ${contesto.customerName || 'N/D'}
+     Telefono: ${contesto.customerPhone || 'N/D'}
+     Riassunto conversazione precedente: ${contesto.previousConversationSummary || 'Nessuno.'}
+     Offerta AI (se presente): ${contesto.activeAiOffer ? JSON.stringify(contesto.activeAiOffer) : 'Nessuna.'}
+     `;
+
+     const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
+     let parsedResponse;
+     try {
+         parsedResponse = JSON.parse(aiResponse);
+         if (!parsedResponse.action || !["risposta_normale", "chiedi_contatto", "conferma_contatto", "aggiungi_note_contatto"].includes(parsedResponse.action)) {
+             throw new Error("Formato JSON non valido: campo 'action' mancante o non riconosciuto.");
+         }
+     } catch (e) {
+         console.error("Errore parsing risposta AI Botanico:", aiResponse, e);
+         return res.status(500).json({
+             action: "risposta_normale",
+             message: `Mi dispiace, c'è stato un problema tecnico e non riesco a elaborare la tua richiesta in questo momento. Riprova piÃ¹ tardi.`,
+             reasoning: `AI response not valid JSON or invalid action: ${aiResponse}`
+         });
+     }
+     return res.status(200).json(parsedResponse);
+ }
+
+    const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Il tuo tono deve essere ${tone || "amichevole e cordiale"}.
+
+        CONTESTO MEMORIA AI: ${JSON.stringify(structuredMemory)}.
+        ISTRUZIONI GENERALI DEL NEGOZIO: ${generalInstructions}.
+        PRODOTTI DISPONIBILI (nome, prezzo, categoria, quantitÃ ): ${JSON.stringify(contesto.prodotti_semplificati)}.
+
+        REGOLE DI RISPOSTA:
+        1. Rispondi SEMPRE in ${contesto.lang || 'it'}.
+        2. Se il cliente esprime il desiderio di "parlare con il proprietario", "essere richiamato", "negoziare", o se la sua richiesta va oltre le tue capacitÃ  attuali di gestione (es. ordini enormi per matrimoni con dettagli complessi, richieste molto specifiche e non standard), DEVI proporre l'escalation al proprietario.
+        3. Quando proponi l'escalation, DEVI chiedere al cliente di fornire il suo "nome" e "numero di telefono".
+        4. Dopo aver ricevuto nome e numero, DEVI chiedere se vuole aggiungere "altre note" per il proprietario.
+        5. Se il cliente aggiunge "altre note", DEVI aggiornare il riepilogo della conversazione includendole.
+        6. Se il cliente ha un carrello attivo o ha fatto una richiesta specifica che ha generato un'offerta AI (quindi con un "sigillo" in valid_offers), DEVI fare riferimento a quella proposta nel riassunto.
+        7. Mantieni le risposte il piÃ¹ concise possibile, rispettando il tono del negozio.
+        8. Rispondi SEMPRE e SOLO con un oggetto JSON nel formato:
+           {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto"|"aggiungi_note_contatto",
+            "message": "messaggio al cliente",
+            "fields_needed": ["nome", "telefono"] (solo per "chiedi_contatto"),
+            "customer_name": "nome del cliente" (se giÃ  estratto o fornito),
+            "customer_phone": "telefono del cliente" (se giÃ  estratto o fornito),
+            "conversation_summary_for_owner": "riassunto interno della conversazione per il proprietario" (solo per "conferma_contatto" o "aggiungi_note_contatto"),
+            "additional_notes_for_owner": "note aggiuntive dal cliente per il proprietario" (solo per "aggiungi_note_contatto")}
+        9. NON inventare prezzi o sconti che non siano esplicitamente nelle regole del vivaio o che tu non abbia giÃ  proposto con un "sigillo".
+
+        Il cliente ha giÃ  fornito le seguenti informazioni (se disponibili):
+        Nome: ${contesto.customerName || 'N/D'}
+        Telefono: ${contesto.customerPhone || 'N/D'}
+        Riassunto conversazione precedente: ${contesto.previousConversationSummary || 'Nessuno.'}
+        Offerta AI (se presente): ${contesto.activeAiOffer ? JSON.stringify(contesto.activeAiOffer) : 'Nessuna.'}
+        `;
+
+        const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
+        let parsedResponse;
         try {
-            const aiMemoryDoc = await db.collection('vendors').doc(contesto.vendorId).collection('ai_assistant').doc('memory').get();
-            if (aiMemoryDoc.exists) {
-                const data = aiMemoryDoc.data();
-                structuredMemory = data.structured_memory || {};
-                generalInstructions = data.instructions_i18n?.[contesto.lang] || data.instructions || "";
+            parsedResponse = JSON.parse(aiResponse);
+            // Assicurati che 'action' sia sempre presente e valido
+            if (!parsedResponse.action || !["risposta_normale", "chiedi_contatto", "conferma_contatto", "aggiungi_note_contatto"].includes(parsedResponse.action)) {
+                throw new Error("Formato JSON non valido: campo 'action' mancante o non riconosciuto.");
             }
-        } catch (e) { console.error("Errore lettura DB", e); }
-    }
-
-    const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Il tuo tono deve essere ${tone}.
-    
-    CONTESTO MEMORIA AI: ${JSON.stringify(structuredMemory)}.
-    ISTRUZIONI GENERALI DEL NEGOZIO: ${generalInstructions}.
-    PRODOTTI DISPONIBILI (nome, prezzo, categoria, quantitÃ ): ${JSON.stringify(contesto.prodotti_semplificati)}.
-    
-    REGOLE DI RISPOSTA:
-    1. Rispondi SEMPRE in ${contesto.lang || 'it'}.
-    2. Se il cliente esprime il desiderio di "parlare con il proprietario", "essere richiamato", "negoziare", o se la sua richiesta va oltre le tue capacitÃ  attuali di gestione (es. ordini enormi per matrimoni con dettagli complessi, richieste molto specifiche e non standard), DEVI proporre l'escalation al proprietario.
-    3. Quando proponi l'escalation, DEVI chiedere al cliente di fornire il suo "nome" e "numero di telefono".
-    4. Dopo aver ricevuto nome e numero, DEVI chiedere se vuole aggiungere "altre note" per il proprietario.
-    5. Se il cliente aggiunge "altre note", DEVI aggiornare il riepilogo della conversazione includendole.
-    6. Se il cliente ha un carrello attivo o ha fatto una richiesta specifica che ha generato un'offerta AI (quindi con un "sigillo" in valid_offers), DEVI fare riferimento a quella proposta nel riassunto.
-    7. Mantieni le risposte il piÃ¹ concise possibile, rispettando il tono del negozio.
-    8. Rispondi SEMPRE e SOLO con un oggetto JSON nel formato:
-       {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto"|"aggiungi_note_contatto",
-        "message": "messaggio al cliente",
-        "fields_needed": ["nome", "telefono"] (solo per "chiedi_contatto"),
-        "customer_name": "nome del cliente" (se giÃ  estratto o fornito),
-        "customer_phone": "telefono del cliente" (se giÃ  estratto o fornito),
-        "conversation_summary_for_owner": "riassunto interno della conversazione per il proprietario" (solo per "conferma_contatto" o "aggiungi_note_contatto"),
-        "additional_notes_for_owner": "note aggiuntive dal cliente per il proprietario" (solo per "aggiungi_note_contatto")}
-    9. NON inventare prezzi o sconti che non siano esplicitamente nelle regole del vivaio o che tu non abbia giÃ  proposto con un "sigillo".
-
-    Il cliente ha giÃ  fornito le seguenti informazioni (se disponibili):
-    Nome: ${contesto.customerName || 'N/D'}
-    Telefono: ${contesto.customerPhone || 'N/D'}
-    Riassunto conversazione precedente: ${contesto.previousConversationSummary || 'Nessuno.'}
-    Offerta AI (se presente): ${contesto.activeAiOffer ? JSON.stringify(contesto.activeAiOffer) : 'Nessuna.'}
-    `;
-
-    const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
-    let parsedResponse;
-    try {
-        parsedResponse = JSON.parse(aiResponse);
-        if (!parsedResponse.action || !["risposta_normale", "chiedi_contatto", "conferma_contatto", "aggiungi_note_contatto"].includes(parsedResponse.action)) {
-            throw new Error("Formato JSON non valido: campo 'action' mancante o non riconosciuto.");
+        } catch (e) {
+            console.error("Errore parsing risposta AI Botanico:", aiResponse, e);
+            return res.status(500).json({
+                action: "risposta_normale",
+                message: `Mi dispiace, c'è stato un problema tecnico e non riesco a elaborare la tua richiesta in questo momento. Riprova più tardi.`,
+                reasoning: `AI response not valid JSON or invalid action: ${aiResponse}`
+            });
         }
-    } catch (e) {
-        console.error("Errore parsing risposta AI Botanico:", aiResponse, e);
-        return res.status(500).json({
-            action: "risposta_normale",
-            message: `Mi dispiace, c'è stato un problema tecnico e non riesco a elaborare la tua richiesta in questo momento. Riprova piÃ¹ tardi.`,
-            reasoning: `AI response not valid JSON or invalid action: ${aiResponse}`
-        });
+        return res.status(200).json(parsedResponse);
     }
-    return res.status(200).json(parsedResponse);
+
+    const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.5, true);
+    return res.status(200).json(JSON.parse(aiResponse));
 }
 
 // ==================================================================
+// 5. VECCHIA LOGICA CARRELLI
+// ==================================================================
+async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
+    const { contesto } = req.body;
+    const systemPrompt = `Sei un Personal Shopper. Crea 3 carrelli spesa. Rispondi SOLO con un oggetto JSON {"carrelli": [...]}. Richiesta: ${contesto.richiestaUtente}. Prodotti: ${JSON.stringify(contesto.prodotti)}`;
+    const aiResponse = await callGroqAPI(systemPrompt, "Genera carrelli", groqApiKey, 0.5, true);
+    return res.status(200).json(JSON.parse(aiResponse));
+}
+
+// ==================================================================
+// 6. HANDLER PRINCIPALE
+// ==================================================================
+export default async function handler(req, res) {
+    res.setHeader('Access-Control-Allow-Credentials', true);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (req.method === 'OPTIONS') return res.status(200).end();
+
+    const GROQ_API_KEY = process.env.GROQ_API_KEY;
+    if (!GROQ_API_KEY) return res.status(500).json({ error: "API Key mancante" });
+
+    try {
+            const { action } = req.body;
+            switch (action) {
+                            case 'teach_ai_collaborator':
+                                return await handleTeachAICollaborator(req, res, GROQ_API_KEY);
+
+                            case 'sync_vendor_inventory':
+                                return await handleSyncInventory(req, res, GROQ_API_KEY);
+
+                            case 'botanico':
+                                return await handleBotanicoClient(req, res, GROQ_API_KEY);
+
+                            case 'propose_discount_offer':
+                                return await handleProposeDiscountOffer(req, res, GROQ_API_KEY);
+
+                            case 'escalate_to_owner': // NUOVA AZIONE PER ESCALATION
+                                return await handleEscalateToOwner(req, res, GROQ_API_KEY);
+
+                            case 'carrelli':
+                                return await handlePersonalShopperCarrelli(req, res, GROQ_API_KEY);
+
+                            default: return res.status(400).json({ error: 'Azione sconosciuta' });
+                        }
+    } catch (error) {
+        console.error("Errore Handler:", error);
+        return res.status(500).json({ error: error.message });
+    }
+}
+// ==================================================================
 // 5. LOGICA PROPOSTA SCONTO/TRATTATIVA (Corazzata per il Guardiano)
 // ==================================================================
-async function handleProposeDiscountOffer(req, res, groqApiKey) { // CORRETTO: "async"
+async function handleProposeDiscountOffer(req, res, groqApiKey) {
     const { vendorId, customerUserId, cartItems, customerQuery, lang = 'it' } = req.body;
     let structuredMemory = {};
     let generalInstructions = "";
@@ -183,6 +289,7 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) { // CORRETTO: "
                 structuredMemory = data.structured_memory || {};
                 generalInstructions = data.instructions_i18n?.[lang] || data.instructions || "";
             }
+            // Per il sigillo, assumiamo che i prodotti siano disponibili nel DB, ma per AI diamo una lista semplificata
             const offersSnap = await db.collection('offers').where('vendorId', '==', vendorId).get();
             vendorProducts = offersSnap.docs.map(doc => {
                 const data = doc.data();
@@ -192,7 +299,7 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) { // CORRETTO: "
                     price: data.price,
                     category: data.productCategory,
                     quantity_available: data.quantity,
-                    quickSyncCode: data.quickSyncCode
+                    quickSyncCode: data.quickSyncCode // Potrebbe essere utile per referenze
                 };
             }).filter(p => p.quantity_available > 0);
 
@@ -242,8 +349,13 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) { // CORRETTO: "
     }
 
     if (parsedResponse.offer_made) {
+        // Qui dovremmo idealmente creare il "Sigillo" nel database `validazioni`
+        // Per ora, lo facciamo internamente e indichiamo che è una prossima fase di integrazione
+        // Il frontend cliente riceverà questa offerta e, se accettata, invierà la richiesta di pagamento
+        // Il `agrigarden-payment-intent.js` a quel punto verificherà se esiste un sigillo valido
         console.log("AI ha proposto un'offerta. Servirebbe creare il sigillo qui:", parsedResponse);
 
+        // NUOVA LOGICA: Creazione del "Sigillo" nel database Firestore
         try {
             const timestamp = admin.firestore.FieldValue.serverTimestamp();
             const offerRef = await db.collection('vendors').doc(vendorId).collection('ai_assistant').collection('valid_offers').add({
@@ -279,8 +391,8 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) { // CORRETTO: "
 // ==================================================================
 // 6. LOGICA DI ESCALATION AL PROPRIETARIO
 // ==================================================================
-async function handleEscalateToOwner(req, res, groqApiKey) { // CORRETTO: "async"
-    const { vendorId, customerUserId, customerName, customerPhone, conversationSummary, additionalNotes, lang = 'it', requestId = null } = req.body;
+async function handleEscalateToOwner(req, res, groqApiKey) {
+    const { vendorId, customerUserId, customerName, customerPhone, conversationSummary, additionalNotes, lang = 'it' } = req.body;
     let structuredMemory = {};
     let generalInstructions = "";
 
@@ -299,46 +411,40 @@ async function handleEscalateToOwner(req, res, groqApiKey) { // CORRETTO: "async
 
     const tone = structuredMemory.tono_di_voce_ai || "familiare e cordiale";
 
+    // Salviamo la richiesta nel database
     try {
         const timestamp = admin.firestore.FieldValue.serverTimestamp();
-        let requestRef;
+        const requestRef = await db.collection('vendors').doc(vendorId).collection('ai_assistant').collection('owner_contact_requests').add({
+            vendorId: vendorId,
+            customerUserId: customerUserId || 'guest',
+            customerName: customerName || 'Anonimo',
+            customerPhone: customerPhone,
+            conversationSummary: conversationSummary,
+            additionalNotes: additionalNotes,
+            request_created_at: timestamp,
+            status: 'pending_contact', // Stato iniziale: in attesa di essere contattato
+            lang: lang
+        });
+        console.log(`Richiesta di contatto proprietario creata con ID: ${requestRef.id}`);
 
-        if (requestId) { // Se esiste giÃ  una richiesta, la aggiorniamo
-            requestRef = db.collection('vendors').doc(vendorId).collection('ai_assistant').collection('owner_contact_requests').doc(requestId);
-            await requestRef.update({
-                conversationSummary: conversationSummary, // Aggiorna il riepilogo
-                additionalNotes: additionalNotes,
-                updatedAt: timestamp
-            });
-            console.log(`Richiesta di contatto proprietario aggiornata con ID: ${requestRef.id}`);
-        } else { // Altrimenti, ne creiamo una nuova
-            requestRef = await db.collection('vendors').doc(vendorId).collection('ai_assistant').collection('owner_contact_requests').add({
-                vendorId: vendorId,
-                customerUserId: customerUserId || 'guest',
-                customerName: customerName || 'Anonimo',
-                customerPhone: customerPhone,
-                conversationSummary: conversationSummary,
-                additionalNotes: additionalNotes,
-                request_created_at: timestamp,
-                status: 'pending_contact',
-                lang: lang
-            });
-            console.log(`Richiesta di contatto proprietario creata con ID: ${requestRef.id}`);
-        }
+        // Opzionale: notifica il venditore via email/Whatsapp/Telegram che c'è una richiesta
+        // Questa parte richiederebbe un'altra Vercel Function per le notifiche, non inclusa qui.
+        // Ad esempio: fetch('URL_NOTIFICHE_VENDITORE', { method: 'POST', body: JSON.stringify({ type: 'new_contact_request', requestId: requestRef.id, ...req.body }) });
 
+        // Risposta per il cliente
         const aiResponseText = `Perfetto ${customerName || ''}! Ho inoltrato tutte le informazioni al mio capo. Non preoccuparti, sa già di cosa avete parlato. Ti contatterà al più presto al numero ${customerPhone}. Vuoi aggiungere qualcos'altro da lasciare detto al mio capo prima che ti contatti, oppure posso aiutarti in qualche altra cosa?`;
 
         return res.status(200).json({
             success: true,
             message_to_customer: aiResponseText,
-            request_id: requestRef.id // Restituisce l'ID della richiesta (nuova o aggiornata)
+            request_id: requestRef.id
         });
 
     } catch (e) {
-        console.error("Errore nella creazione/aggiornamento della richiesta di contatto proprietario:", e);
+        console.error("Errore nella creazione della richiesta di contatto proprietario:", e);
         return res.status(500).json({
             success: false,
-            message_to_customer: `Mi dispiace, c'è stato un errore e non sono riuscito a inoltrare la tua richiesta. Riprova piÃ¹ tardi.`,
+            message_to_customer: `Mi dispiace, c'è stato un errore e non sono riuscito a inoltrare la tua richiesta. Riprova più tardi.`,
             error: e.message
         });
     }
@@ -350,7 +456,7 @@ async function handleEscalateToOwner(req, res, groqApiKey) { // CORRETTO: "async
 async function handleSyncInventory(req, res, groqApiKey) {
     const { vendorData, products, currentMemory } = req.body;
 
-    const systemPrompt = `Sei un esperto analista di business. Riceverai i dati di un negozio e la lista dei suoi prodotti.
+const systemPrompt = `Sei un esperto analista di business. Riceverai i dati di un negozio e la lista dei suoi prodotti.
     Il tuo compito Ã¨ creare un "Manuale di Conoscenza" per l'assistente AI del negozio.
     DEVI strutturare la risposta in JSON con:
     1. newInstructions_it: Un testo fluido in italiano che riassume chi Ã¨ il negozio, i suoi orari di apertura, l'indirizzo, il tipo di prodotti che vende (diviso per categorie o tipi principali), e le sue specializzazioni.
@@ -371,7 +477,7 @@ async function handleSyncInventory(req, res, groqApiKey) {
     const parsed = JSON.parse(aiResponse);
 
     // Generiamo le traduzioni massive come abbiamo fatto prima
-    const translatePrompt = `Traduci in queste lingue: ${SUPPORTED_LANGUAGES.join(', ')}. Rispondi solo JSON.`;
+    const translatePrompt = `Traduci in queste lingue: en, fr, de, es, ru, ro, sq, hi, ar, zh. Rispondi solo JSON.`;
     const translateResp = await callGroqAPI(translatePrompt, parsed.newInstructions_it, groqApiKey, 0.1, true);
     const translations = JSON.parse(translateResp);
 
@@ -380,57 +486,4 @@ async function handleSyncInventory(req, res, groqApiKey) {
         newInstructions_i18n: { it: parsed.newInstructions_it, ...translations },
         structured_memory: parsed.structured_memory
     });
-}
-
-// ==================================================================
-// 8. VECCHIA LOGICA CARRELLI
-// ==================================================================
-async function handlePersonalShopperCarrelli(req, res, groqApiKey) { // CORRETTO: "async"
-    const { contesto } = req.body;
-    const systemPrompt = `Sei un Personal Shopper. Crea 3 carrelli spesa. Rispondi SOLO con un oggetto JSON {"carrelli": [...]}. Richiesta: ${contesto.richiestaUtente}. Prodotti: ${JSON.stringify(contesto.prodotti)}`;
-    const aiResponse = await callGroqAPI(systemPrompt, "Genera carrelli", groqApiKey, 0.5, true);
-    return res.status(200).json(JSON.parse(aiResponse));
-}
-
-// ==================================================================
-// 9. HANDLER PRINCIPALE
-// ==================================================================
-export default async function handler(req, res) {
-    res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-    if (req.method === 'OPTIONS') return res.status(200).end();
-
-    const GROQ_API_KEY = process.env.GROQ_API_KEY;
-    if (!GROQ_API_KEY) return res.status(500).json({ error: "API Key mancante" });
-
-    try {
-        const { action } = req.body;
-        switch (action) {
-            case 'teach_ai_collaborator':
-                return await handleTeachAICollaborator(req, res, GROQ_API_KEY);
-
-            case 'sync_vendor_inventory':
-                return await handleSyncInventory(req, res, GROQ_API_KEY);
-
-            case 'botanico':
-                return await handleBotanicoClient(req, res, GROQ_API_KEY);
-
-            case 'propose_discount_offer':
-                return await handleProposeDiscountOffer(req, res, GROQ_API_KEY);
-
-            case 'escalate_to_owner':
-                return await handleEscalateToOwner(req, res, GROQ_API_KEY);
-
-            case 'carrelli':
-                return await handlePersonalShopperCarrelli(req, res, GROQ_API_KEY);
-
-            default: return res.status(400).json({ error: 'Azione sconosciuta' });
-        }
-    } catch (error) {
-        console.error("Errore Handler:", error);
-        return res.status(500).json({ error: error.message });
-    }
 }
