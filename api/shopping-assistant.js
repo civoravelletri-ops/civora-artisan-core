@@ -104,8 +104,7 @@ async function handleBotanicoClient(req, res, groqApiKey) { // CORRETTO: "async"
     const { contesto } = req.body;
     let structuredMemory = {};
     let generalInstructions = "";
-    // Recupera il tono dalla memoria strutturata del venditore, altrimenti usa un default
-    const tone = (structuredMemory.tono_di_voce_ai || "amichevole e cordiale");
+    const tone = (contesto.structuredMemory && contesto.structuredMemory.tono_di_voce_ai) || "amichevole e cordiale"; // Prende il tono dalla memoria strutturata
 
     if (contesto.vendorId) {
         try {
@@ -184,7 +183,6 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) { // CORRETTO: "
                 structuredMemory = data.structured_memory || {};
                 generalInstructions = data.instructions_i18n?.[lang] || data.instructions || "";
             }
-            // Per il sigillo, assumiamo che i prodotti siano disponibili nel DB, ma per AI diamo una lista semplificata
             const offersSnap = await db.collection('offers').where('vendorId', '==', vendorId).get();
             vendorProducts = offersSnap.docs.map(doc => {
                 const data = doc.data();
@@ -194,7 +192,7 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) { // CORRETTO: "
                     price: data.price,
                     category: data.productCategory,
                     quantity_available: data.quantity,
-                    quickSyncCode: data.quickSyncCode // Potrebbe essere utile per referenze
+                    quickSyncCode: data.quickSyncCode
                 };
             }).filter(p => p.quantity_available > 0);
 
