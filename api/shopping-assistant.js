@@ -116,8 +116,55 @@ async function handleBotanicoClient(req, res, groqApiKey) {
         } catch (e) { console.error("Errore lettura DB", e); }
     }
 
-    const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Tono amichevole. CONTESTO: ${JSON.stringify(structuredMemory)}. ISTRUZIONI: ${generalInstructions}. PRODOTTI: ${JSON.stringify(contesto.prodotti_semplificati)}.
-    REGOLE: Rispondi in ${contesto.lang || 'it'} (max 3 frasi). Rispondi SOLO con un oggetto JSON {"risposta": "tuo testo"}`;
+    const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Il tuo tono deve essere ${tone || "amichevole e cordiale"}.
+
+        CONTESTO MEMORIA AI: ${JSON.stringify(structuredMemory)}.
+        ISTRUZIONI GENERALI DEL NEGOZIO: ${generalInstructions}.
+        PRODOTTI DISPONIBILI (nome, prezzo, categoria, quantitÃ ): ${JSON.stringify(contesto.prodotti_semplificati)}.
+
+        REGOLE DI RISPOSTA:
+        1. Rispondi SEMPRE in ${contesto.lang || 'it'}.
+        2. Se il cliente esprime il desiderio di "parlare con il proprietario", "essere richiamato", "negoziare", o se la sua richiesta va oltre le tue capacitÃ  attuali di gestione (es. ordini enormi per matrimoni con dettagli complessi, richieste molto specifiche e non standard), DEVI proporre l'escalation al proprietario.
+        3. Quando proponi l'escalation, DEVI chiedere al cliente di fornire il suo "nome" e "numero di telefono".
+        4. Dopo aver ricevuto nome e numero, DEVI chiedere se vuole aggiungere "altre note" per il proprietario.
+        5. Se il cliente aggiunge "altre note", DEVI aggiornare il riepilogo della conversazione includendole.
+        6. Se il cliente ha un carrello attivo o ha fatto una richiesta specifica che ha generato un'offerta AI (quindi con un "sigillo" in valid_offers), DEVI fare riferimento a quella proposta nel riassunto.
+        7. Mantieni le risposte il piÃ¹ concise possibile, rispettando il tono del negozio.
+        8. Rispondi SEMPRE e SOLO con un oggetto JSON nel formato:
+           {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto"|"aggiungi_note_contatto",
+            "message": "messaggio al cliente",
+            "fields_needed": ["nome", "telefono"] (solo per "chiedi_contatto"),
+            "customer_name": "nome del cliente" (se giÃ  estratto o fornito),
+            "customer_phone": "telefono del cliente" (se giÃ  estratto o fornito),
+            "conversation_summary_for_owner": "riassunto interno della conversazione per il proprietario" (solo per "conferma_contatto" o "aggiungi_note_contatto"),
+            "additional_notes_for_owner": "note aggiuntive dal cliente per il proprietario" (solo per "aggiungi_note_contatto")}
+        9. NON inventare prezzi o sconti che non siano esplicitamente nelle regole del vivaio o che tu non abbia giÃ  proposto con un "sigillo".
+
+        Il cliente ha giÃ  fornito le seguenti informazioni (se disponibili):
+        Nome: ${contesto.customerName || 'N/D'}
+        Telefono: ${contesto.customerPhone || 'N/D'}
+        Riassunto conversazione precedente: ${contesto.previousConversationSummary || 'Nessuno.'}
+        Offerta AI (se presente): ${contesto.activeAiOffer ? JSON.stringify(contesto.activeAiOffer) : 'Nessuna.'}
+        `;
+
+        const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
+        let parsedResponse;
+        try {
+            parsedResponse = JSON.parse(aiResponse);
+            // Assicurati che 'action' sia sempre presente e valido
+            if (!parsedResponse.action || !["risposta_normale", "chiedi_contatto", "conferma_contatto", "aggiungi_note_contatto"].includes(parsedResponse.action)) {
+                throw new Error("Formato JSON non valido: campo 'action' mancante o non riconosciuto.");
+            }
+        } catch (e) {
+            console.error("Errore parsing risposta AI Botanico:", aiResponse, e);
+            return res.status(500).json({
+                action: "risposta_normale",
+                message: `Mi dispiace, c'è stato un problema tecnico e non riesco a elaborare la tua richiesta in questo momento. Riprova più tardi.`,
+                reasoning: `AI response not valid JSON or invalid action: ${aiResponse}`
+            });
+        }
+        return res.status(200).json(parsedResponse);
+    }
 
     const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.5, true);
     return res.status(200).json(JSON.parse(aiResponse));
@@ -159,8 +206,11 @@ export default async function handler(req, res) {
                             case 'botanico':
                                 return await handleBotanicoClient(req, res, GROQ_API_KEY);
 
-                            case 'propose_discount_offer': // NUOVA AZIONE
+                            case 'propose_discount_offer':
                                 return await handleProposeDiscountOffer(req, res, GROQ_API_KEY);
+
+                            case 'escalate_to_owner': // NUOVA AZIONE PER ESCALATION
+                                return await handleEscalateToOwner(req, res, GROQ_API_KEY);
 
                             case 'carrelli':
                                 return await handlePersonalShopperCarrelli(req, res, GROQ_API_KEY);
@@ -286,6 +336,68 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) {
     }
 
     return res.status(200).json(parsedResponse);
+}
+
+// ==================================================================
+// 6. LOGICA DI ESCALATION AL PROPRIETARIO
+// ==================================================================
+async function handleEscalateToOwner(req, res, groqApiKey) {
+    const { vendorId, customerUserId, customerName, customerPhone, conversationSummary, additionalNotes, lang = 'it' } = req.body;
+    let structuredMemory = {};
+    let generalInstructions = "";
+
+    if (vendorId) {
+        try {
+            const aiMemoryDoc = await db.collection('vendors').doc(vendorId).collection('ai_assistant').doc('memory').get();
+            if (aiMemoryDoc.exists) {
+                const data = aiMemoryDoc.data();
+                structuredMemory = data.structured_memory || {};
+                generalInstructions = data.instructions_i18n?.[lang] || data.instructions || "";
+            }
+        } catch (e) {
+            console.error("Errore lettura DB per AI escalation:", e);
+        }
+    }
+
+    const tone = structuredMemory.tono_di_voce_ai || "familiare e cordiale";
+
+    // Salviamo la richiesta nel database
+    try {
+        const timestamp = admin.firestore.FieldValue.serverTimestamp();
+        const requestRef = await db.collection('vendors').doc(vendorId).collection('ai_assistant').collection('owner_contact_requests').add({
+            vendorId: vendorId,
+            customerUserId: customerUserId || 'guest',
+            customerName: customerName || 'Anonimo',
+            customerPhone: customerPhone,
+            conversationSummary: conversationSummary,
+            additionalNotes: additionalNotes,
+            request_created_at: timestamp,
+            status: 'pending_contact', // Stato iniziale: in attesa di essere contattato
+            lang: lang
+        });
+        console.log(`Richiesta di contatto proprietario creata con ID: ${requestRef.id}`);
+
+        // Opzionale: notifica il venditore via email/Whatsapp/Telegram che c'è una richiesta
+        // Questa parte richiederebbe un'altra Vercel Function per le notifiche, non inclusa qui.
+        // Ad esempio: fetch('URL_NOTIFICHE_VENDITORE', { method: 'POST', body: JSON.stringify({ type: 'new_contact_request', requestId: requestRef.id, ...req.body }) });
+
+        // Risposta per il cliente
+        const aiResponseText = `Perfetto ${customerName || ''}! Ho inoltrato tutte le informazioni al mio capo. Non preoccuparti, sa già di cosa avete parlato. Ti contatterà al più presto al numero ${customerPhone}. Vuoi aggiungere qualcos'altro da lasciare detto al mio capo prima che ti contatti, oppure posso aiutarti in qualche altra cosa?`;
+
+        return res.status(200).json({
+            success: true,
+            message_to_customer: aiResponseText,
+            request_id: requestRef.id
+        });
+
+    } catch (e) {
+        console.error("Errore nella creazione della richiesta di contatto proprietario:", e);
+        return res.status(500).json({
+            success: false,
+            message_to_customer: `Mi dispiace, c'è stato un errore e non sono riuscito a inoltrare la tua richiesta. Riprova più tardi.`,
+            error: e.message
+        });
+    }
 }
 
 // ==================================================================
