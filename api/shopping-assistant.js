@@ -55,8 +55,23 @@ async function handleTeachAICollaborator(req, res, groqApiKey) {
     const instructionsInItalian = await callGroqAPI(itPrompt, rawInstructions, groqApiKey);
 
     // B. ESTRAZIONE STRUTTURATA (OBLIGATORIO JSON)
-    const structPrompt = `Sei un analista dati. Estrai un oggetto JSON dal testo.
-    REGOLE: Rispondi SOLO con JSON. Campi: anno_fondazione, specialita_vivaio (array), filosofia_generale, regole_sconti_quantita (mappa), personale (array), orari_speciali, tono_di_voce_ai, discount_strategy_rules (array), customer_psychology_rules (array), forbidden_words (array), preferred_words (array), descrizione_generale_vivaio.`;
+        const structPrompt = `Sei un analista dati. Estrai un oggetto JSON dal testo.
+        REGOLE: Rispondi SOLO con JSON.
+        Campi:
+        - anno_fondazione (stringa, l'anno di fondazione del vivaio, es. "1982")
+        - specialita_vivaio (array di stringhe, le specialitÃ  del vivaio, es. ["rose antiche", "piante grasse"])
+        - filosofia_generale (stringa, la filosofia del negozio, es. "coltiviamo con amore e passione")
+        - regole_sconti_quantita (array di oggetti con: min_qty (numero), percentage (numero), description (stringa), es. [{"min_qty": 100, "percentage": 20, "description": "sconto del 20% su 100 rose"}])
+        - personale (array di stringhe, nomi e ruoli chiave, es. ["Marco (esperto di bonsai)", "Giulia (responsabile consegne)"])
+        - orari_speciali (stringa, descrizione di orari particolari o festivitÃ )
+        - tono_di_voce_ai (stringa, lo stile di comunicazione dell'AI, es. "familiare e cordiale", "professionale e diretto")
+        - discount_strategy_rules (array di stringhe, regole generali per gli sconti)
+        - customer_psychology_rules (array di stringhe, regole su come trattare i clienti)
+        - forbidden_words (array di stringhe, parole che l'AI non deve usare)
+        - preferred_words (array di stringhe, parole che l'AI dovrebbe preferire)
+        - descrizione_generale_vivaio (stringa, un riassunto generale del vivaio)
+        - range_prezzi_display (stringa, un range di prezzi tipico dei prodotti del vivaio, es. "€ 5,00 - € 150,00" se ricavabile, altrimenti "N/D")
+        - comprensione_percentuale (numero intero da 0 a 100, una stima di quanto l'AI ha compreso i dettagli forniti, sempre 98 se il testo è ricco di informazioni).`;
 
     const structUser = `TESTO NUOVO: "${instructionsInItalian}"\nMEMORIA VECCHIA: "${currentMemory || ''}"`;
     const structResp = await callGroqAPI(structPrompt, structUser, groqApiKey, 0.1, true);
@@ -135,39 +150,164 @@ export default async function handler(req, res) {
     try {
             const { action } = req.body;
             switch (action) {
-                case 'teach_ai_collaborator':
-                    return await handleTeachAICollaborator(req, res, GROQ_API_KEY);
+                            case 'teach_ai_collaborator':
+                                return await handleTeachAICollaborator(req, res, GROQ_API_KEY);
 
-                case 'sync_vendor_inventory':
-                    return await handleSyncInventory(req, res, GROQ_API_KEY);
+                            case 'sync_vendor_inventory':
+                                return await handleSyncInventory(req, res, GROQ_API_KEY);
 
-                case 'botanico':
-                    return await handleBotanicoClient(req, res, GROQ_API_KEY);
+                            case 'botanico':
+                                return await handleBotanicoClient(req, res, GROQ_API_KEY);
 
-                case 'carrelli':
-                    return await handlePersonalShopperCarrelli(req, res, GROQ_API_KEY);
+                            case 'propose_discount_offer': // NUOVA AZIONE
+                                return await handleProposeDiscountOffer(req, res, GROQ_API_KEY);
 
-                default: return res.status(400).json({ error: 'Azione sconosciuta' });
-            }
+                            case 'carrelli':
+                                return await handlePersonalShopperCarrelli(req, res, GROQ_API_KEY);
+
+                            default: return res.status(400).json({ error: 'Azione sconosciuta' });
+                        }
     } catch (error) {
         console.error("Errore Handler:", error);
         return res.status(500).json({ error: error.message });
     }
 }
 // ==================================================================
+// 5. LOGICA PROPOSTA SCONTO/TRATTATIVA (Corazzata per il Guardiano)
+// ==================================================================
+async function handleProposeDiscountOffer(req, res, groqApiKey) {
+    const { vendorId, customerUserId, cartItems, customerQuery, lang = 'it' } = req.body;
+    let structuredMemory = {};
+    let generalInstructions = "";
+    let vendorProducts = [];
+
+    if (vendorId) {
+        try {
+            const aiMemoryDoc = await db.collection('vendors').doc(vendorId).collection('ai_assistant').doc('memory').get();
+            if (aiMemoryDoc.exists) {
+                const data = aiMemoryDoc.data();
+                structuredMemory = data.structured_memory || {};
+                generalInstructions = data.instructions_i18n?.[lang] || data.instructions || "";
+            }
+            // Per il sigillo, assumiamo che i prodotti siano disponibili nel DB, ma per AI diamo una lista semplificata
+            const offersSnap = await db.collection('offers').where('vendorId', '==', vendorId).get();
+            vendorProducts = offersSnap.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    name: data.productName,
+                    price: data.price,
+                    category: data.productCategory,
+                    quantity_available: data.quantity,
+                    quickSyncCode: data.quickSyncCode // Potrebbe essere utile per referenze
+                };
+            }).filter(p => p.quantity_available > 0);
+
+        } catch (e) {
+            console.error("Errore lettura DB per AI offerta:", e);
+        }
+    }
+
+    const rules = structuredMemory.regole_sconti_quantita || [];
+    const discountStrategy = structuredMemory.discount_strategy_rules || [];
+    const philosophy = structuredMemory.filosofia_generale || "";
+    const tone = structuredMemory.tono_di_voce_ai || "familiare e cordiale";
+
+    const systemPrompt = `Sei un "Guardiano delle Offerte" per il vivaio. Il tuo compito è analizzare la richiesta del cliente e il suo carrello attuale.
+    Consulta le regole di sconto del vivaio. Se le condizioni sono soddisfatte, propone un'offerta al cliente.
+    Il tuo tono di voce è: ${tone}. La filosofia del vivaio è: ${philosophy}.
+    REGOLE DI SCONTO DEL VIVAIO: ${JSON.stringify(rules)}.
+    STRATEGIE AGGIUNTIVE: ${JSON.stringify(discountStrategy)}.
+    PRODOTTI DISPONIBILI NEL VIVAIO (semplificati): ${JSON.stringify(vendorProducts)}.
+    CARRELLO ATTUALE DEL CLIENTE: ${JSON.stringify(cartItems)}.
+
+    DEVI rispondere SOLO con un oggetto JSON.
+    Campi dell'oggetto JSON:
+    - offer_made (booleano, true se fai un'offerta, false altrimenti)
+    - offer_text (stringa, il testo dell'offerta al cliente, es. "Ottima scelta! Per le 100 rose, ti offro uno sconto del 20% e la consegna gratuita. Il totale sarÃ  di €X.XX")
+    - suggested_total_price (numero, il prezzo totale suggerito DOPO lo sconto, se offer_made Ã¨ true)
+    - discount_percentage_applied (numero, la percentuale di sconto applicata, se offer_made Ã¨ true)
+    - original_subtotal (numero, il subtotale prima dello sconto)
+    - offer_details (oggetto, con dettagli specifici dell'offerta come "free_shipping": true/false)
+    - reasoning (stringa, spiegazione interna del perchÃ© l'offerta è stata fatta, NON mostrare al cliente).
+
+    Se non fai un'offerta, offer_text sarÃ  una risposta amichevole che invita a proseguire o a chiedere altro.`;
+
+    const userPromptText = `Cliente chiede: "${customerQuery}". Analizza il carrello per vedere se si applicano sconti.`;
+
+    const aiResponse = await callGroqAPI(systemPrompt, userPromptText, groqApiKey, 0.2, true);
+    let parsedResponse;
+    try {
+        parsedResponse = JSON.parse(aiResponse);
+    } catch (e) {
+        console.error("Errore parsing risposta AI per offerta:", aiResponse, e);
+        return res.status(500).json({
+            offer_made: false,
+            offer_text: `Mi dispiace, c'è stato un errore nel calcolare le offerte. Riprova più tardi.`,
+            reasoning: `AI response not valid JSON: ${aiResponse}`
+        });
+    }
+
+    if (parsedResponse.offer_made) {
+        // Qui dovremmo idealmente creare il "Sigillo" nel database `validazioni`
+        // Per ora, lo facciamo internamente e indichiamo che è una prossima fase di integrazione
+        // Il frontend cliente riceverà questa offerta e, se accettata, invierà la richiesta di pagamento
+        // Il `agrigarden-payment-intent.js` a quel punto verificherà se esiste un sigillo valido
+        console.log("AI ha proposto un'offerta. Servirebbe creare il sigillo qui:", parsedResponse);
+
+        // NUOVA LOGICA: Creazione del "Sigillo" nel database Firestore
+        try {
+            const timestamp = admin.firestore.FieldValue.serverTimestamp();
+            const offerRef = await db.collection('vendors').doc(vendorId).collection('ai_assistant').collection('valid_offers').add({
+                vendorId: vendorId,
+                customerUserId: customerUserId || 'guest',
+                cartItems: cartItems,
+                customerQuery: customerQuery,
+                offer_made: true,
+                suggested_total_price: parsedResponse.suggested_total_price,
+                discount_percentage_applied: parsedResponse.discount_percentage_applied,
+                original_subtotal: parsedResponse.original_subtotal,
+                offer_details: parsedResponse.offer_details,
+                offer_created_at: timestamp,
+                offer_expires_at: new Date(Date.now() + 3600000), // Offerta valida per 1 ora
+                status: 'pending_customer_acceptance',
+                reasoning: parsedResponse.reasoning,
+                ai_response: parsedResponse
+            });
+            console.log(`Sigillo offerta creato con ID: ${offerRef.id}`);
+            parsedResponse.offer_id = offerRef.id; // Aggiungi l'ID del sigillo alla risposta
+
+        } catch (e) {
+            console.error("Errore nella creazione del Sigillo dell'offerta:", e);
+            parsedResponse.offer_made = false;
+            parsedResponse.offer_text = `Mi dispiace, non sono riuscito a creare il sigillo per l'offerta. Riprova più tardi.`;
+            parsedResponse.reasoning = `Errore creazione sigillo: ${e.message}`;
+        }
+    }
+
+    return res.status(200).json(parsedResponse);
+}
+
+// ==================================================================
 // 7. LOGICA SINCRONIZZAZIONE AUTOMATICA (RIASSUNTO CATALOGO E PROFILO)
 // ==================================================================
 async function handleSyncInventory(req, res, groqApiKey) {
     const { vendorData, products, currentMemory } = req.body;
 
-    const systemPrompt = `Sei un esperto analista di business. Riceverai i dati di un negozio e la lista dei suoi prodotti.
-    Il tuo compito è creare un "Manuale di Conoscenza" per l'assistente AI del negozio.
+const systemPrompt = `Sei un esperto analista di business. Riceverai i dati di un negozio e la lista dei suoi prodotti.
+    Il tuo compito Ã¨ creare un "Manuale di Conoscenza" per l'assistente AI del negozio.
     DEVI strutturare la risposta in JSON con:
-    1. newInstructions_it: Un testo fluido che riassume chi è il negozio, orari, e cosa vende (diviso per categorie).
-    2. structured_memory: Un oggetto con campi chiave estratti (orari, categorie_principali, range_prezzi).
-    3. newInstructions_i18n: Le traduzioni del testo fluido.
+    1. newInstructions_it: Un testo fluido in italiano che riassume chi Ã¨ il negozio, i suoi orari di apertura, l'indirizzo, il tipo di prodotti che vende (diviso per categorie o tipi principali), e le sue specializzazioni.
+    2. structured_memory: Un oggetto JSON con i seguenti campi chiave estratti dal contesto:
+       - orari (stringa, riassunto degli orari di apertura, es. "Dal lunedÃ¬ al sabato 9:00-13:00 e 15:00-19:00")
+       - categorie_principali (array di stringhe, le categorie di prodotti piÃ¹ vendute o importanti, es. ["Piante da esterno", "Macchinari"])
+       - range_prezzi_display (stringa, un range di prezzi tipico dei prodotti offerti, es. "€ 5,00 - € 150,00" se ricavabile dai prodotti, altrimenti "N/D")
+       - comprensione_percentuale (numero intero da 0 a 100, una stima di quanto l'AI ha compreso i dettagli forniti, sempre 98 se il testo Ã¨ ricco di informazioni)
+       - anno_fondazione (stringa, l'anno di fondazione del vivaio, se disponibile)
+       - descrizione_generale_vivaio (stringa, un riassunto conciso del vivaio)
+    3. newInstructions_i18n: Le traduzioni del testo fluido 'newInstructions_it' nelle lingue supportate.
 
-    Sii professionale e invitante.`;
+    Sii professionale, preciso e invitante. Se il range prezzi non Ã¨ chiaramente desumibile, usa "N/D".`;
 
     const userPrompt = `PROFILO NEGOZIO: ${JSON.stringify(vendorData)}\nPRODOTTI: ${JSON.stringify(products)}\nMEMORIA ATTUALE: ${currentMemory}`;
 
