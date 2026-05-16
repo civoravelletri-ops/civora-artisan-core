@@ -108,17 +108,19 @@ async function handleBotanicoClient(req, res, groqApiKey) {
 
     const tone = structuredMemory.tono_di_voce_ai || "amichevole e cordiale";
     const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Tono: ${tone}.
-    CONTESTO: ${JSON.stringify(structuredMemory)}. ISTRUZIONI: ${generalInstructions}. PRODOTTI: ${JSON.stringify(contesto.prodotti_semplificati)}.
-    Rispondi SEMPRE in ${contesto.lang || 'it'} in formato JSON:
-    {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}`;
-
-    const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
-    try {
-        return res.status(200).json(JSON.parse(aiResponse));
-    } catch (e) {
-        return res.status(200).json({ action: "risposta_normale", message: "Scusami, ho avuto un piccolo problema tecnico. Puoi ripetere?" });
+        CONTESTO: ${JSON.stringify(structuredMemory)}. ISTRUZIONI: ${generalInstructions}. PRODOTTI: ${JSON.stringify(contesto.prodotti_semplificati)}.
+        CRONOLOGIA CONVERSAZIONE PRECEDENTE: ${contesto.previousConversationSummary || 'Nessuna cronologia precedente.'}
+        Rispondi SEMPRE in ${contesto.lang || 'it'} in formato JSON:
+        {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}`; // "conversation_summary_for_owner" deve essere un riassunto CONCISSO dell'intera conversazione finora.
+    
+        const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
+        try {
+            return res.status(200).json(JSON.parse(aiResponse));
+        } catch (e) {
+            console.error("Errore parsing AI response in handleBotanicoClient:", e, "Raw AI Response:", aiResponse);
+            return res.status(200).json({ action: "risposta_normale", message: "Scusami, ho avuto un piccolo problema tecnico. Puoi ripetere?", conversation_summary_for_owner: contesto.previousConversationSummary }); // In caso di errore, mantieni la cronologia esistente
+        }
     }
-}
 
 // ==================================================================
 // 5. LOGICA PROPOSTA SCONTO (Il Guardiano)
