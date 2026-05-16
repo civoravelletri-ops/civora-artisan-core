@@ -110,24 +110,24 @@ async function handleBotanicoClient(req, res, groqApiKey) {
         const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Tono: ${tone}.
         CONTESTO VIVAIO: ${JSON.stringify(structuredMemory)}. ISTRUZIONI: ${generalInstructions}. PRODOTTI DISPONIBILI: ${JSON.stringify(contesto.prodotti_semplificati)}.
         CRONOLOGIA CONVERSAZIONE: ${contesto.previousConversationSummary || 'Nessuna cronologia.'}
-    
+
         SEI UN VERO CONSULENTE DI VENDITA. APPLICA QUESTE STRATEGIE COMMERCIALI:
-    
+
         1. SCENARIO GRANDI EVENTI E MATRIMONI:
            - Se l'utente organizza un evento futuro, NON limitarti al database dei prodotti attuali. Il vivaio può ordinare qualsiasi fiore o colore dai mercati internazionali.
            - Usa SUBITO l'action "chiedi_contatto" (questo farà apparire il modulo per il numero di telefono).
            - Nel "message", sii entusiasta. Spiega che per gli eventi offrite una "cura sartoriale". Fai domande sul tema, i colori o il luogo.
            - FAI STIME REALISTICHE se richiesto, per sembrare un vero esperto (es. "Solitamente per un allestimento base partiamo da X euro, mentre per i trasporti speciali calcoliamo circa Y euro, ma il mio principale ti farà un preventivo esatto e su misura").
-    
+
         2. SCENARIO PRODOTTI INGOMBRANTI O GRANDI QUANTITÀ (Es. Alberi, Macchinari):
            - Se l'utente vuole la consegna di prodotti "Solo Ritiro in Sede" o chiede grandissime quantità, NON DIRE DI NO. Tutto si può fare.
            - Spiega brevemente che online non si calcola la spedizione per articoli così grandi, ma che IL VIVAIO HA I MEZZI E IL PERSONALE per consegnare e installare ovunque.
            - Usa SUBITO l'action "chiedi_contatto".
            - Nel "message" vai dritto al punto: "Certamente! Online questi giganti risultano 'solo ritiro' per questioni logistiche, ma il mio principale ha i mezzi per portarteli e piantarli dove vuoi. Lasciami il tuo numero: ti fa chiamare subito, vi mettete d'accordo sul trasporto e chiudiamo l'ordine."
-    
+
         3. REGOLA DEI LINK AI PRODOTTI:
            - Solo se consigli un prodotto specifico presente nel database per un acquisto immediato, scrivilo esattamente così: [PRODOTTO:ID_PRODOTTO|NOME_PRODOTTO].
-    
+
         4. REGOLE DI SISTEMA:
            - Rispondi SEMPRE E SOLO in ${contesto.lang || 'it'} e in formato JSON valido.
            - Aggiorna SEMPRE "conversation_summary_for_owner" con un riassunto dettagliato dei desideri del cliente. Questo sarà il rapporto che leggerà il tuo capo.
@@ -191,22 +191,45 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) {
 // 6. LOGICA ESCALATION AL PROPRIETARIO
 // ==================================================================
 async function handleEscalateToOwner(req, res, groqApiKey) {
-    const { vendorId, customerUserId, customerName, customerPhone, conversationSummary, additionalNotes } = req.body;
+    // I dati arrivano dal frontend impacchettati dentro "contesto"
+    const data = req.body.contesto || req.body;
+    const { vendorId, customerUserId, customerName, customerPhone, conversationSummary, additionalNotes, requestId } = data;
+    
     try {
-        const requestRef = await db.collection('vendors').doc(vendorId).collection('ai_assistant').collection('owner_contact_requests').add({
-            vendorId,
-            customerUserId: customerUserId || 'guest',
-            customerName, customerPhone, conversationSummary, additionalNotes,
-            request_created_at: admin.firestore.FieldValue.serverTimestamp(),
-            status: 'pending_contact'
-        });
-        return res.status(200).json({
-            success: true,
-            message_to_customer: `Perfetto ${customerName}! Ho avvisato il titolare. Ti contatterà al ${customerPhone}.`,
-            request_id: requestRef.id
-        });
+        if (!vendorId) throw new Error("ID Venditore mancante");
+
+        if (requestId) {
+            // Se c'è già un ID, l'utente sta aggiungendo le note opzionali
+            await db.collection('vendors').doc(vendorId).collection('ai_assistant').collection('owner_contact_requests').doc(requestId).update({
+                additionalNotes: additionalNotes,
+                request_updated_at: admin.firestore.FieldValue.serverTimestamp()
+            });
+            return res.status(200).json({ 
+                action: "aggiungi_note_contatto",
+                message_to_customer: "Perfetto, ho aggiunto le tue note! Il titolare ha ora tutti i dettagli. A presto!" 
+            });
+        } else {
+            // Creazione della nuova richiesta di contatto
+            const requestRef = await db.collection('vendors').doc(vendorId).collection('ai_assistant').collection('owner_contact_requests').add({
+                vendorId: vendorId,
+                customerUserId: customerUserId || 'guest',
+                customerName: customerName, 
+                customerPhone: customerPhone, 
+                conversationSummary: conversationSummary || 'Nessun riassunto', 
+                additionalNotes: additionalNotes || '',
+                request_created_at: admin.firestore.FieldValue.serverTimestamp(),
+                status: 'pending_contact'
+            });
+            return res.status(200).json({ 
+                action: "conferma_contatto",
+                message_to_customer: `Grazie ${customerName}! Ho inviato tutto al titolare. Ti chiamerà al più presto al numero ${customerPhone}. Vuoi aggiungere un'ultima nota scritta per lui?`,
+                request_id: requestRef.id,
+                conversation_summary_for_owner: conversationSummary
+            });
+        }
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        console.error("Errore Salvataggio Contatto:", e);
+        return res.status(500).json({ error: e.message });
     }
 }
 
