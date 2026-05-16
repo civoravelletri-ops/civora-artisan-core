@@ -108,35 +108,32 @@ async function handleBotanicoClient(req, res, groqApiKey) {
 
     const tone = structuredMemory.tono_di_voce_ai || "amichevole e cordiale";
     const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Tono: ${tone}.
-        CONTESTO VIVAIO: ${JSON.stringify(structuredMemory)}. ISTRUZIONI: ${generalInstructions}. PRODOTTI DISPONIBILI: ${JSON.stringify(contesto.prodotti_semplificati)}.
-        CRONOLOGIA CONVERSAZIONE PRECEDENTE: ${contesto.previousConversationSummary || 'Nessuna cronologia precedente.'}
+    CONTESTO VIVAIO: ${JSON.stringify(structuredMemory)}. ISTRUZIONI: ${generalInstructions}. PRODOTTI DISPONIBILI: ${JSON.stringify(contesto.prodotti_semplificati)}.
+    CRONOLOGIA CONVERSAZIONE PRECEDENTE: ${contesto.previousConversationSummary || 'Nessuna cronologia precedente.'}
 
-        REGOLE DI RISPOSTA:
-            1. Rispondi SEMPRE in ${contesto.lang || 'it'} e in formato JSON.
-            2. Includi SEMPRE "conversation_summary_for_owner" con un riassunto CONCISSO dell'intera conversazione finora (per mantenere la memoria).
-            3. Se menzioni un prodotto specifico disponibile (es. "rosa Red Velvet" con ID "xyz"), formatta il suo nome nel campo "message" in questo modo:
-               Per Desktop: "[NOME_PRODOTTO_SENZA_SPAZI_URL]/agrigarden/agrigarden_product_detail_desktop.html?id=[ID_PRODOTTO]&vendorId=${contesto.vendorId}&color=${contesto.currentThemeColor}&lang=${contesto.lang}[NOME_PRODOTTO_COMPLETO]"
-               Per Mobile: "[NOME_PRODOTTO_SENZA_SPAZI_URL]/agrigarden/agrigarden_details_mobile.html?id=${contesto.vendorId}&color=${contesto.currentThemeColor}&lang=${contesto.lang}&openProduct=[ID_PRODOTTO][NOME_PRODOTTO_COMPLETO]"
-               Esempio Desktop: "Potresti interessato alla [rosa-red-velvet]/agrigarden/agrigarden_product_detail_desktop.html?id=xyz&vendorId=abc&color=%2319C37D&lang=it[Rosa Red Velvet]"
-               Esempio Mobile: "Potresti interessato alla [rosa-red-velvet]/agrigarden/agrigarden_details_mobile.html?id=abc&color=%2319C37D&lang=it&openProduct=xyz[Rosa Red Velvet]"
-               **NOTA BENE:** Il `[NOME_PRODOTTO_SENZA_SPAZI_URL]` è una stringa breve (es. "rosa-red-velvet") che l'AI DEVE INVENTARE se il `productName` è lungo, solo per la parte dell'URL dopo il dominio. E il `[NOME_PRODOTTO_COMPLETO]` è il nome da mostrare cliccabile. Questi sono dei TAG fittizi per indicare il pattern. L'AI DEVE RENDERIZZARE LA STRINGA HTML COMPLETA.
-               Non deve generare solo il testo, ma direttamente l'HTML con il link `<a>` come specificato in questo esempio: `<a href="IL_TUO_URL_DI_PRODOTTO" class="ai-product-link" style="color: var(--color-primary); font-weight: bold; text-decoration: underline;">NOME DEL PRODOTTO QUI</a>`
-               **IL TUO URL DI PRODOTTO** deve essere quello che ti ho mostrato per desktop e mobile.
+    REGOLE DI RISPOSTA:
+    1. Rispondi SEMPRE in ${contesto.lang || 'it'} e in formato JSON.
+    2. Includi SEMPRE "conversation_summary_for_owner" con un riassunto CONCISSO dell'intera conversazione finora (per mantenere la memoria).
+    3. Se menzioni un prodotto specifico disponibile (es. "rosa Red Velvet" con ID "xyz"), formatta il suo nome nel campo "message" in questo modo:
+       Per Desktop: "[NOME_PRODOTTO_SENZA_SPAZI_URL]/agrigarden/agrigarden_product_detail_desktop.html?id=[ID_PRODOTTO]&vendorId=${contesto.vendorId}&color=${contesto.currentThemeColor}&lang=${contesto.lang}[NOME_PRODOTTO_COMPLETO]"
+       Per Mobile: "[NOME_PRODOTTO_SENZA_SPAZI_URL]/agrigarden/agrigarden_details_mobile.html?id=${contesto.vendorId}&color=${contesto.currentThemeColor}&lang=${contesto.lang}&openProduct=[ID_PRODOTTO][NOME_PRODOTTO_COMPLETO]"
+       **NOTA BENE:** Il `[NOME_PRODOTTO_SENZA_SPAZI_URL]` è una stringa breve (es. "rosa-red-velvet") che l'AI DEVE INVENTARE se il `productName` è lungo, solo per la parte dell'URL dopo il dominio. E il `[NOME_PRODOTTO_COMPLETO]` è il nome da mostrare cliccabile. Questi sono dei TAG fittizi per indicare il pattern. L'AI DEVE RENDERIZZARE LA STRINGA HTML COMPLETA.
+       Non deve generare solo il testo, ma direttamente l'HTML con il link `<a>` come specificato in questo esempio: `<a href="IL_TUO_URL_DI_PRODOTTO" class="ai-product-link" style="color: var(--color-primary); font-weight: bold; text-decoration: underline;">NOME DEL PRODOTTO QUI</a>`
+       **IL TUO URL DI PRODOTTO** deve essere quello che ti ho mostrato per desktop e mobile.
 
-            4. Se ricevi una richiesta che supera le scorte o è complessa (es. "100 rose per un matrimonio"), proponi subito l'azione "chiedi_contatto" e riassumi la richiesta per il titolare.
-            5. Utilizza i prodotti disponibili per le raccomandazioni, cercando di essere specifico.
-            6. Il formato JSON deve essere sempre: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
-            `;
-           // Il messaggio dell'utente verrà aggiunto dopo questo prompt.
+    4. Se ricevi una richiesta che supera le scorte o è complessa (es. "100 rose per un matrimonio"), proponi subito l'azione "chiedi_contatto" e riassumi la richiesta per il titolare.
+    5. Utilizza i prodotti disponibili per le raccomandazioni, cercando di essere specifico.
+    6. Il formato JSON deve essere sempre: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
+    `; // Il messaggio dell'utente verrà aggiunto dopo questo prompt.
 
-        const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
-        try {
-            return res.status(200).json(JSON.parse(aiResponse));
-        } catch (e) {
-            console.error("Errore parsing AI response in handleBotanicoClient:", e, "Raw AI Response:", aiResponse);
-            return res.status(200).json({ action: "risposta_normale", message: "Scusami, ho avuto un piccolo problema tecnico. Puoi ripetere?", conversation_summary_for_owner: contesto.previousConversationSummary }); // In caso di errore, mantieni la cronologia esistente
-        }
+    const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
+    try {
+        return res.status(200).json(JSON.parse(aiResponse));
+    } catch (e) {
+        console.error("Errore parsing AI response in handleBotanicoClient:", e, "Raw AI Response:", aiResponse);
+        return res.status(200).json({ action: "risposta_normale", message: "Scusami, ho avuto un piccolo problema tecnico. Puoi ripetere?", conversation_summary_for_owner: contesto.previousConversationSummary }); // In caso di errore, mantieni la cronologia esistente
     }
+}
 
 // ==================================================================
 // 5. LOGICA PROPOSTA SCONTO (Il Guardiano)
@@ -150,7 +147,7 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) {
         try {
             const aiMemoryDoc = await db.collection('vendors').doc(vendorId).collection('ai_assistant').doc('memory').get();
             if (aiMemoryDoc.exists) structuredMemory = aiMemoryDoc.data().structured_memory || {};
-            
+
             const offersSnap = await db.collection('offers').where('vendorId', '==', vendorId).get();
             vendorProducts = offersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(p => p.quantity > 0);
         } catch (e) { console.error("Errore DB Sconti", e); }
@@ -195,10 +192,10 @@ async function handleEscalateToOwner(req, res, groqApiKey) {
             request_created_at: admin.firestore.FieldValue.serverTimestamp(),
             status: 'pending_contact'
         });
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             message_to_customer: `Perfetto ${customerName}! Ho avvisato il titolare. Ti contatterà al ${customerPhone}.`,
-            request_id: requestRef.id 
+            request_id: requestRef.id
         });
     } catch (e) {
         return res.status(500).json({ success: false, error: e.message });
@@ -215,14 +212,14 @@ async function handleSyncInventory(req, res, groqApiKey) {
 
     const userPrompt = `PROFILO: ${JSON.stringify(vendorData)}\nPRODOTTI: ${JSON.stringify(products)}\nMEMORIA: ${currentMemory}`;
     const aiResponse = await callGroqAPI(systemPrompt, userPrompt, groqApiKey, 0.3, true);
-    
+
     let parsed;
     try {
         parsed = JSON.parse(aiResponse);
         const translatePrompt = `Traduci in: en, fr, de, es, ru, ro, sq, hi, ar, zh. Rispondi solo JSON.`;
         const translateResp = await callGroqAPI(translatePrompt, parsed.newInstructions_it, groqApiKey, 0.1, true);
         const translations = JSON.parse(translateResp);
-        
+
         return res.status(200).json({
             newInstructions_it: parsed.newInstructions_it,
             newInstructions_i18n: { it: parsed.newInstructions_it, ...translations },
@@ -265,19 +262,19 @@ export default async function handler(req, res) {
     try {
         const { action } = req.body;
         switch (action) {
-            case 'teach_ai_collaborator': 
+            case 'teach_ai_collaborator':
                 return await handleTeachAICollaborator(req, res, GROQ_API_KEY);
-            case 'sync_vendor_inventory': 
+            case 'sync_vendor_inventory':
                 return await handleSyncInventory(req, res, GROQ_API_KEY);
-            case 'botanico': 
+            case 'botanico':
                 return await handleBotanicoClient(req, res, GROQ_API_KEY);
-            case 'propose_discount_offer': 
+            case 'propose_discount_offer':
                 return await handleProposeDiscountOffer(req, res, GROQ_API_KEY);
-            case 'escalate_to_owner': 
+            case 'escalate_to_owner':
                 return await handleEscalateToOwner(req, res, GROQ_API_KEY);
             case 'personal_shopper_carrelli':
                 return await handlePersonalShopperCarrelli(req, res, GROQ_API_KEY);
-            default: 
+            default:
                 return res.status(400).json({ error: 'Azione sconosciuta: ' + action });
         }
     } catch (error) {
