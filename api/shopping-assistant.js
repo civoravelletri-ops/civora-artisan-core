@@ -112,20 +112,12 @@ async function handleBotanicoClient(req, res, groqApiKey) {
     CRONOLOGIA CONVERSAZIONE PRECEDENTE: ${contesto.previousConversationSummary || 'Nessuna cronologia precedente.'}
 
     REGOLE DI RISPOSTA:
-    1. Rispondi SEMPRE in ${contesto.lang || 'it'} e in formato JSON.
-    2. Includi SEMPRE "conversation_summary_for_owner" con un riassunto CONCISSO dell'intera conversazione finora (per mantenere la memoria).
-    3. Se menzioni un prodotto specifico disponibile (es. "rosa Red Velvet" con ID "xyz"), formatta il suo nome nel campo "message" in questo modo:
-       Per Desktop: "[NOME_PRODOTTO_URL]/agrigarden/agrigarden_product_detail_desktop.html?id=[ID_PRODOTTO]&vendorId=${contesto.vendorId}&color=${contesto.currentThemeColor}&lang=${contesto.lang}[NOME_PRODOTTO_COMPLETO]"
-       Per Mobile: "[NOME_PRODOTTO_URL]/agrigarden/agrigarden_details_mobile.html?id=${contesto.vendorId}&color=${contesto.currentThemeColor}&lang=${contesto.lang}&openProduct=[ID_PRODOTTO][NOME_PRODOTTO_COMPLETO]"
-       
-       Esempio Desktop: "Ti consiglio la <a href='/agrigarden/agrigarden_product_detail_desktop.html?id=xyz&vendorId=abc&color=%2319C37D&lang=it' class='ai-product-link' style='color: var(--color-primary); font-weight: bold; text-decoration: underline;'>Rosa Red Velvet</a>"
-       Esempio Mobile: "Ti consiglio la <a href='/agrigarden/agrigarden_details_mobile.html?id=abc&color=%2319C37D&lang=it&openProduct=xyz' class='ai-product-link' style='color: var(--color-primary); font-weight: bold; text-decoration: underline;'>Rosa Red Velvet</a>"
-       
-       NOTA BENE: Devi generare direttamente l'HTML con il link <a> come mostrato negli esempi sopra. Usa virgolette singole per gli attributi HTML (class, style, href).
-
-    4. Se ricevi una richiesta che supera le scorte o è complessa (es. "100 rose per un matrimonio"), proponi subito l'azione "chiedi_contatto" e riassumi la richiesta per il titolare.
-    5. Utilizza i prodotti disponibili per le raccomandazioni, cercando di essere specifico.
-    6. Il formato JSON deve essere sempre: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
+        1. Rispondi SEMPRE in ${contesto.lang || 'it'} e in formato JSON.
+        2. Includi SEMPRE "conversation_summary_for_owner" con un riassunto CONCISSO dell'intera conversazione.
+        3. Se consigli un prodotto tra quelli disponibili, scrivi il suo nome in questo formato esatto: [NOME PRODOTTO][ID_PRODOTTO].
+           Esempio: "Ti suggerisco la [Rosa Red Velvet][2fKaEPiaupBja0ybP4SI]."
+        4. Se la richiesta è per grandi quantità o eventi complessi, usa l'azione "chiedi_contatto".
+        5. Formato JSON: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
     `;
 
     const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
