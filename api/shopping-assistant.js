@@ -14,12 +14,12 @@ if (!admin.apps.length) {
             const firebaseConfig = JSON.parse(Buffer.from(firebaseServiceAccountKey, 'base64').toString('utf8'));
             admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
             db = admin.firestore();
-        } catch (e) { 
-            console.error("Errore Firebase Init:", e); 
+        } catch (e) {
+            console.error("Errore Firebase Init:", e);
         }
     }
-} else { 
-    db = admin.firestore(); 
+} else {
+    db = admin.firestore();
 }
 
 // ==================================================================
@@ -62,7 +62,7 @@ async function handleTeachAICollaborator(req, res, groqApiKey) {
 
     const structUser = `TESTO NUOVO: "${instructionsInItalian}"\nMEMORIA VECCHIA: "${currentMemory || ''}"`;
     const structResp = await callGroqAPI(structPrompt, structUser, groqApiKey, 0.1, true);
-    
+
     let structuredMemory;
     try {
         structuredMemory = JSON.parse(structResp);
@@ -75,7 +75,7 @@ async function handleTeachAICollaborator(req, res, groqApiKey) {
 
     const translatePrompt = `Traduci in queste lingue: ${SUPPORTED_LANGUAGES.join(', ')}. REGOLE: Rispondi SOLO con un oggetto JSON dove le chiavi sono i codici lingua.`;
     const translateResp = await callGroqAPI(translatePrompt, newMemory_it, groqApiKey, 0.1, true);
-    
+
     let translations = {};
     try { translations = JSON.parse(translateResp); } catch(e) {}
 
@@ -126,7 +126,7 @@ async function handleBotanicoClient(req, res, groqApiKey) {
        - Nel "message" vai dritto al punto: "Certamente! Online questi giganti risultano 'solo ritiro' per questioni logistiche, ma il mio principale ha i mezzi per portarteli e piantarli dove vuoi. Lasciami il tuo numero: ti fa chiamare subito, vi mettete d'accordo sul trasporto e chiudiamo l'ordine."
 
     3. REGOLA DEI LINK AI PRODOTTI:
-       - Quando consigli un prodotto specifico tra quelli disponibili nel database, scrivilo in questo formato esatto: [PRODOTTO:ID_PRODOTTO|NOME_PRODOTTO]. 
+       - Quando consigli un prodotto specifico tra quelli disponibili nel database, scrivilo in questo formato esatto: [PRODOTTO:ID_PRODOTTO|NOME_PRODOTTO].
        - ESEMPIO: "Ti suggerisco la [PRODOTTO:2fKaEPiaupBja0ybP4SI|Rosa Red Velvet]."
 
     4. REGOLE DI SISTEMA:
@@ -156,7 +156,7 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) {
         try {
             const aiMemoryDoc = await db.collection('vendors').doc(vendorId).collection('ai_assistant').doc('memory').get();
             if (aiMemoryDoc.exists) structuredMemory = aiMemoryDoc.data().structured_memory || {};
-            
+
             const offersSnap = await db.collection('offers').where('vendorId', '==', vendorId).get();
             vendorProducts = offersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(p => p.quantity > 0);
         } catch (e) { console.error("Errore DB Sconti", e); }
@@ -189,38 +189,38 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) {
 }
 
 // ==================================================================
-// 6. LOGICA ESCALATION AL PROPRIETARIO (Perfettamente funzionante)
+// 6. LOGICA ESCALATION AL PROPRIETARIO (Corretta)
 // ==================================================================
 async function handleEscalateToOwner(req, res, groqApiKey) {
     const data = req.body.contesto || req.body;
     const { vendorId, customerUserId, customerName, customerPhone, conversationSummary, additionalNotes, requestId } = data;
-    
+
     try {
         if (!vendorId) throw new Error("ID Venditore mancante");
 
         if (requestId) {
-            // Aggiunta note opzionali
-            await db.collection('vendors').doc(vendorId).collection('ai_assistant').collection('owner_contact_requests').doc(requestId).update({
-                additionalNotes: additionalNotes,
+            // Aggiunta note opzionali: percorso corretto
+            await db.collection('vendors').doc(vendorId).collection('owner_contact_requests').doc(requestId).update({
+                additionalNotes: additionalNotes || '',
                 request_updated_at: admin.firestore.FieldValue.serverTimestamp()
             });
-            return res.status(200).json({ 
+            return res.status(200).json({
                 action: "aggiungi_note_contatto",
-                message_to_customer: "Perfetto, ho aggiunto le tue note! Il titolare ha ora tutti i dettagli. A presto!" 
+                message_to_customer: "Perfetto, ho aggiunto le tue note! Il titolare ha ora tutti i dettagli. A presto!"
             });
         } else {
-            // Creazione nuova richiesta
-            const requestRef = await db.collection('vendors').doc(vendorId).collection('ai_assistant').collection('owner_contact_requests').add({
+            // Creazione nuova richiesta: percorso corretto
+            const requestRef = await db.collection('vendors').doc(vendorId).collection('owner_contact_requests').add({
                 vendorId: vendorId,
                 customerUserId: customerUserId || 'guest',
-                customerName: customerName, 
-                customerPhone: customerPhone, 
-                conversationSummary: conversationSummary || 'Nessun riassunto', 
+                customerName: customerName || 'Cliente',
+                customerPhone: customerPhone || 'N/D',
+                conversationSummary: conversationSummary || 'Nessun riassunto',
                 additionalNotes: additionalNotes || '',
                 request_created_at: admin.firestore.FieldValue.serverTimestamp(),
                 status: 'pending_contact'
             });
-            return res.status(200).json({ 
+            return res.status(200).json({
                 action: "conferma_contatto",
                 message_to_customer: `Grazie ${customerName}! Ho inviato tutto al titolare. Ti chiamerà al più presto al numero ${customerPhone}. Vuoi aggiungere un'ultima nota scritta per lui?`,
                 request_id: requestRef.id,
@@ -243,14 +243,14 @@ async function handleSyncInventory(req, res, groqApiKey) {
 
     const userPrompt = `PROFILO: ${JSON.stringify(vendorData)}\nPRODOTTI: ${JSON.stringify(products)}\nMEMORIA: ${currentMemory}`;
     const aiResponse = await callGroqAPI(systemPrompt, userPrompt, groqApiKey, 0.3, true);
-    
+
     let parsed;
     try {
         parsed = JSON.parse(aiResponse);
         const translatePrompt = `Traduci in: en, fr, de, es, ru, ro, sq, hi, ar, zh. Rispondi solo JSON.`;
         const translateResp = await callGroqAPI(translatePrompt, parsed.newInstructions_it, groqApiKey, 0.1, true);
         const translations = JSON.parse(translateResp);
-        
+
         return res.status(200).json({
             newInstructions_it: parsed.newInstructions_it,
             newInstructions_i18n: { it: parsed.newInstructions_it, ...translations },
