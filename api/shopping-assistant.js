@@ -108,11 +108,19 @@ async function handleBotanicoClient(req, res, groqApiKey) {
 
     const tone = structuredMemory.tono_di_voce_ai || "amichevole e cordiale";
     const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Tono: ${tone}.
-        CONTESTO: ${JSON.stringify(structuredMemory)}. ISTRUZIONI: ${generalInstructions}. PRODOTTI: ${JSON.stringify(contesto.prodotti_semplificati)}.
+        CONTESTO VIVAIO: ${JSON.stringify(structuredMemory)}. ISTRUZIONI: ${generalInstructions}. PRODOTTI DISPONIBILI: ${JSON.stringify(contesto.prodotti_semplificati)}.
         CRONOLOGIA CONVERSAZIONE PRECEDENTE: ${contesto.previousConversationSummary || 'Nessuna cronologia precedente.'}
-        Rispondi SEMPRE in ${contesto.lang || 'it'} in formato JSON:
-        {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}`; // "conversation_summary_for_owner" deve essere un riassunto CONCISSO dell'intera conversazione finora.
-    
+
+        REGOLE DI RISPOSTA:
+        1. Rispondi SEMPRE in ${contesto.lang || 'it'} e in formato JSON.
+        2. Includi SEMPRE "conversation_summary_for_owner" con un riassunto CONCISSO dell'intera conversazione finora (per mantenere la memoria).
+        3. Se menzioni un prodotto specifico disponibile (es. "rosa Red Velvet"), formatta il suo nome nel campo "message" in questo modo: "[NOME_PRODOTTO][ID_PRODOTTO]". Ad esempio: "Hai pensato alla [Rosa Red Velvet][rosa-red-velvet-id]?"
+        4. Se ricevi una richiesta che supera le scorte o è complessa (es. "100 rose per un matrimonio"), proponi subito "chiedi_contatto" e riassumi la richiesta per il titolare.
+        5. Utilizza i prodotti disponibili per le raccomandazioni, cercando di essere specifico.
+        6. Il formato JSON deve essere sempre: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
+
+        `; // Il messaggio dell'utente verrà aggiunto dopo questo prompt.
+
         const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
         try {
             return res.status(200).json(JSON.parse(aiResponse));
