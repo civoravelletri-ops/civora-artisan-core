@@ -113,11 +113,11 @@ async function handleBotanicoClient(req, res, groqApiKey) {
 
     REGOLE DI RISPOSTA:
         1. Rispondi SEMPRE in ${contesto.lang || 'it'} e in formato JSON.
-        2. Includi SEMPRE "conversation_summary_for_owner" con un riassunto CONCISSO dell'intera conversazione.
-        3. Se consigli un prodotto tra quelli disponibili, scrivi il suo nome in questo formato esatto: [NOME PRODOTTO][ID_PRODOTTO].
-           Esempio: "Ti suggerisco la [Rosa Red Velvet][2fKaEPiaupBja0ybP4SI]."
-        4. Se la richiesta è per grandi quantità o eventi complessi, usa l'azione "chiedi_contatto".
-        5. Formato JSON: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
+        2. Includi SEMPRE "conversation_summary_for_owner" per la memoria.
+        3. Quando consigli un prodotto, scrivi SEMPRE: [PRODOTTO:ID_PRODOTTO|NOME_PRODOTTO].
+           ESEMPIO: "Ti consiglio la [PRODOTTO:2fKaEPiaupBja0ybP4SI|Rosa Red Velvet]."
+        4. Se serve un intervento umano, usa "chiedi_contatto".
+        5. JSON: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
     `;
 
     const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
