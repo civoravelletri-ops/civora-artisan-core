@@ -14,12 +14,12 @@ if (!admin.apps.length) {
             const firebaseConfig = JSON.parse(Buffer.from(firebaseServiceAccountKey, 'base64').toString('utf8'));
             admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
             db = admin.firestore();
-        } catch (e) { 
-            console.error("Errore Firebase Init:", e); 
+        } catch (e) {
+            console.error("Errore Firebase Init:", e);
         }
     }
-} else { 
-    db = admin.firestore(); 
+} else {
+    db = admin.firestore();
 }
 
 // ==================================================================
@@ -62,7 +62,7 @@ async function handleTeachAICollaborator(req, res, groqApiKey) {
 
     const structUser = `TESTO NUOVO: "${instructionsInItalian}"\nMEMORIA VECCHIA: "${currentMemory || ''}"`;
     const structResp = await callGroqAPI(structPrompt, structUser, groqApiKey, 0.1, true);
-    
+
     let structuredMemory;
     try {
         structuredMemory = JSON.parse(structResp);
@@ -75,7 +75,7 @@ async function handleTeachAICollaborator(req, res, groqApiKey) {
 
     const translatePrompt = `Traduci in queste lingue: ${SUPPORTED_LANGUAGES.join(', ')}. REGOLE: Rispondi SOLO con un oggetto JSON dove le chiavi sono i codici lingua.`;
     const translateResp = await callGroqAPI(translatePrompt, newMemory_it, groqApiKey, 0.1, true);
-    
+
     let translations = {};
     try { translations = JSON.parse(translateResp); } catch(e) {}
 
@@ -107,18 +107,32 @@ async function handleBotanicoClient(req, res, groqApiKey) {
     }
 
     const tone = structuredMemory.tono_di_voce_ai || "amichevole e cordiale";
-    const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Tono: ${tone}.
-    CONTESTO VIVAIO: ${JSON.stringify(structuredMemory)}. ISTRUZIONI: ${generalInstructions}. PRODOTTI DISPONIBILI: ${JSON.stringify(contesto.prodotti_semplificati)}.
-    CRONOLOGIA CONVERSAZIONE PRECEDENTE: ${contesto.previousConversationSummary || 'Nessuna cronologia precedente.'}
-
-    REGOLE DI RISPOSTA:
-        1. Rispondi SEMPRE in ${contesto.lang || 'it'} e in formato JSON.
-        2. Includi SEMPRE "conversation_summary_for_owner" per la memoria.
-        3. Quando consigli un prodotto, scrivi SEMPRE: [PRODOTTO:ID_PRODOTTO|NOME_PRODOTTO].
-           ESEMPIO: "Ti consiglio la [PRODOTTO:2fKaEPiaupBja0ybP4SI|Rosa Red Velvet]."
-        4. Se serve un intervento umano, usa "chiedi_contatto".
-        5. JSON: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
-    `;
+        const systemPrompt = `Sei il Botanico Digitale di "${contesto.storeName}". Tono: ${tone}.
+        CONTESTO VIVAIO: ${JSON.stringify(structuredMemory)}. ISTRUZIONI: ${generalInstructions}. PRODOTTI DISPONIBILI: ${JSON.stringify(contesto.prodotti_semplificati)}.
+        CRONOLOGIA CONVERSAZIONE: ${contesto.previousConversationSummary || 'Nessuna cronologia.'}
+    
+        SEI UN VERO CONSULENTE DI VENDITA. APPLICA QUESTE STRATEGIE COMMERCIALI:
+    
+        1. SCENARIO GRANDI EVENTI E MATRIMONI:
+           - Se l'utente organizza un evento futuro, NON limitarti al database dei prodotti attuali. Il vivaio può ordinare qualsiasi fiore o colore dai mercati internazionali.
+           - Usa SUBITO l'action "chiedi_contatto" (questo farà apparire il modulo per il numero di telefono).
+           - Nel "message", sii entusiasta. Spiega che per gli eventi offrite una "cura sartoriale". Fai domande sul tema, i colori o il luogo.
+           - FAI STIME REALISTICHE se richiesto, per sembrare un vero esperto (es. "Solitamente per un allestimento base partiamo da X euro, mentre per i trasporti speciali calcoliamo circa Y euro, ma il mio principale ti farà un preventivo esatto e su misura").
+    
+        2. SCENARIO PRODOTTI INGOMBRANTI O GRANDI QUANTITÀ (Es. Alberi, Macchinari):
+           - Se l'utente vuole la consegna di prodotti "Solo Ritiro in Sede" o chiede grandissime quantità, NON DIRE DI NO. Tutto si può fare.
+           - Spiega brevemente che online non si calcola la spedizione per articoli così grandi, ma che IL VIVAIO HA I MEZZI E IL PERSONALE per consegnare e installare ovunque.
+           - Usa SUBITO l'action "chiedi_contatto".
+           - Nel "message" vai dritto al punto: "Certamente! Online questi giganti risultano 'solo ritiro' per questioni logistiche, ma il mio principale ha i mezzi per portarteli e piantarli dove vuoi. Lasciami il tuo numero: ti fa chiamare subito, vi mettete d'accordo sul trasporto e chiudiamo l'ordine."
+    
+        3. REGOLA DEI LINK AI PRODOTTI:
+           - Solo se consigli un prodotto specifico presente nel database per un acquisto immediato, scrivilo esattamente così: [PRODOTTO:ID_PRODOTTO|NOME_PRODOTTO].
+    
+        4. REGOLE DI SISTEMA:
+           - Rispondi SEMPRE E SOLO in ${contesto.lang || 'it'} e in formato JSON valido.
+           - Aggiorna SEMPRE "conversation_summary_for_owner" con un riassunto dettagliato dei desideri del cliente. Questo sarà il rapporto che leggerà il tuo capo.
+           - Formato JSON: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
+        `;
 
     const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
     try {
