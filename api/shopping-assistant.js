@@ -112,14 +112,22 @@ async function handleBotanicoClient(req, res, groqApiKey) {
         CRONOLOGIA CONVERSAZIONE PRECEDENTE: ${contesto.previousConversationSummary || 'Nessuna cronologia precedente.'}
 
         REGOLE DI RISPOSTA:
-        1. Rispondi SEMPRE in ${contesto.lang || 'it'} e in formato JSON.
-        2. Includi SEMPRE "conversation_summary_for_owner" con un riassunto CONCISSO dell'intera conversazione finora (per mantenere la memoria).
-        3. Se menzioni un prodotto specifico disponibile (es. "rosa Red Velvet"), formatta il suo nome nel campo "message" in questo modo: "[NOME_PRODOTTO][ID_PRODOTTO]". Ad esempio: "Hai pensato alla [Rosa Red Velvet][rosa-red-velvet-id]?"
-        4. Se ricevi una richiesta che supera le scorte o è complessa (es. "100 rose per un matrimonio"), proponi subito "chiedi_contatto" e riassumi la richiesta per il titolare.
-        5. Utilizza i prodotti disponibili per le raccomandazioni, cercando di essere specifico.
-        6. Il formato JSON deve essere sempre: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
+            1. Rispondi SEMPRE in ${contesto.lang || 'it'} e in formato JSON.
+            2. Includi SEMPRE "conversation_summary_for_owner" con un riassunto CONCISSO dell'intera conversazione finora (per mantenere la memoria).
+            3. Se menzioni un prodotto specifico disponibile (es. "rosa Red Velvet" con ID "xyz"), formatta il suo nome nel campo "message" in questo modo:
+               Per Desktop: "[NOME_PRODOTTO_SENZA_SPAZI_URL]/agrigarden/agrigarden_product_detail_desktop.html?id=[ID_PRODOTTO]&vendorId=${contesto.vendorId}&color=${contesto.currentThemeColor}&lang=${contesto.lang}[NOME_PRODOTTO_COMPLETO]"
+               Per Mobile: "[NOME_PRODOTTO_SENZA_SPAZI_URL]/agrigarden/agrigarden_details_mobile.html?id=${contesto.vendorId}&color=${contesto.currentThemeColor}&lang=${contesto.lang}&openProduct=[ID_PRODOTTO][NOME_PRODOTTO_COMPLETO]"
+               Esempio Desktop: "Potresti interessato alla [rosa-red-velvet]/agrigarden/agrigarden_product_detail_desktop.html?id=xyz&vendorId=abc&color=%2319C37D&lang=it[Rosa Red Velvet]"
+               Esempio Mobile: "Potresti interessato alla [rosa-red-velvet]/agrigarden/agrigarden_details_mobile.html?id=abc&color=%2319C37D&lang=it&openProduct=xyz[Rosa Red Velvet]"
+               **NOTA BENE:** Il `[NOME_PRODOTTO_SENZA_SPAZI_URL]` è una stringa breve (es. "rosa-red-velvet") che l'AI DEVE INVENTARE se il `productName` è lungo, solo per la parte dell'URL dopo il dominio. E il `[NOME_PRODOTTO_COMPLETO]` è il nome da mostrare cliccabile. Questi sono dei TAG fittizi per indicare il pattern. L'AI DEVE RENDERIZZARE LA STRINGA HTML COMPLETA.
+               Non deve generare solo il testo, ma direttamente l'HTML con il link `<a>` come specificato in questo esempio: `<a href="IL_TUO_URL_DI_PRODOTTO" class="ai-product-link" style="color: var(--color-primary); font-weight: bold; text-decoration: underline;">NOME DEL PRODOTTO QUI</a>`
+               **IL TUO URL DI PRODOTTO** deve essere quello che ti ho mostrato per desktop e mobile.
 
-        `; // Il messaggio dell'utente verrà aggiunto dopo questo prompt.
+            4. Se ricevi una richiesta che supera le scorte o è complessa (es. "100 rose per un matrimonio"), proponi subito l'azione "chiedi_contatto" e riassumi la richiesta per il titolare.
+            5. Utilizza i prodotti disponibili per le raccomandazioni, cercando di essere specifico.
+            6. Il formato JSON deve essere sempre: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
+            `;
+           // Il messaggio dell'utente verrà aggiunto dopo questo prompt.
 
         const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
         try {
