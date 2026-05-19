@@ -270,34 +270,42 @@ export default async function handler(req, res) {
                                                         // =====================================================================================
                                                         else if (action === 'FINALIZE_ORDER') {
                                                             const { paymentIntentId, vendorId, productId, customerShippingData } = payload;
-
-                                                            // 1. Inizializza Firebase Admin sfruttando le variabili ambiente già settate per l'ecosistema Civora
+                                                            
                                                             const admin = require('firebase-admin');
-                                                            if (!admin.apps.length) {
-                                                                admin.initializeApp({
-                                                                    credential: admin.credential.cert({
-                                                                        projectId: process.env.FIREBASE_PROJECT_ID,
-                                                                        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-                                                                        // Fix per i ritorni a capo della chiave privata nelle variabili d'ambiente
-                                                                        privateKey: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
-                                                                    })
-                                                                });
+                                                            
+                                                            try {
+                                                                if (!admin.apps.length) {
+                                                                    // Legge le variabili esatte dal tuo Vercel (dalla foto che mi hai mandato)
+                                                                    let serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+                                                                    
+                                                                    if (serviceAccountKey) {
+                                                                        admin.initializeApp({
+                                                                            credential: admin.credential.cert(JSON.parse(serviceAccountKey))
+                                                                        });
+                                                                    } else {
+                                                                        admin.initializeApp();
+                                                                    }
+                                                                }
+                                                            } catch (err) {
+                                                                console.error("Errore inizializzazione Firebase Admin:", err);
+                                                                return res.status(500).json({ error: "Errore di lettura della chiave FIREBASE_SERVICE_ACCOUNT_KEY su Vercel." });
                                                             }
+                                                
                                                             const db = admin.firestore();
-
+                                                
                                                             // 2. Lettura SICURA dei dati reali del prodotto dal Database
                                                             const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
                                                             const productDoc = await productRef.get();
-
+                                                            
                                                             if (!productDoc.exists) {
                                                                 return res.status(404).json({ error: "Prodotto non trovato nel database." });
                                                             }
                                                             const productData = productDoc.data();
-
+                                                
                                                             // 3. Genera numero ordine univoco
                                                             const generatedOrderNumber = "ORD-" + Math.floor(Math.random() * 1000000);
-
-                                                            // 4. Salva l'ordine REALE nella Dashboard (Calcolando i totali internamente, a prova di hacker)
+                                                
+                                                            // 4. Salva l'ordine REALE nella Dashboard (Calcolando i totali internamente)
                                                             const orderData = {
                                                                 status: 'pending',
                                                                 orderNumber: generatedOrderNumber,
@@ -313,12 +321,12 @@ export default async function handler(req, res) {
                                                                     quantity: 1
                                                                 }]
                                                             };
-
+                                                
                                                             const orderRef = await db.collection('vendors').doc(vendorId).collection('orders').add(orderData);
-
-                                                            // 5. Metti il prodotto come VENDUTO così scompare dalla vetrina
+                                                
+                                                            // 5. Metti il prodotto come VENDUTO
                                                             await productRef.update({ status: 'sold' });
-
+                                                
                                                             return res.status(200).json({
                                                                 success: true,
                                                                 orderId: orderRef.id,
