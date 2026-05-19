@@ -285,25 +285,27 @@ export default async function handler(req, res) {
                                                                     let serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 
                                                                     if (!serviceAccountKey) {
-                                                                        return res.status(500).json({ error: "Chiave FIREBASE mancante nelle variabili di Vercel." });
-                                                                    }
-
-                                                                    let parsedKey;
-                                                                    try {
-                                                                        parsedKey = JSON.parse(serviceAccountKey);
-                                                                    } catch (e1) {
-                                                                        try {
-                                                                            // Tenta di auto-correggere eventuali doppie virgolette messe da Vercel
-                                                                            parsedKey = JSON.parse(JSON.parse(serviceAccountKey));
-                                                                        } catch (e2) {
-                                                                            return res.status(500).json({ error: "Il testo della chiave su Vercel non è formattato bene: " + e1.message });
-                                                                        }
-                                                                    }
-
-                                                                    // Sistema i ritorni a capo della chiave privata
-                                                                    if (parsedKey && parsedKey.private_key) {
-                                                                        parsedKey.private_key = parsedKey.private_key.replace(/\\n/g, '\n');
-                                                                    }
+                                                                                            return res.status(500).json({ error: "Chiave FIREBASE mancante nelle variabili di Vercel." });
+                                                                                        }
+                                                                    
+                                                                                        let parsedKey;
+                                                                                        try {
+                                                                                            // Tenta prima il parsing diretto
+                                                                                            parsedKey = JSON.parse(serviceAccountKey);
+                                                                                        } catch (e1) {
+                                                                                            try {
+                                                                                                // Se fallisce, prova a decodificare da Base64 e poi a parsare
+                                                                                                const decodedKey = Buffer.from(serviceAccountKey, 'base64').toString('utf8');
+                                                                                                parsedKey = JSON.parse(decodedKey);
+                                                                                            } catch (e2) {
+                                                                                                return res.status(500).json({ error: "Il testo della chiave su Vercel non è formattato bene o non è JSON valido: " + e2.message });
+                                                                                            }
+                                                                                        }
+                                                                    
+                                                                                        // Sistema i ritorni a capo della chiave privata
+                                                                                        if (parsedKey && parsedKey.private_key) {
+                                                                                            parsedKey.private_key = parsedKey.private_key.replace(/\\n/g, '\n');
+                                                                                        }
 
                                                                     admin.initializeApp({
                                                                         credential: admin.credential.cert(parsedKey)
