@@ -207,56 +207,84 @@ export default async function handler(req, res) {
                                                 // AZIONE 4: INVIO SMS OTP TRAMITE MACRODROID (COLLEGAMENTO REALE SMARTPHONE CIVORA)
                                                 // =====================================================================================
                                                 else if (action === 'invia-sms-negoziante') {
-                                                            const { phone, otp, vendorName } = payload;
-                                                            const SMS_GATEWAY_URL = process.env.SMS_GATEWAY_URL;
-
-                                                            if (!phone) return res.status(400).json({ error: 'Manca il numero.' });
-
-                                                            let numeroSms = phone.replace(/\s+/g, '');
-                                                            if (!numeroSms.startsWith('+')) numeroSms = '+39' + numeroSms;
-
-                                                            const smsText = `Civora: Il tuo codice per ${vendorName} e' ${otp}. Inseriscilo per confermare la prenotazione.`;
-
-                                                            try {
-                                                                if (SMS_GATEWAY_URL) {
-                                                                    const gatewayUrl = `${SMS_GATEWAY_URL}?phone=${encodeURIComponent(numeroSms)}&message=${encodeURIComponent(smsText)}`;
-                                                                    await fetch(gatewayUrl, { method: 'GET' });
-                                                                    return res.status(200).json({ success: true });
-                                                                } else {
-                                                                    throw new Error("SMS_GATEWAY_URL non configurato.");
-                                                                }
-                                                            } catch (error) {
-                                                                console.error("Errore invio SMS:", error);
-                                                                return res.status(500).json({ error: 'Errore gateway SMS' });
-                                                            }
-                                                        }
-
+                                                    const { phone, otp, vendorName } = payload;
+                                        
+                                                    let numeroPulito = phone.replace(/\s+/g, '');
+                                                    if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
+                                        
+                                                    const messaggioSms = `Civora: Il tuo codice per ${vendorName} e' ${otp}. Inseriscilo per confermare la prenotazione.`;
+                                        
+                                                    const urlSmsReale = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(messaggioSms)}`;
+                                        
+                                                    try {
+                                                        await fetch(urlSmsReale);
+                                                        return res.status(200).json({ success: true });
+                                                    } catch (errSms) {
+                                                        return res.status(500).json({ error: 'Errore invio segnale SMS' });
+                                                    }
+                                                }
+                                        
                                                 // =====================================================================================
-                                                // AZIONE 5: SALVATAGGIO PRENOTAZIONE NEL PROFILO NEGOZIANTE (SOTTOCARTELLA BOOKINGS)
+                                                // AZIONE 5: CALCOLO TOTALE E CREAZIONE PAGAMENTO STRIPE (CALCULATE_AND_PAY)
                                                 // =====================================================================================
-                                                else if (action === 'invia-sms-negoziante') {
-                                                            const { phone, otp, vendorName } = payload;
-
-                                                            let numeroPulito = phone.replace(/\s+/g, '');
-                                                            if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
-
-                                                            const messaggioSms = `Civora: Il tuo codice per ${vendorName} e' ${otp}. Inseriscilo per confermare la prenotazione.`;
-
-                                                            // URL REALE CHE FA SCATTARE IL TUO SMARTPHONE
-                                                            const urlSmsReale = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(messaggioSms)}`;
-
-                                                            try {
-                                                                await fetch(urlSmsReale);
-                                                                return res.status(200).json({ success: true });
-                                                            } catch (errSms) {
-                                                                return res.status(500).json({ error: 'Errore invio segnale SMS' });
-                                                            }
+                                                else if (action === 'CALCULATE_AND_PAY') {
+                                                    const { clientClaimedTotal } = payload;
+                                                    const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+                                                    
+                                                    if (!STRIPE_SECRET_KEY) {
+                                                        return res.status(500).json({ error: "Errore: STRIPE_SECRET_KEY mancante su Vercel." });
+                                                    }
+                                        
+                                                    try {
+                                                        const stripeParams = new URLSearchParams();
+                                                        stripeParams.append('amount', clientClaimedTotal.toString());
+                                                        stripeParams.append('currency', 'eur');
+                                                        stripeParams.append('automatic_payment_methods[enabled]', 'true');
+                                        
+                                                        const stripeReq = await fetch('https://api.stripe.com/v1/payment_intents', {
+                                                            method: 'POST',
+                                                            headers: {
+                                                                'Authorization': `Bearer ${STRIPE_SECRET_KEY}`,
+                                                                'Content-Type': 'application/x-www-form-urlencoded'
+                                                            },
+                                                            body: stripeParams
+                                                        });
+                                        
+                                                        const stripeRes = await stripeReq.json();
+                                        
+                                                        if (stripeRes.error) {
+                                                            return res.status(400).json({ error: stripeRes.error.message });
                                                         }
-
-                                        // Se l'azione non è riconosciuta
-                                        else {
-                                            return res.status(400).json({ error: 'Azione non riconosciuta' });
-                                        }
+                                        
+                                                        return res.status(200).json({
+                                                            clientSecret: stripeRes.client_secret
+                                                        });
+                                        
+                                                    } catch (err) {
+                                                        return res.status(500).json({ error: err.message });
+                                                    }
+                                                }
+                                        
+                                                // =====================================================================================
+                                                // AZIONE 6: CONFERMA ORDINE E RICEVUTA (FINALIZE_ORDER)
+                                                // =====================================================================================
+                                                else if (action === 'FINALIZE_ORDER') {
+                                                    
+                                                    // Genera numero ordine univoco per il carrello
+                                                    const generatedOrderNumber = "ORD-" + Math.floor(Math.random() * 1000000);
+                                                    const generatedOrderId = "id_" + Date.now();
+                                        
+                                                    return res.status(200).json({
+                                                        success: true,
+                                                        orderId: generatedOrderId,
+                                                        orderNumber: generatedOrderNumber
+                                                    });
+                                                }
+                                        
+                                                // Se l'azione non è riconosciuta
+                                                else {
+                                                    return res.status(400).json({ error: 'Azione non riconosciuta dal sistema.' });
+                                                }
 
     } catch (error) {
         console.error("Errore nel Router Civora:", error);
