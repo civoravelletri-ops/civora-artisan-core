@@ -270,68 +270,92 @@ export default async function handler(req, res) {
                                                         // =====================================================================================
                                                         else if (action === 'FINALIZE_ORDER') {
                                                             const { paymentIntentId, vendorId, productId, customerShippingData } = payload;
-                                                            
-                                                            const admin = require('firebase-admin');
-                                                            
+
                                                             try {
-                                                                if (!admin.apps.length) {
-                                                                    // Legge le variabili esatte dal tuo Vercel (dalla foto che mi hai mandato)
-                                                                    let serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-                                                                    
-                                                                    if (serviceAccountKey) {
-                                                                        admin.initializeApp({
-                                                                            credential: admin.credential.cert(JSON.parse(serviceAccountKey))
-                                                                        });
-                                                                    } else {
-                                                                        admin.initializeApp();
-                                                                    }
+                                                                // 1. Caricamento della libreria Admin (se manca, ci dirà esattamente questo)
+                                                                let admin;
+                                                                try {
+                                                                    admin = require('firebase-admin');
+                                                                } catch (reqErr) {
+                                                                    return res.status(500).json({ error: "ATTENZIONE: Manca la libreria 'firebase-admin' nel progetto Vercel." });
                                                                 }
+
+                                                                // 2. Inizializzazione Firebase
+                                                                if (!admin.apps.length) {
+                                                                    let serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+
+                                                                    if (!serviceAccountKey) {
+                                                                        return res.status(500).json({ error: "Chiave FIREBASE mancante nelle variabili di Vercel." });
+                                                                    }
+
+                                                                    let parsedKey;
+                                                                    try {
+                                                                        parsedKey = JSON.parse(serviceAccountKey);
+                                                                    } catch (e1) {
+                                                                        try {
+                                                                            // Tenta di auto-correggere eventuali doppie virgolette messe da Vercel
+                                                                            parsedKey = JSON.parse(JSON.parse(serviceAccountKey));
+                                                                        } catch (e2) {
+                                                                            return res.status(500).json({ error: "Il testo della chiave su Vercel non è formattato bene: " + e1.message });
+                                                                        }
+                                                                    }
+
+                                                                    // Sistema i ritorni a capo della chiave privata
+                                                                    if (parsedKey && parsedKey.private_key) {
+                                                                        parsedKey.private_key = parsedKey.private_key.replace(/\\n/g, '\n');
+                                                                    }
+
+                                                                    admin.initializeApp({
+                                                                        credential: admin.credential.cert(parsedKey)
+                                                                    });
+                                                                }
+
+                                                                const db = admin.firestore();
+
+                                                                // 3. Lettura SICURA dei dati reali del prodotto
+                                                                const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
+                                                                const productDoc = await productRef.get();
+
+                                                                if (!productDoc.exists) {
+                                                                    return res.status(404).json({ error: "Prodotto non trovato nel database." });
+                                                                }
+                                                                const productData = productDoc.data();
+
+                                                                // 4. Genera numero ordine univoco
+                                                                const generatedOrderNumber = "ORD-" + Math.floor(Math.random() * 1000000);
+
+                                                                // 5. Salva l'ordine REALE nella Dashboard (Calcolando i totali internamente)
+                                                                const orderData = {
+                                                                    status: 'pending',
+                                                                    orderNumber: generatedOrderNumber,
+                                                                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                                                                    totalAmount: (productData.price || 0) + (productData.deliveryCost || 0),
+                                                                    shippingAddress: customerShippingData,
+                                                                    cartItems: [{
+                                                                        productId: productId,
+                                                                        productName: productData.name,
+                                                                        price: productData.price,
+                                                                        deliveryCost: productData.deliveryCost,
+                                                                        imageUrl: (productData.imageUrls && productData.imageUrls.length > 0) ? productData.imageUrls[0] : '',
+                                                                        quantity: 1
+                                                                    }]
+                                                                };
+
+                                                                const orderRef = await db.collection('vendors').doc(vendorId).collection('orders').add(orderData);
+
+                                                                // 6. Metti il prodotto come VENDUTO
+                                                                await productRef.update({ status: 'sold' });
+
+                                                                return res.status(200).json({
+                                                                    success: true,
+                                                                    orderId: orderRef.id,
+                                                                    orderNumber: generatedOrderNumber
+                                                                });
+
                                                             } catch (err) {
-                                                                console.error("Errore inizializzazione Firebase Admin:", err);
-                                                                return res.status(500).json({ error: "Errore di lettura della chiave FIREBASE_SERVICE_ACCOUNT_KEY su Vercel." });
+                                                                console.error("Errore finale Vercel:", err);
+                                                                return res.status(500).json({ error: "Errore interno a Vercel: " + err.message });
                                                             }
-                                                
-                                                            const db = admin.firestore();
-                                                
-                                                            // 2. Lettura SICURA dei dati reali del prodotto dal Database
-                                                            const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
-                                                            const productDoc = await productRef.get();
-                                                            
-                                                            if (!productDoc.exists) {
-                                                                return res.status(404).json({ error: "Prodotto non trovato nel database." });
-                                                            }
-                                                            const productData = productDoc.data();
-                                                
-                                                            // 3. Genera numero ordine univoco
-                                                            const generatedOrderNumber = "ORD-" + Math.floor(Math.random() * 1000000);
-                                                
-                                                            // 4. Salva l'ordine REALE nella Dashboard (Calcolando i totali internamente)
-                                                            const orderData = {
-                                                                status: 'pending',
-                                                                orderNumber: generatedOrderNumber,
-                                                                createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                                                                totalAmount: (productData.price || 0) + (productData.deliveryCost || 0),
-                                                                shippingAddress: customerShippingData,
-                                                                cartItems: [{
-                                                                    productId: productId,
-                                                                    productName: productData.name,
-                                                                    price: productData.price,
-                                                                    deliveryCost: productData.deliveryCost,
-                                                                    imageUrl: (productData.imageUrls && productData.imageUrls.length > 0) ? productData.imageUrls[0] : '',
-                                                                    quantity: 1
-                                                                }]
-                                                            };
-                                                
-                                                            const orderRef = await db.collection('vendors').doc(vendorId).collection('orders').add(orderData);
-                                                
-                                                            // 5. Metti il prodotto come VENDUTO
-                                                            await productRef.update({ status: 'sold' });
-                                                
-                                                            return res.status(200).json({
-                                                                success: true,
-                                                                orderId: orderRef.id,
-                                                                orderNumber: generatedOrderNumber
-                                                            });
                                                         }
 
                                                 // Se l'azione non è riconosciuta
