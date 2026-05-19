@@ -208,14 +208,14 @@ export default async function handler(req, res) {
                                                 // =====================================================================================
                                                 else if (action === 'invia-sms-negoziante') {
                                                     const { phone, otp, vendorName } = payload;
-                                        
+
                                                     let numeroPulito = phone.replace(/\s+/g, '');
                                                     if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
-                                        
+
                                                     const messaggioSms = `Civora: Il tuo codice per ${vendorName} e' ${otp}. Inseriscilo per confermare la prenotazione.`;
-                                        
+
                                                     const urlSmsReale = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(messaggioSms)}`;
-                                        
+
                                                     try {
                                                         await fetch(urlSmsReale);
                                                         return res.status(200).json({ success: true });
@@ -223,24 +223,24 @@ export default async function handler(req, res) {
                                                         return res.status(500).json({ error: 'Errore invio segnale SMS' });
                                                     }
                                                 }
-                                        
+
                                                 // =====================================================================================
                                                 // AZIONE 5: CALCOLO TOTALE E CREAZIONE PAGAMENTO STRIPE (CALCULATE_AND_PAY)
                                                 // =====================================================================================
                                                 else if (action === 'CALCULATE_AND_PAY') {
                                                     const { clientClaimedTotal } = payload;
                                                     const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
-                                                    
+
                                                     if (!STRIPE_SECRET_KEY) {
                                                         return res.status(500).json({ error: "Errore: STRIPE_SECRET_KEY mancante su Vercel." });
                                                     }
-                                        
+
                                                     try {
                                                         const stripeParams = new URLSearchParams();
                                                         stripeParams.append('amount', clientClaimedTotal.toString());
                                                         stripeParams.append('currency', 'eur');
                                                         stripeParams.append('automatic_payment_methods[enabled]', 'true');
-                                        
+
                                                         const stripeReq = await fetch('https://api.stripe.com/v1/payment_intents', {
                                                             method: 'POST',
                                                             headers: {
@@ -249,38 +249,83 @@ export default async function handler(req, res) {
                                                             },
                                                             body: stripeParams
                                                         });
-                                        
+
                                                         const stripeRes = await stripeReq.json();
-                                        
+
                                                         if (stripeRes.error) {
                                                             return res.status(400).json({ error: stripeRes.error.message });
                                                         }
-                                        
+
                                                         return res.status(200).json({
                                                             clientSecret: stripeRes.client_secret
                                                         });
-                                        
+
                                                     } catch (err) {
                                                         return res.status(500).json({ error: err.message });
                                                     }
                                                 }
-                                        
+
                                                 // =====================================================================================
-                                                // AZIONE 6: CONFERMA ORDINE E RICEVUTA (FINALIZE_ORDER)
-                                                // =====================================================================================
-                                                else if (action === 'FINALIZE_ORDER') {
-                                                    
-                                                    // Genera numero ordine univoco per il carrello
-                                                    const generatedOrderNumber = "ORD-" + Math.floor(Math.random() * 1000000);
-                                                    const generatedOrderId = "id_" + Date.now();
-                                        
-                                                    return res.status(200).json({
-                                                        success: true,
-                                                        orderId: generatedOrderId,
-                                                        orderNumber: generatedOrderNumber
-                                                    });
-                                                }
-                                        
+                                                        // AZIONE 6: CONFERMA ORDINE E RICEVUTA (FINALIZE_ORDER) - BLINDATO DA SERVER
+                                                        // =====================================================================================
+                                                        else if (action === 'FINALIZE_ORDER') {
+                                                            const { paymentIntentId, vendorId, productId, customerShippingData } = payload;
+
+                                                            // 1. Inizializza Firebase Admin sfruttando le variabili ambiente già settate per l'ecosistema Civora
+                                                            const admin = require('firebase-admin');
+                                                            if (!admin.apps.length) {
+                                                                admin.initializeApp({
+                                                                    credential: admin.credential.cert({
+                                                                        projectId: process.env.FIREBASE_PROJECT_ID,
+                                                                        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+                                                                        // Fix per i ritorni a capo della chiave privata nelle variabili d'ambiente
+                                                                        privateKey: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
+                                                                    })
+                                                                });
+                                                            }
+                                                            const db = admin.firestore();
+
+                                                            // 2. Lettura SICURA dei dati reali del prodotto dal Database
+                                                            const productRef = db.collection('vendors').doc(vendorId).collection('products').doc(productId);
+                                                            const productDoc = await productRef.get();
+
+                                                            if (!productDoc.exists) {
+                                                                return res.status(404).json({ error: "Prodotto non trovato nel database." });
+                                                            }
+                                                            const productData = productDoc.data();
+
+                                                            // 3. Genera numero ordine univoco
+                                                            const generatedOrderNumber = "ORD-" + Math.floor(Math.random() * 1000000);
+
+                                                            // 4. Salva l'ordine REALE nella Dashboard (Calcolando i totali internamente, a prova di hacker)
+                                                            const orderData = {
+                                                                status: 'pending',
+                                                                orderNumber: generatedOrderNumber,
+                                                                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                                                                totalAmount: (productData.price || 0) + (productData.deliveryCost || 0),
+                                                                shippingAddress: customerShippingData,
+                                                                cartItems: [{
+                                                                    productId: productId,
+                                                                    productName: productData.name,
+                                                                    price: productData.price,
+                                                                    deliveryCost: productData.deliveryCost,
+                                                                    imageUrl: (productData.imageUrls && productData.imageUrls.length > 0) ? productData.imageUrls[0] : '',
+                                                                    quantity: 1
+                                                                }]
+                                                            };
+
+                                                            const orderRef = await db.collection('vendors').doc(vendorId).collection('orders').add(orderData);
+
+                                                            // 5. Metti il prodotto come VENDUTO così scompare dalla vetrina
+                                                            await productRef.update({ status: 'sold' });
+
+                                                            return res.status(200).json({
+                                                                success: true,
+                                                                orderId: orderRef.id,
+                                                                orderNumber: generatedOrderNumber
+                                                            });
+                                                        }
+
                                                 // Se l'azione non è riconosciuta
                                                 else {
                                                     return res.status(400).json({ error: 'Azione non riconosciuta dal sistema.' });
