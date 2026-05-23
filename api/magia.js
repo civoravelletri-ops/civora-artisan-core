@@ -165,45 +165,30 @@ export default async function handler(req, res) {
                         }
             // === NUOVA LOGICA: STIMA PESO E DIMENSIONI (SPEDIZIONE) ===
                         else if (task === "estimate_shipping_attributes") {
-                            systemPrompt = `Sei un esperto di logistica e spedizioni e-commerce.
-                            Il tuo compito è stimare il peso reale (in kg) e le dimensioni dell'imballaggio (in cm) per un prodotto.
-                            Sii realistico: considera anche il peso del vaso/terra per le piante o della scatola/protezioni per i macchinari.`;
+                            systemPrompt = `Sei un esperto di logistica e spedizioni e-commerce, specializzato in giardinaggio, piante e florovivaismo.
+                            Il tuo compito è stimare il peso reale (in kg) e le tre dimensioni dell'imballaggio (lunghezza, larghezza, altezza in cm) per la spedizione di un prodotto.
+
+                            Usa questi INDIZI per fare una stima estremamente realistica:
+                            1. PREZZO: Il prezzo è un indicatore di taglia. Per le piante (pianta/verde): sotto i 5€ sono piantine minuscole, tra 10€ e 20€ sono vasi piccoli/medi, tra 30€ e 50€ sono piante adulte e slanciate (altezza circa 60-90 cm, peso 3-5 kg), sopra i 100€ sono alberi grandi e pesanti.
+                            2. DESCRIZIONE: Se nella descrizione sono indicati dati numerici (es. "altezza 80cm", "vaso 20cm", "peso 3kg"), usa e rispetta tassativamente quei valori!
+                            3. DELICATEZZA: Ricorda che le piante vive viaggiano in verticale (in piedi), quindi l'altezza ("height") deve rappresentare lo sviluppo in verticale della pianta, non adagiarla su un fianco.`;
 
                             userPromptContent = `Estima peso e dimensioni per la spedizione di questo prodotto:
-                            Nome: "${contesto.productName || contesto.nome}"
-                            Categoria: "${contesto.productCategory || contesto.categoria}"
-                            Tipo: "${contesto.productType}"
+                            Nome: "${contesto.productName || contesto.nome || ''}"
+                            Categoria: "${contesto.productCategory || contesto.categoria || ''}"
+                            Tipo: "${contesto.productType || ''}"
+                            Prezzo: "${contesto.price || '0'} €"
                             Descrizione: "${contesto.productShortDescription || contesto.productDescription || ''}"
                             ${contesto.brand ? 'Marca: ' + contesto.brand : ''}
 
                             REGOLE DI RISPOSTA:
                             Rispondi ESCLUSIVAMENTE con un oggetto JSON valido.
                             Usa queste chiavi: "weight" (numero in kg), "length" (numero in cm), "width" (numero in cm), "height" (numero in cm).
-                            Esempio: {"weight": 1.5, "length": 30, "width": 20, "height": 15}`;
+                            Esempio: {"weight": 4.5, "length": 25, "width": 25, "height": 80}`;
 
                             temperature = 0.3;
                         }
-                        // === NUOVA LOGICA: STIMA PESO E DIMENSIONI (SPEDIZIONE) ===
-                                    else if (task === "estimate_shipping_attributes") {
-                                        systemPrompt = `Sei un esperto di logistica e spedizioni e-commerce.
-                                        Il tuo compito è stimare il peso reale (in kg) e le dimensioni dell'imballaggio (in cm) per un prodotto.
-                                        Sii realistico: considera anche il peso del vaso/terra per le piante o della scatola/protezioni per i macchinari.`;
 
-                                        userPromptContent = `Estima peso e dimensioni per la spedizione di questo prodotto:
-                                        Nome: "${contesto.productName || contesto.nome}"
-                                        Categoria: "${contesto.productCategory || contesto.categoria}"
-                                        Tipo: "${contesto.productType}"
-                                        Descrizione: "${contesto.productShortDescription || contesto.productDescription || ''}"
-                                        ${contesto.brand ? 'Marca: ' + contesto.brand : ''}
-
-                                        REGOLE DI RISPOSTA:
-                                        Rispondi ESCLUSIVAMENTE con un oggetto JSON valido.
-                                        Non aggiungere testo prima o dopo.
-                                        Usa queste chiavi: "weight" (numero in kg), "length" (numero in cm), "width" (numero in cm), "height" (numero in cm).
-                                        Esempio: {"weight": 1.5, "length": 30, "width": 20, "height": 15}`;
-
-                                        temperature = 0.3;
-                                    }
                                     // === LOGICA PER PRODOTTI (Bazar / Business) ===
                                     else if (task.includes("descrizione_breve") || task.includes("descrizione_completa") || task.includes("tags") || task.includes("keywords") || task.includes("titolo")) {
                                         userPromptContent = `Il prodotto base è "${contesto.nome || contesto.productName}". Categoria: "${contesto.categoria || contesto.productCategory}". Marca: "${contesto.marca || contesto.brand || ''}". Prezzo: "${contesto.prezzo || ''}€".`;
@@ -236,28 +221,7 @@ export default async function handler(req, res) {
                         else if (task === "visione_immagine") {
                             // Gestito sotto nel blocco speciale
                         }
-                        // === NUOVA LOGICA: STIMA PESO E DIMENSIONI (SPEDIZIONE) ===
-                        else if (task === "estimate_shipping_attributes") {
-                            systemPrompt = `Sei un esperto di logistica e spedizioni e-commerce.
-                            Il tuo compito è stimare il peso reale (in kg) e le dimensioni dell'imballaggio (in cm) per un prodotto.
-                            Sii realistico: considera anche il peso del vaso/terra per le piante o della scatola/protezioni per i macchinari.`;
 
-                            userPromptContent = `Estima peso e dimensioni per la spedizione di questo prodotto:
-                            Nome: "${contesto.productName}"
-                            Categoria: "${contesto.productCategory}"
-                            Tipo: "${contesto.productType}"
-                            Descrizione: "${contesto.productShortDescription || contesto.productDescription || ''}"
-                            ${contesto.brand ? 'Marca: ' + contesto.brand : ''}
-                            ${contesto.enginePower ? 'Potenza: ' + contesto.enginePower : ''}
-
-                            REGOLE DI RISPOSTA:
-                            Rispondi ESCLUSIVAMENTE con un oggetto JSON valido.
-                            Non aggiungere testo prima o dopo.
-                            Usa queste chiavi: "weight" (numero in kg), "length" (numero in cm), "width" (numero in cm), "height" (numero in cm).
-                            Esempio: {"weight": 1.5, "length": 30, "width": 20, "height": 15}`;
-
-                            temperature = 0.3; // Più bassa per avere dati più precisi e meno creativi
-                        }
                         else {
                             userPromptContent = `Genera un contenuto per il campo "${task}" relativo a "${contesto.nome || contesto.productName}" della categoria "${contesto.categoria || contesto.productCategory}".`;
                         }
