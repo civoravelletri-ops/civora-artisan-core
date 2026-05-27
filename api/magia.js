@@ -241,26 +241,32 @@ export default async function handler(req, res) {
                 }
 
                 if (task === "visione_immagine") {
-                    // Utilizziamo il modello Vision ufficiale di Groq
-                    aiModel = "meta-llama/llama-4-scout-17b-16e-instruct";
-                    responseFormat = { "type": "json_object" }; // ATTIVA MODALITÀ JSON
-                    messages = [
-                        {
-                            role: "user",
-                            content: [
-                                {
-                                    type: "text",
-                                    text: "Analizza questa immagine di un prodotto per un mercatino dell'usato o bazar. Crea un titolo accattivante (max 60 caratteri), una descrizione persuasiva (3-4 righe) e stima un prezzo netto realistico per la vendita (restituisci solo il numero). Rispondi ESCLUSIVAMENTE in formato JSON con chiavi: 'titolo', 'descrizione', 'prezzo'."
-                                },
-                                {
-                                    type: "image_url",
-                                    image_url: { url: contesto.imageUrl }
+                                    // Utilizziamo il modello Vision ufficiale di Groq
+                                    aiModel = "meta-llama/llama-4-scout-17b-16e-instruct";
+                                    responseFormat = { "type": "json_object" }; // ATTIVA MODALITÀ JSON
+                                    
+                                    // Se il frontend ha passato istruzioni speciali per la pianta (AgriGarden), usiamo quelle.
+                                    // Altrimenti, usiamo il prompt di default per il bazar/mercatino dell'usato.
+                                    const promptVisione = contesto.istruzioni_extra || 
+                                        "Analizza questa immagine di un prodotto per un mercatino dell'usato o bazar. Crea un titolo accattivante (max 60 caratteri), una descrizione persuasiva (3-4 righe) e stima un prezzo netto realistico per la vendita (restituisci solo il numero). Rispondi ESCLUSIVAMENTE in formato JSON con chiavi: 'titolo', 'descrizione', 'prezzo'.";
+                
+                                    messages = [
+                                        {
+                                            role: "user",
+                                            content: [
+                                                {
+                                                    type: "text",
+                                                    text: promptVisione
+                                                },
+                                                {
+                                                    type: "image_url",
+                                                    image_url: { url: contesto.imageUrl }
+                                                }
+                                            ]
+                                        }
+                                    ];
+                                    temperature = 0.5;
                                 }
-                            ]
-                        }
-                    ];
-                    temperature = 0.5;
-                }
 
         try {
             const bodyRequest = {
