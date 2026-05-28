@@ -160,16 +160,16 @@ async function handleBotanicoClient(req, res, groqApiKey) {
     let aiResponse;
 
     if (contesto.imageUrl && (contesto.imageUrl.startsWith("data:image") || contesto.imageUrl.startsWith("http"))) {
-            // Se l'utente ha inviato un'immagine, usiamo il modello Vision (Llama-3.2-11b)
+            // Se l'utente ha inviato un'immagine, usiamo il nuovo e potentissimo Llama 4 Scout di Groq con supporto Vision
             try {
                 // Per evitare errori 400 di Groq, uniamo le istruzioni di sistema direttamente nel testo dell'utente!
                 const promptUnito = `${systemPrompt}\n\nDOMANDA CLIENTE DA RISPONDERE: ${contesto.query || "Ciao, guarda la foto del mio balcone o giardino."}`;
-    
+
                 const visionResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                     method: "POST",
                     headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        model: "llama-3.2-11b-vision-preview",
+                        model: "meta-llama/llama-4-scout-17b-16e-instruct",
                         messages: [
                             {
                                 role: "user",
