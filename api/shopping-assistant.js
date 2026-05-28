@@ -149,10 +149,10 @@ async function handleBotanicoClient(req, res, groqApiKey) {
                - Nel "message", rassicuralo: "Quello che vedi online è solo un assaggio delle nostre serre! Ho salvato la tua richiesta, lasciami il tuo numero così vado a controllare fisicamente in vivaio se ne ho altri lotti pronti o ti propongo un'alternativa spettacolare che ho visto stamattina."
 
             6. REGOLE DI SISTEMA RIGIDE:
-               - Rispondi sempre e solo in ${contesto.lang || 'it'} e in formato JSON valido.
-               - Aggiorna sempre "conversation_summary_for_owner" con un riassunto dettagliato in italiano di ciò che il cliente desidera. Sarà il promemoria letto dal negoziante.
-               - Formato JSON: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
-            `;
+                           - REQUISITO FONDAMENTALE DI LINGUA: Rispondi ESCLUSIVAMENTE nella lingua richiesta: "${contesto.lang || 'it'}". Anche se il catalogo o le istruzioni sono in italiano, tu devi tradurre ed esprimerti nella lingua del cliente ("${contesto.lang || 'it'}"). Non usare l'italiano se la lingua richiesta è diversa.
+                           - Aggiorna SEMPRE "conversation_summary_for_owner" con un riassunto dettagliato in italiano di ciò che il cliente desidera. Sarà il promemoria letto dal negoziante.
+                           - Formato JSON: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
+                        `;
 
     const aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
     try {
