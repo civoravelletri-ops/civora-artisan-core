@@ -160,27 +160,29 @@ async function handleBotanicoClient(req, res, groqApiKey) {
     let aiResponse;
 
     if (contesto.imageUrl && (contesto.imageUrl.startsWith("data:image") || contesto.imageUrl.startsWith("http"))) {
-        // Se l'utente ha inviato un'immagine, usiamo la potenza del modello Vision su Groq (Llama-3.2-11b)
-        try {
-            const visionResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    model: "llama-3.2-11b-vision-preview",
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        {
-                            role: "user",
-                            content: [
-                                { type: "text", text: contesto.query || "Ciao, guarda la foto del mio balcone o giardino." },
-                                { type: "image_url", image_url: { url: contesto.imageUrl } }
-                            ]
-                        }
-                    ],
-                    temperature: 0.5,
-                    response_format: { type: "json_object" }
-                })
-            });
+            // Se l'utente ha inviato un'immagine, usiamo il modello Vision (Llama-3.2-11b)
+            try {
+                // Per evitare errori 400 di Groq, uniamo le istruzioni di sistema direttamente nel testo dell'utente!
+                const promptUnito = `${systemPrompt}\n\nDOMANDA CLIENTE DA RISPONDERE: ${contesto.query || "Ciao, guarda la foto del mio balcone o giardino."}`;
+    
+                const visionResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                    method: "POST",
+                    headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        model: "llama-3.2-11b-vision-preview",
+                        messages: [
+                            {
+                                role: "user",
+                                content: [
+                                    { type: "text", text: promptUnito },
+                                    { type: "image_url", image_url: { url: contesto.imageUrl } }
+                                ]
+                            }
+                        ],
+                        temperature: 0.5,
+                        response_format: { type: "json_object" }
+                    })
+                });
 
             if (!visionResponse.ok) {
                 const err = await visionResponse.json();
