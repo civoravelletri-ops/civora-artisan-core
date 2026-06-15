@@ -30,8 +30,14 @@ export default async function handler(req, res) {
         Mantieni un tono commerciale, persuasivo e naturale, adattandolo leggermente al contesto fornito (es. più empatico per un veterinario, più elegante per un salone).
         Se il testo è una lista di parole separate da virgola (tags), mantieni la separazione con le virgole.
 
-        REGOLA FONDAMENTALE: DEVI RISPONDERE SOLO ED ESCLUSIVAMENTE CON UN OGGETTO JSON VALIDO.
-        Non aggiungere MAI commenti, saluti o testo fuori dal JSON.
+        REGOLA DI FORMATTAZIONE JSON DI MASSIMA IMPORTANZA:
+        - Devi restituire UNICAMENTE un oggetto JSON valido.
+        - Non aggiungere MAI commenti, spiegazioni, saluti o testo fuori dal JSON.
+        - Ogni valore del JSON deve essere una stringa pulita.
+        - NON avvolgere le singole traduzioni in doppie virgolette interne (es. ""testo"" o \\"\\"testo\\"\\" è severamente vietato).
+        - Se devi includere delle virgolette nella traduzione, usa le virgolette singole (es. 'testo') oppure esegui il corretto escape con una sola barra rovesciata (\\").
+        - Assicurati che non ci siano virgolette spurie o ridondanti all'inizio o alla fine della stringa tradotta.
+
         L'oggetto JSON deve avere ESATTAMENTE queste 10 chiavi (ISO 639-1 per le lingue):
         "en" (Inglese)
         "es" (Spagnolo)
@@ -44,7 +50,11 @@ export default async function handler(req, res) {
         "sq" (Albanese)
         "hi" (Hindi)`;
 
-    const userPromptContent = `Contesto del testo: ${contesto}\n\nTesto in italiano da tradurre:\n"${testo_italiano}"`;
+    // Rimosse le virgolette fisiche dal prompt dell'utente attorno al testo per evitare di confondere il modello
+    const userPromptContent = `Contesto del testo: ${contesto || "Generico"}
+
+Testo in italiano da tradurre (traduci solo il contenuto puro, senza racchiuderlo in virgolette esterne extra):
+${testo_italiano}`;
 
     try {
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -59,7 +69,7 @@ export default async function handler(req, res) {
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPromptContent }
                 ],
-                temperature: 0.3, // Temperatura bassa per traduzioni precise e non fantasiose
+                temperature: 0.2, // Ridotta leggermente per minimizzare i comportamenti di formattazione imprevisti
                 response_format: { type: "json_object" } // FORZA Groq a sputare fuori un JSON perfetto
             })
         });
