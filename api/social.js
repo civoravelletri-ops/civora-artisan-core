@@ -54,30 +54,36 @@ module.exports = async function handler(req, res) {
         let userPromptText = "";
 
         if (contesto.isBookingImport) {
-            // STRADA 3: Importazione e parsing intelligente dell'appuntamento (slang/dialetto/audio trascritto)
-            systemPrompt = `Sei l'assistente di reception virtuale di un salone di bellezza/studio professionale. Il tuo compito è analizzare un messaggio o la trascrizione di un audio informale, abbreviato o in dialetto, inviato da un cliente per prenotare un appuntamento, ed estrarre i dati in formato JSON.
-
-            REGOLE DI ESTRAZIONE E CALCOLO:
-            1. Nome: Estrai solo il nome del cliente (es: "Marco", "Giulia"). Se non lo trovi, lascia "".
-            2. Data: Calcola la data esatta in formato AAAA-MM-GG basandoti sulla data di oggi che ti viene fornita. Es: se oggi è Domenica 21 Giugno 2026, "domani" sarà "2026-06-22", "mercoledì" o "mercoledì prossimo" sarà il primo mercoledì utile "2026-06-24", ecc.
-            3. Ora: Estrai l'ora richiesta in formato HH:MM (es: "17:30"). Se l'ora è generica (es: "pomeriggio"), proponi un orario coerente (es: "17:00").
-            4. Servizio: Identifica quale dei servizi reali del negozio (che trovi nella lista fornita) corrisponde di più alla richiesta del cliente (es: se chiede "baffo" o "radersi" e in listino c'è "Regolazione Barba", seleziona l'ID di quel servizio). Se non trovi riscontri, lascia "".
-            5. Risposta: Genera un testo amichevole e professionale che il salone invierà su WhatsApp per confermare (es: "Ciao Marco! Ti confermo l'appuntamento...").
-
-            Rispondi ESCLUSIVAMENTE con un oggetto JSON pulito e valido, senza formattazione markdown (niente racchiuso in tre apici o scritte come \`\`\`json), strutturato esattamente così:
-            {
-              "customerName": "Nome",
-              "date": "YYYY-MM-DD",
-              "time": "HH:MM",
-              "serviceId": "ID_DEL_SERVIZIO",
-              "suggestedReply": "Messaggio di risposta"
-            }`;
-
-            userPromptText = `Contesto temporale (Oggi è): ${contesto.currentDate}
-            Listino Servizi reali del Negozio:
-            ${JSON.stringify(contesto.servicesList)}
-
-            Messaggio del cliente da analizzare: "${contesto.messageText}"`;
+                    // STRADA 3: Importazione e parsing intelligente dell'appuntamento (Spporto alle date alternative)
+                    systemPrompt = `Sei l'assistente di reception virtuale di un salone di bellezza/studio professionale. Il tuo compito è analizzare un messaggio o la trascrizione di un audio informale, abbreviato o in dialetto, inviato da un cliente per prenotare un appuntamento, ed estrarre i dati in formato JSON.
+        
+                    REGOLE DI ESTRAZIONE E CALCOLO:
+                    1. Nome: Estrai solo il nome del cliente (es: "Marco", "Giulia"). Se non lo trovi, lascia "".
+                    2. Data: Calcola la data esatta in formato AAAA-MM-GG basandoti sulla data di oggi che ti viene fornita. Es: se oggi è Domenica 21 Giugno 2026, "domani" sarà "2026-06-22", "mercoledì" o "mercoledì prossimo" sarà il primo mercoledì utile "2026-06-24", ecc.
+                    3. Ora: Estrai l'ora richiesta in formato HH:MM (es: "17:30"). Se l'ora è generica (es: "pomeriggio"), proponi un orario coerente (es: "17:00").
+                    4. Servizio: Identifica quale dei servizi reali del negozio (che trovi nella lista fornita) corrisponde di più alla richiesta del cliente (es: se chiede "baffo" o "radersi" e in listino c'è "Regolazione Barba", seleziona l'ID di quel servizio). Se non trovi riscontri, lascia "".
+                    5. Risposta WhatsApp (CONFERMA): Se NON ti viene fornito l'elenco "alternativeSlots", genera una risposta cordiale per confermare la prenotazione richiesta (es. "Ciao Marco! Ti confermo l'appuntamento...").
+                    6. Risposta WhatsApp (RIFIUTO E SPOSTAMENTO): Se ti viene fornito l'elenco "alternativeSlots", significa che l'orario richiesto era occupato. Genera un messaggio super diplomatico e amichevole dove spieghi che purtroppo quell'orario/giorno è al completo, ma offri esplicitamente le date/ore alternative dell'elenco. Mantieni lo stesso identico tono del cliente (es: se scrive in modo scherzoso/amichevole, rispondigli come un amico con "un abbraccio"; se scrive in modo formale/distaccato, mantieni una risposta professionale ed educata).
+        
+                    Rispondi ESCLUSIVAMENTE con un oggetto JSON pulito e valido, senza formattazione markdown (niente racchiuso in tre apici o scritte come \`\`\`json), strutturato esattamente così:
+                    {
+                      "customerName": "Nome",
+                      "date": "YYYY-MM-DD",
+                      "time": "HH:MM",
+                      "serviceId": "ID_DEL_SERVIZIO",
+                      "suggestedReply": "Messaggio di risposta"
+                    }`;
+        
+                    // Prepariamo la descrizione dell'utente differenziando se ci sono alternative
+                    userPromptText = `Contesto temporale (Oggi è): ${contesto.currentDate}
+                    Listino Servizi reali del Negozio:
+                    ${JSON.stringify(contesto.servicesList)}
+                    
+                    ${contesto.isAlternativeProposal ? `!!! ATTENZIONE: IL GIORNO RICHIESTO È COMPLETAMENTE OCCUPATO !!!
+                    Proponi al cliente queste date/ore alternative libere reali:
+                    ${JSON.stringify(contesto.alternativeSlots)}` : ''}
+        
+                    Messaggio del cliente da analizzare: "${contesto.messageText}"`;
 
         } else if (contesto.isAIAssistant || contesto.nota_extra?.includes("Agisci come un esperto")) {
             // STRADA 1: Assistente Esperto del Banco
