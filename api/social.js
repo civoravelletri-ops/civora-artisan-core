@@ -24,13 +24,38 @@ module.exports = async function handler(req, res) {
         const hasDiscount = contesto.originalPrice && contesto.originalPrice > contesto.prezzo;
         const discountPercent = hasDiscount ? Math.round(((contesto.originalPrice - contesto.prezzo) / contesto.originalPrice) * 100) : 0;
 
+        // --- TRASCRIZIONE AUTOMATICA DEI VOCALI AUDIO (Whisper Groq) ---
+        if (contesto.isBookingImport && contesto.isAudioTranscription && contesto.audioBase64) {
+            const audioBuffer = Buffer.from(contesto.audioBase64, 'base64');
+            const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
+            const formData = new FormData();
+            formData.append('file', blob, contesto.audioFilename || 'audio.mp3');
+            formData.append('model', 'whisper-large-v3');
+            formData.append('language', 'it');
+
+            const whisperResponse = await fetch('https://api.groq.com/v1/audio/transcriptions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${GROQ_API_KEY}`
+                },
+                body: formData
+            });
+
+            const whisperData = await whisperResponse.json();
+            if (!whisperResponse.ok) {
+                throw new Error(whisperData.error?.message || "Errore durante la trascrizione dell'audio.");
+            }
+            // Sostituiamo il testo del messaggio con la trascrizione audio
+            contesto.messageText = whisperData.text;
+        }
+
         // --- SELEZIONE AUTOMATICA DELLE ISTRUZIONI (SOCIAL vs ESPERTO vs IMPORT PRENOTAZIONE) ---
         let systemPrompt = "";
         let userPromptText = "";
 
         if (contesto.isBookingImport) {
-            // STRADA 3: Importazione e parsing intelligente dell'appuntamento (slang/dialetto)
-            systemPrompt = `Sei l'assistente di reception virtuale di un salone di bellezza/studio professionale. Il tuo compito è analizzare un messaggio informale, abbreviato o in dialetto, inviato da un cliente per prenotare un appuntamento, ed estrarre i dati in formato JSON.
+            // STRADA 3: Importazione e parsing intelligente dell'appuntamento (slang/dialetto/audio trascritto)
+            systemPrompt = `Sei l'assistente di reception virtuale di un salone di bellezza/studio professionale. Il tuo compito è analizzare un messaggio o la trascrizione di un audio informale, abbreviato o in dialetto, inviato da un cliente per prenotare un appuntamento, ed estrarre i dati in formato JSON.
 
             REGOLE DI ESTRAZIONE E CALCOLO:
             1. Nome: Estrai solo il nome del cliente (es: "Marco", "Giulia"). Se non lo trovi, lascia "".
