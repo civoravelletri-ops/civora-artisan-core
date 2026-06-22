@@ -14,41 +14,42 @@ export default async function handler(req, res) {
     const { testo_italiano, contesto } = req.body;
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-    // Lista aggiornata delle 10 lingue (per i fallback e il prompt)
-    const I18N_LANGS = ["en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi"];
-
-    if (!testo_italiano || testo_italiano.trim() === "") {
-        // Se il testo è vuoto, restituisci un oggetto con tutte le lingue vuote
-        const emptyTranslations = {};
-        I18N_LANGS.forEach(lang => emptyTranslations[lang] = "");
-        return res.status(200).json(emptyTranslations);
-    }
-
-    // Diciamo all'IA chi è e cosa deve fare. Le imponiamo di rispondere SOLO in formato JSON.
-    const systemPrompt = `Sei un traduttore professionista ed esperto di marketing per attività commerciali locali, inclusi saloni di bellezza, studi medici e cliniche veterinarie.
-        Il tuo compito è prendere il testo in italiano e tradurlo in 10 lingue.
-        Mantieni un tono commerciale, persuasivo e naturale, adattandolo leggermente al contesto fornito (es. più empatico per un veterinario, più elegante per un salone).
-        Se il testo è una lista di parole separate da virgola (tags), mantieni la separazione con le virgole.
-
-        REGOLA DI FORMATTAZIONE JSON DI MASSIMA IMPORTANZA:
-        - Devi restituire UNICAMENTE un oggetto JSON valido.
-        - Non aggiungere MAI commenti, spiegazioni, saluti o testo fuori dal JSON.
-        - Ogni valore del JSON deve essere una stringa pulita.
-        - NON avvolgere le singole traduzioni in doppie virgolette interne (es. ""testo"" o \\"\\"testo\\"\\" è severamente vietato).
-        - Se devi includere delle virgolette nella traduzione, usa le virgolette singole (es. 'testo') oppure esegui il corretto escape con una sola barra rovesciata (\\").
-        - Assicurati che non ci siano virgolette spurie o ridondanti all'inizio o alla fine della stringa tradotta.
-
-        L'oggetto JSON deve avere ESATTAMENTE queste 10 chiavi (ISO 639-1 per le lingue):
-        "en" (Inglese)
-        "es" (Spagnolo)
-        "fr" (Francese)
-        "de" (Tedesco)
-        "ru" (Russo)
-        "ar" (Arabo standard)
-        "ro" (Rumeno)
-        "zh" (Cinese semplificato)
-        "sq" (Albanese)
-        "hi" (Hindi)`;
+    // Lista aggiornata delle 11 lingue (per i fallback e il prompt)
+        const I18N_LANGS = ["en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr"];
+    
+        if (!testo_italiano || testo_italiano.trim() === "") {
+            // Se il testo è vuoto, restituisci un oggetto con tutte le lingue vuote
+            const emptyTranslations = {};
+            I18N_LANGS.forEach(lang => emptyTranslations[lang] = "");
+            return res.status(200).json(emptyTranslations);
+        }
+    
+        // Diciamo all'IA chi è e cosa deve fare. Le imponiamo di rispondere SOLO in formato JSON.
+        const systemPrompt = `Sei un traduttore professionista ed esperto di marketing per attività commerciali locali, inclusi saloni di bellezza, studi medici e cliniche veterinarie.
+            Il tuo compito è prendere il testo in italiano e tradurlo in 11 lingue.
+            Mantieni un tono commerciale, persuasivo e naturale, adattandolo leggermente al contesto fornito (es. più empatico per un veterinario, più elegante per un salone).
+            Se il testo è una lista di parole separate da virgola (tags), mantieni la separazione con le virgole.
+    
+            REGOLA DI FORMATTAZIONE JSON DI MASSIMA IMPORTANZA:
+            - Devi restituire UNICAMENTE un oggetto JSON valido.
+            - Non aggiungere MAI commenti, spiegazioni, saluti o testo fuori dal JSON.
+            - Ogni valore del JSON deve essere una stringa pulita.
+            - NON avvolgere le singole traduzioni in doppie virgolette interne (es. ""testo"" o \\"\\"testo\\"\\" è severamente vietato).
+            - Se devi includere delle virgolette nella traduzione, usa le virgolette singole (es. 'testo') oppure esegui il corretto escape con una sola barra rovesciata (\\").
+            - Assicurati che non ci siano virgolette spurie o ridondanti all'inizio o alla fine della stringa tradotta.
+    
+            L'oggetto JSON deve avere ESATTAMENTE queste 11 chiavi (ISO 639-1 per le lingue):
+            "en" (Inglese)
+            "es" (Spagnolo)
+            "fr" (Francese)
+            "de" (Tedesco)
+            "ru" (Russo)
+            "ar" (Arabo standard)
+            "ro" (Rumeno)
+            "zh" (Cinese semplificato)
+            "sq" (Albanese)
+            "hi" (Hindi)
+            "tr" (Turco)`;
 
     // Rimosse le virgolette fisiche dal prompt dell'utente attorno al testo per evitare di confondere il modello
     const userPromptContent = `Contesto del testo: ${contesto || "Generico"}
