@@ -27,7 +27,7 @@ throw new Error("GROQ_API_KEY mancante nelle variabili d'ambiente di Vercel");
 const groqApiUrl = "https://api.groq.com/openai/v1/chat/completions";
 
 let responseContent = "";
-let groqModel = "meta-llama/llama-4-scout-17b-16e-instruct"; // CONFERMATO: Questo è il nostro modello multimodale potente
+let groqModel = "qwen/qwen3.6-27b"; // CONFERMATO: Questo è il nostro modello multimodale potente
 let messages = [];
 let temperature = 0.7; // Default per creatività nella conversazione
 
