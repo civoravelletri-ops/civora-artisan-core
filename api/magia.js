@@ -242,9 +242,9 @@ export default async function handler(req, res) {
                             }
 
                             if (task === "visione_immagine" || task === "importazione_agenda_ia") {
-                                                // Utilizziamo il modello Vision ufficiale di Groq
-                                                aiModel = "meta-llama/llama-4-scout-17b-16e-instruct";
-                                                responseFormat = { "type": "json_object" }; // ATTIVA MODALITÀ JSON
+                                                                // Utilizziamo il modello Vision ufficiale e globale di Groq (Llama 3.2 Vision)
+                                                                aiModel = "llama-3.2-11b-vision-preview";
+                                                                responseFormat = { "type": "json_object" }; // ATTIVA MODALITÀ JSON
 
                                                 let promptVisione = contesto.istruzioni_extra ||
                                                     "Analizza questa immagine di un prodotto per un mercatino dell'usato o bazar. Crea un titolo accattivante (max 60 caratteri), una descrizione persuasiva (3-4 righe) e stima un prezzo netto realistico per la vendita (restituisci solo il numero). Rispondi ESCLUSIVAMENTE in formato JSON con chiavi: 'titolo', 'descrizione', 'prezzo'.";
