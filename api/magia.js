@@ -255,8 +255,12 @@ export default async function handler(req, res) {
 
                                                 // Se l'azione è l'importazione dell'agenda, diamo all'IA le istruzioni di precisione millimetrica
                                                 if (task === "importazione_agenda_ia") {
-                                                                                        promptVisione = `Sei un assistente d'ufficio ad altissima precisione. Il tuo compito è estrarre l'elenco degli appuntamenti futuri dall'immagine di un'agenda cartacea o uno screenshot digitale fornito.
-
+                                                                                        promptVisione = `REGOLA DI SICUREZZA ASSOLUTA PER EVITARE TRONCAMENTI: 
+                                                                                        NON RAGIONARE, NON PENSARE, NON INCLUDERE MAI I TAG <think> E </think> E NON SCRIVERE ALCUN RAGIONAMENTO NELLA RISPOSTA.
+                                                                                        Inizia la tua risposta DIRETTAMENTE con la parentesi graffa aperta { ed elabora subito il JSON.
+                                                
+                                                                                        Il tuo compito è estrarre l'elenco degli appuntamenti futuri dall'immagine di un'agenda cartacea o uno screenshot digitale fornito.
+                                                                                        
                                                                                         Analizza l'immagine ed estrai tutti gli appuntamenti leggibili. Per ognuno trova:
                                                                                         - data (nel formato AAAA-MM-DD. Se trovi solo il giorno o l'orario, stima la data corretta nel mese/anno corrente 2026).
                                                                                         - ora (nel formato HH:MM).
@@ -264,14 +268,12 @@ export default async function handler(req, res) {
                                                                                         - telefono (se presente, altrimenti null).
                                                                                         - servizio (Nome del Servizio richiesto).
                                                                                         - note (se presenti, altrimenti null).
-
+                                                
                                                                                         Rispondi ESCLUSIVAMENTE con un oggetto JSON valido contenente la chiave "prenotazioni", che è un array di oggetti.
                                                                                         Il formato del JSON deve rispecchiare esattamente questo esempio:
                                                                                         {"prenotazioni": [{"data": "2026-07-28", "ora": "10:30", "cliente": "Marco Rossi", "telefono": "+393331234567", "servizio": "Taglio", "note": "Allergico a prodotti"}]}
-
-                                                                                        REGOLA FONDAMENTALE DI FORMATTAZIONE PER LA VALIDAZIONE:
-                                                                                        NON utilizzare mai i tag di pensiero <think> o </think> e non includere alcun ragionamento.
-                                                                                        NON utilizzare mai i blocchi di codice markdown (come \`\`\`json o \`\`\`).
+                                                                                        
+                                                                                        Non utilizzare mai i blocchi di codice markdown (come \`\`\`json o \`\`\`).
                                                                                         Inizia la tua risposta DIRETTAMENTE con la parentesi graffa aperta { e terminala con }. Non scrivere altro testo.`;
                                                                                     }
 
