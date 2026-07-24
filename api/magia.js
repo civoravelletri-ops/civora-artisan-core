@@ -244,7 +244,7 @@ export default async function handler(req, res) {
                             if (task === "visione_immagine" || task === "importazione_agenda_ia") {
                                                                 // Utilizziamo il modello Vision ufficiale, attivo e ultra-rapido di Groq (Qwen 3.6 27B)
                                                                 aiModel = "qwen/qwen3.6-27b";
-                                                                
+
                                                                 // Attiviamo il formato JSON rigido di Groq solo per la visione_immagine standard dei prodotti, escludendo l'agenda
                                                                 if (task === "visione_immagine") {
                                                                     responseFormat = { "type": "json_object" };
@@ -270,9 +270,9 @@ export default async function handler(req, res) {
                                                                                         {"prenotazioni": [{"data": "2026-07-28", "ora": "10:30", "cliente": "Marco Rossi", "telefono": "+393331234567", "servizio": "Taglio", "note": "Allergico a prodotti"}]}
 
                                                                                         REGOLA FONDAMENTALE DI FORMATTAZIONE PER LA VALIDAZIONE:
-                                                                                        Inizia la tua risposta DIRETTAMENTE con la parentesi graffa aperta { e terminala con }
+                                                                                        NON utilizzare mai i tag di pensiero <think> o </think> e non includere alcun ragionamento.
                                                                                         NON utilizzare mai i blocchi di codice markdown (come \`\`\`json o \`\`\`).
-                                                                                        Non aggiungere alcun testo prima o dopo l'oggetto JSON.`;
+                                                                                        Inizia la tua risposta DIRETTAMENTE con la parentesi graffa aperta { e terminala con }. Non scrivere altro testo.`;
                                                                                     }
 
                                                 messages = [
@@ -294,16 +294,17 @@ export default async function handler(req, res) {
                                             }
 
         try {
-            const bodyRequest = {
-                model: aiModel,
-                messages: messages,
-                temperature: temperature
-            };
+                    const bodyRequest = {
+                        model: aiModel,
+                        messages: messages,
+                        temperature: temperature,
+                        max_tokens: 3000 // Aumentiamo i token per evitare che l'IA si interrompa prima di aver scritto l'intero JSON
+                    };
 
-            // Aggiunge il formato JSON solo se necessario
-            if (responseFormat) {
-                bodyRequest.response_format = responseFormat;
-            }
+                    // Aggiunge il formato JSON solo se necessario
+                    if (responseFormat) {
+                        bodyRequest.response_format = responseFormat;
+                    }
 
             const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                 method: "POST",
