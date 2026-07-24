@@ -236,16 +236,16 @@ export default async function handler(req, res) {
                     let aiModel = "llama-3.1-8b-instant"; // RIPRISTINATO IL TUO MODELLO ORIGINALE
                             let responseFormat = null;
 
-                            // Attiviamo la modalità JSON ufficiale di Groq per evitare testi inutili
-                            if (task === "visione_immagine" || task === "estimate_shipping_attributes" || task === "importazione_agenda_ia") {
-                                responseFormat = { "type": "json_object" };
-                            }
+                            // Attiviamo la modalità JSON ufficiale di Groq solo per compiti compatibili (escludendo l'agenda)
+                                if (task === "visione_immagine" || task === "estimate_shipping_attributes") {
+                                    responseFormat = { "type": "json_object" };
+                                }
 
                             if (task === "visione_immagine" || task === "importazione_agenda_ia") {
                                                                 // Utilizziamo il modello Vision ufficiale, attivo e ultra-rapido di Groq (Qwen 3.6 27B)
                                                                 aiModel = "qwen/qwen3.6-27b";
-
-                                                                // Attiviamo il blocco rigido del formato JSON solo per la visione_immagine standard dei prodotti
+                                                                
+                                                                // Attiviamo il formato JSON rigido di Groq solo per la visione_immagine standard dei prodotti, escludendo l'agenda
                                                                 if (task === "visione_immagine") {
                                                                     responseFormat = { "type": "json_object" };
                                                                 }
