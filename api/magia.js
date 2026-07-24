@@ -265,7 +265,10 @@ export default async function handler(req, res) {
                                                                                         Il formato del JSON deve rispecchiare esattamente questo esempio:
                                                                                         {"prenotazioni": [{"data": "2026-07-28", "ora": "10:30", "cliente": "Marco Rossi", "telefono": "+393331234567", "servizio": "Taglio", "note": "Allergico a prodotti"}]}
                                                                                         
-                                                                                        Non aggiungere alcun testo prima o dopo l'oggetto JSON. Rispondi solo con il JSON.`;
+                                                                                        REGOLA FONDAMENTALE DI FORMATTAZIONE PER LA VALIDAZIONE:
+                                                                                        Inizia la tua risposta DIRETTAMENTE con la parentesi graffa aperta { e terminala con }
+                                                                                        NON utilizzare mai i blocchi di codice markdown (come \`\`\`json o \`\`\`).
+                                                                                        Non aggiungere alcun testo prima o dopo l'oggetto JSON.`;
                                                                                     }
 
                                                 messages = [
