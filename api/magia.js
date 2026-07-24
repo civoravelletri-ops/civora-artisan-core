@@ -242,8 +242,8 @@ export default async function handler(req, res) {
                             }
 
                             if (task === "visione_immagine" || task === "importazione_agenda_ia") {
-                                                                // Utilizziamo il modello Vision ufficiale e globale di Groq (Llama 3.2 Vision)
-                                                                aiModel = "llama-3.2-11b-vision-preview";
+                                                                // Utilizziamo il modello Vision ufficiale, attivo e ultra-rapido di Groq (Qwen 3.6 27B)
+                                                                aiModel = "qwen/qwen3.6-27b";
                                                                 responseFormat = { "type": "json_object" }; // ATTIVA MODALITÀ JSON
 
                                                 let promptVisione = contesto.istruzioni_extra ||
