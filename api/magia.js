@@ -6,16 +6,17 @@ export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
     if (req.method === 'OPTIONS') {
-        res.status(200).end();
-        return;
-    }
+            res.status(200).end();
+            return;
+        }
 
-    // Estraiamo campo (usato per testi) o action (usato per spedizioni)
-        const { campo, action, contesto } = req.body;
+        // Estraiamo campo (con fallback a stringa vuota per evitare errori 'endsWith' se assente), action e contesto
+        const { action, contesto } = req.body;
+        const campo = req.body.campo || ""; // Protezione anti-crash d'emergenza
         const task = action || campo;
 
         // Recuperiamo la chiave che metteremo tra poco su Vercel
-    const GROQ_API_KEY = process.env.GROQ_API_KEY;
+        const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
     // Prepariamo il messaggio per l'IA (Tono differenziato tra i vari settori)
         let systemPrompt = "";
