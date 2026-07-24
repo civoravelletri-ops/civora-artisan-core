@@ -262,12 +262,12 @@ export default async function handler(req, res) {
                                                                                         Il tuo compito è estrarre l'elenco degli appuntamenti futuri dall'immagine di un'agenda cartacea o uno screenshot digitale fornito.
                                                                                         
                                                                                         Analizza l'immagine ed estrai tutti gli appuntamenti leggibili. Per ognuno trova:
-                                                                                        - data (nel formato AAAA-MM-DD. Se trovi solo il giorno o l'orario, stima la data corretta nel mese/anno corrente 2026).
-                                                                                        - ora (nel formato HH:MM).
-                                                                                        - cliente (Nome e Cognome).
-                                                                                        - telefono (se presente, altrimenti null).
-                                                                                        - servizio (Nome del Servizio richiesto).
-                                                                                        - note (se presenti, altrimenti null).
+                                                                                                                                - data (nel formato AAAA-MM-DD. Se trovi solo il giorno o l'orario, stima la data corretta nel mese/anno corrente 2026).
+                                                                                                                                - ora (nel formato HH:MM).
+                                                                                                                                - cliente (Nome e Cognome).
+                                                                                                                                - telefono (se presente, altrimenti null).
+                                                                                                                                - servizio (Nome del Servizio richiesto. TRADUCI FONDAMENTALMENTE IN ITALIANO se scritto in inglese, es: 'Hair Coloring' o 'Color' diventa 'Colore', 'Hair Wash' diventa 'Lavaggio', 'Skin Fades' o 'Fades' diventa 'Sfumatura' o 'Taglio').
+                                                                                                                                - note (se presenti, altrimenti null).
                                                 
                                                                                         Rispondi ESCLUSIVAMENTE con un oggetto JSON valido contenente la chiave "prenotazioni", che è un array di oggetti.
                                                                                         Il formato del JSON deve rispecchiare esattamente questo esempio:
