@@ -218,55 +218,81 @@ export default async function handler(req, res) {
                                         }
                                     }
             // === LOGICA PER VISIONE D'IMMAGINE ===
-                        else if (task === "visione_immagine") {
-                            // Gestito sotto nel blocco speciale
-                        }
+                                    else if (task === "visione_immagine" || task === "importazione_agenda_ia") {
+                                        // Gestito sotto nel blocco speciale
+                                    }
 
-                        else {
-                            userPromptContent = `Genera un contenuto per il campo "${task}" relativo a "${contesto.nome || contesto.productName}" della categoria "${contesto.categoria || contesto.productCategory}".`;
-                        }
+                                    else {
+                                        userPromptContent = `Genera un contenuto per il campo "${task}" relativo a "${contesto.nome || contesto.productName}" della categoria "${contesto.categoria || contesto.productCategory}".`;
+                                    }
 
 
-        let messages = [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPromptContent }
-        ];
+                    let messages = [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userPromptContent }
+                    ];
 
-        let aiModel = "llama-3.1-8b-instant"; // RIPRISTINATO IL TUO MODELLO ORIGINALE
-                let responseFormat = null;
+                    let aiModel = "llama-3.1-8b-instant"; // RIPRISTINATO IL TUO MODELLO ORIGINALE
+                            let responseFormat = null;
 
-                // Attiviamo la modalità JSON ufficiale di Groq per evitare testi inutili
-                if (task === "visione_immagine" || task === "estimate_shipping_attributes") {
-                    responseFormat = { "type": "json_object" };
-                }
+                            // Attiviamo la modalità JSON ufficiale di Groq per evitare testi inutili
+                            if (task === "visione_immagine" || task === "estimate_shipping_attributes" || task === "importazione_agenda_ia") {
+                                responseFormat = { "type": "json_object" };
+                            }
 
-                if (task === "visione_immagine") {
-                                    // Utilizziamo il modello Vision ufficiale di Groq
-                                    aiModel = "meta-llama/llama-4-scout-17b-16e-instruct";
-                                    responseFormat = { "type": "json_object" }; // ATTIVA MODALITÀ JSON
-                                    
-                                    // Se il frontend ha passato istruzioni speciali per la pianta (AgriGarden), usiamo quelle.
-                                    // Altrimenti, usiamo il prompt di default per il bazar/mercatino dell'usato.
-                                    const promptVisione = contesto.istruzioni_extra || 
-                                        "Analizza questa immagine di un prodotto per un mercatino dell'usato o bazar. Crea un titolo accattivante (max 60 caratteri), una descrizione persuasiva (3-4 righe) e stima un prezzo netto realistico per la vendita (restituisci solo il numero). Rispondi ESCLUSIVAMENTE in formato JSON con chiavi: 'titolo', 'descrizione', 'prezzo'.";
-                
-                                    messages = [
-                                        {
-                                            role: "user",
-                                            content: [
-                                                {
-                                                    type: "text",
-                                                    text: promptVisione
-                                                },
-                                                {
-                                                    type: "image_url",
-                                                    image_url: { url: contesto.imageUrl }
+                            if (task === "visione_immagine" || task === "importazione_agenda_ia") {
+                                                // Utilizziamo il modello Vision ufficiale di Groq
+                                                aiModel = "meta-llama/llama-4-scout-17b-16e-instruct";
+                                                responseFormat = { "type": "json_object" }; // ATTIVA MODALITÀ JSON
+
+                                                let promptVisione = contesto.istruzioni_extra ||
+                                                    "Analizza questa immagine di un prodotto per un mercatino dell'usato o bazar. Crea un titolo accattivante (max 60 caratteri), una descrizione persuasiva (3-4 righe) e stima un prezzo netto realistico per la vendita (restituisci solo il numero). Rispondi ESCLUSIVAMENTE in formato JSON con chiavi: 'titolo', 'descrizione', 'prezzo'.";
+
+                                                // Se l'azione è l'importazione dell'agenda, diamo all'IA le istruzioni di precisione millimetrica
+                                                if (task === "importazione_agenda_ia") {
+                                                    promptVisione = `Sei un assistente d'ufficio ad altissima precisione. Il tuo compito è estrarre l'elenco degli appuntamenti futuri dall'immagine fornita (può essere la foto di un'agenda di carta scritta a mano o lo screenshot di un calendario digitale).
+
+                                                    Analizza l'immagine ed estrai tutti gli appuntamenti leggibili. Per ognuno trova:
+                                                    - Data (nel formato AAAA-MM-DD. Se trovi solo il giorno o l'orario, calcola e stima la data corretta nel mese/anno corrente 2026).
+                                                    - Ora di inizio (nel formato HH:MM).
+                                                    - Nome e Cognome del cliente (se presente).
+                                                    - Numero di Telefono del cliente (se presente).
+                                                    - Nome del Servizio richiesto (es: Taglio, Colore, Barba, Massaggio).
+                                                    - Eventuali Note aggiuntive (opzionali).
+
+                                                    Rispondi ESCLUSIVAMENTE con un oggetto JSON valido contenente la chiave "prenotazioni", che è un array di oggetti con questo schema:
+                                                    {
+                                                      "prenotazioni": [
+                                                        {
+                                                          "data": "AAAA-MM-DD",
+                                                          "ora": "HH:MM",
+                                                          "cliente": "Nome Cognome",
+                                                          "telefono": "Telefono o null",
+                                                          "servizio": "Nome Servizio",
+                                                          "note": "Note o null"
+                                                        }
+                                                      ]
+                                                    }
+                                                    Rispondi solo con il JSON, senza alcun testo introduttivo o di contorno.`;
                                                 }
-                                            ]
-                                        }
-                                    ];
-                                    temperature = 0.5;
-                                }
+
+                                                messages = [
+                                                    {
+                                                        role: "user",
+                                                        content: [
+                                                            {
+                                                                type: "text",
+                                                                text: promptVisione
+                                                            },
+                                                            {
+                                                                type: "image_url",
+                                                                image_url: { url: contesto.imageUrl }
+                                                            }
+                                                        ]
+                                                    }
+                                                ];
+                                                temperature = 0.3; // Minore temperatura per massimizzare la precisione dell'estrazione dei testi
+                                            }
 
         try {
             const bodyRequest = {
