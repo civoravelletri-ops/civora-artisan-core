@@ -348,7 +348,29 @@ async function handleSyncInventory(req, res, groqApiKey) {
 // ==================================================================
 async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
     const { contesto } = req.body;
-    const systemPrompt = `Sei un Personal Shopper. Crea 3 carrelli spesa. Rispondi SOLO JSON {"carrelli": [...]}.`;
+    const systemPrompt = `Sei un Personal Shopper esperto di alimentari. Crea esattamente 3 diverse proposte di carrelli della spesa basandoti sulle esigenze del cliente e sui prodotti disponibili nel negozio.
+
+REQUISITI DI RISPOSTA:
+Devi rispondere ESCLUSIVAMENTE con un oggetto JSON valido. Non aggiungere alcuna spiegazione, introduzione o testo aggiuntivo fuori dal JSON.
+
+STRUTTURA JSON RICHIESTA (RISPETTA RIGOROSAMENTE QUESTE ETICHETTE CHIAVE):
+{
+  "carrelli": [
+    {
+      "nome": "Nome accattivante della proposta in italiano (es. Grigliata Rustica, Spesa Energetica)",
+      "descrizione": "Una breve e invitante spiegazione in italiano del perché hai consigliato questo carrello",
+      "prodotti": [
+        {
+          "productId": "ID esatto del prodotto preso dal catalogo",
+          "productName": "Nome esatto del prodotto preso dal catalogo",
+          "qty": 1, // Quantità consigliata (deve essere un numero intero, es. 1, 2, 3)
+          "price": 3.50, // Prezzo unitario del prodotto (deve essere un numero decimale preso dal catalogo o dalla variante, es. 4.99)
+          "variantId": "ID esatto della variante (variantId) se il prodotto ha varianti, altrimenti lascialo vuoto o omettilo"
+        }
+      ]
+    }
+  ]
+}`;
     const aiResponse = await callGroqAPI(systemPrompt, `Richiesta: ${contesto.richiestaUtente}. Prodotti: ${JSON.stringify(contesto.prodotti)}`, groqApiKey, 0.5, true);
     try {
         return res.status(200).json(JSON.parse(aiResponse));
