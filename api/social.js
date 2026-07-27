@@ -1,4 +1,4 @@
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
     // Permetti al tuo sito di chiamare questa funzione (CORS)
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -12,14 +12,10 @@ export default async function handler(req, res) {
 
     try {
         const { contesto } = req.body;
-        console.log("=== API SOCIAL AVVIATA ===");
-        console.log("Contesto ricevuto:", JSON.stringify(contesto));
-
         const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
         // FASE 0: VERIFICA PRESENZA CHIAVE API
         if (!GROQ_API_KEY) {
-            console.error("ERRORE CRITICO: La variabile d'ambiente GROQ_API_KEY non è configurata su Vercel!");
             return res.status(500).json({ errore: "Manca la chiave d'accesso GROQ_API_KEY nelle variabili d'ambiente di Vercel. Configurala nel tuo pannello Vercel!" });
         }
 
@@ -35,7 +31,6 @@ export default async function handler(req, res) {
 
         // --- TRASCRIZIONE AUTOMATICA DEI VOCALI AUDIO (Whisper Groq) ---
         if (contesto.isBookingImport && contesto.isAudioTranscription && contesto.audioBase64) {
-            console.log("Avvio trascrizione audio Whisper...");
             const audioBuffer = Buffer.from(contesto.audioBase64, 'base64');
             const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
             const formData = new FormData();
@@ -57,7 +52,6 @@ export default async function handler(req, res) {
             }
             // Sostituiamo il testo del messaggio con la trascrizione audio
             contesto.messageText = whisperData.text;
-            console.log("Trascrizione completata con successo:", contesto.messageText);
         }
 
         // --- SELEZIONE AUTOMATICA DELLE ISTRUZIONI (SOCIAL vs ESPERTO vs IMPORT PRENOTAZIONE) ---
@@ -65,8 +59,7 @@ export default async function handler(req, res) {
         let userPromptText = "";
 
         if (contesto.isBookingImport) {
-            console.log("Rilevata modalità: Importazione Prenotazione");
-            // STRADA 3: Importazione e parsing intelligente dell'appuntamento (Supporto alle date alternative)
+            // STRADA 3: Importazione e parsing intelligente dell'appuntamento (Spporto alle date alternative)
             systemPrompt = `Sei l'assistente di reception virtuale di un salone di bellezza/studio professionale. Il tuo compito è analizzare un messaggio o la trascrizione di un audio informale, abbreviato o in dialetto, inviato da un cliente per prenotare un appuntamento, ed estrarre i dati in formato JSON.
 
             REGOLE DI ESTRAZIONE E CALCOLO:
@@ -90,7 +83,7 @@ export default async function handler(req, res) {
             userPromptText = `Contesto temporale (Oggi è): ${contesto.currentDate}
             Listino Servizi reali del Negozio:
             ${JSON.stringify(contesto.servicesList)}
-            
+
             ${contesto.isAlternativeProposal ? `!!! ATTENZIONE: IL GIORNO RICHIESTO È COMPLETAMENTE OCCUPATO !!!
             Proponi al cliente queste date/ore alternative libere reali:
             ${JSON.stringify(contesto.alternativeSlots)}` : ''}
@@ -98,7 +91,6 @@ export default async function handler(req, res) {
             Messaggio del cliente da analizzare: "${contesto.messageText}"`;
 
         } else if (contesto.isAIAssistant || contesto.nota_extra?.includes("Agisci come un esperto")) {
-            console.log("Rilevata modalità: Esperto del Banco");
             // STRADA 1: Assistente Esperto del Banco
             systemPrompt = `Sei l'Assistente Esperto di un banco del Mercato Fresco di Civora.
             Il tuo obiettivo è consigliare il cliente, rispondere ai suoi dubbi e aiutarlo a usare al meglio il prodotto.
@@ -120,7 +112,6 @@ export default async function handler(req, res) {
             DOMANDA DEL CLIENTE: "${contesto.nota_extra}"`;
 
         } else {
-            console.log("Rilevata modalità: Senior Copywriter Post Social");
             // STRADA 2: Senior Copywriter per i post social
             systemPrompt = `Sei un Senior Social Media Copywriter da Agenzia di Marketing di Lusso. Il tuo compito è creare post ad ALTO IMPATTO magnetici.
             REGOLE: Inizia con un TITOLO IN GRASSETTO MAIUSCOLO tra emoji. Usa elenchi puntati eleganti. Usa i grassetti per prezzi e urgenza. Crea FOMO se scorte basse.
@@ -141,7 +132,6 @@ export default async function handler(req, res) {
         // FASE 2: ADATTAMENTO STRUTTURA MESSAGGIO MULTIMODALE / TESTUALE
         let messageContent;
         if (imagesToAnalyze && imagesToAnalyze.length > 0) {
-            console.log("Preparazione prompt multimodale con immagini:", imagesToAnalyze);
             messageContent = [
                 { type: "text", text: userPromptText }
             ];
@@ -151,12 +141,10 @@ export default async function handler(req, res) {
                 }
             });
         } else {
-            console.log("Preparazione prompt testuale puro (nessuna immagine da analizzare).");
             // Se non ci sono immagini, invia una stringa pulita per evitare conflitti di validazione con Groq
             messageContent = userPromptText;
         }
 
-        console.log("Invio chiamata API a Groq...");
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
             headers: {
@@ -164,7 +152,7 @@ export default async function handler(req, res) {
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "meta-llama/llama-4-scout-17b-16e-instruct",
+                model: "llama-3.3-70b-versatile",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: messageContent }
@@ -178,18 +166,15 @@ export default async function handler(req, res) {
 
         // Se la chiamata HTTP a Groq fallisce
         if (!response.ok) {
-            console.error("Errore ricevuto da Groq API:", JSON.stringify(data));
             return res.status(500).json({ errore: "Errore da Groq (Status " + response.status + "): " + (data.error?.message || JSON.stringify(data)) });
         }
 
         // Se Groq risponde positivamente ma non restituisce testo
         if (!data.choices || data.choices.length === 0) {
-            console.error("Risposta vuota o anomala da Groq:", JSON.stringify(data));
             return res.status(500).json({ errore: "Groq non ha restituito risposte utilizzabili: " + JSON.stringify(data) });
         }
 
         const postGenerato = data.choices[0].message.content.trim();
-        console.log("Risposta generata correttamente da Groq.");
 
         // Se è una richiesta di importazione appuntamento, ripuliamo l'output e restituiamo un JSON strutturato
         if (contesto.isBookingImport) {
@@ -206,7 +191,6 @@ export default async function handler(req, res) {
         res.status(200).json({ post: postGenerato });
 
     } catch (error) {
-        console.error("ERRORE CRITICO INTERNO:", error);
         res.status(500).json({ errore: "La magia si è interrotta: " + error.message });
     }
-}
+};
