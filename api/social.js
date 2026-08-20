@@ -29,48 +29,48 @@ module.exports = async function handler(req, res) {
         const hasDiscount = contesto.originalPrice && contesto.originalPrice > contesto.prezzo;
         const discountPercent = hasDiscount ? Math.round(((contesto.originalPrice - contesto.prezzo) / contesto.originalPrice) * 100) : 0;
 
-        // --- TRASCRIZIONE AUTOMATICA DEI VOCALI AUDIO CON FALLBACK A CASCATA (Whisper Groq) ---
-        if (contesto.isBookingImport && contesto.isAudioTranscription && contesto.audioBase64) {
-            const audioBuffer = Buffer.from(contesto.audioBase64, 'base64');
-            const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
-
-            const WHISPER_FALLBACK_MODELS = ['whisper-large-v3-turbo', 'whisper-large-v3'];
-            let audioTranscriptionResult = null;
-            let lastWhisperError = null;
-
-            for (const wModel of WHISPER_FALLBACK_MODELS) {
-                try {
-                    const formData = new FormData();
-                    formData.append('file', blob, contesto.audioFilename || 'audio.mp3');
-                    formData.append('model', wModel);
-                    formData.append('language', 'it');
-
-                    const whisperResponse = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${GROQ_API_KEY}`
-                        },
-                        body: formData
-                    });
-
-                    const whisperData = await whisperResponse.json();
-                    if (whisperResponse.ok && whisperData.text) {
-                        audioTranscriptionResult = whisperData.text;
-                        break;
-                    } else {
-                        lastWhisperError = new Error(whisperData.error?.message || "Errore Whisper");
+        // --- TRASCRIZIONE AUTOMATICA MULTILINGUA DEI VOCALI (Whisper Groq con Auto-Detect) ---
+                if (contesto.isBookingImport && contesto.isAudioTranscription && contesto.audioBase64) {
+                    const audioBuffer = Buffer.from(contesto.audioBase64, 'base64');
+                    const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
+        
+                    const WHISPER_FALLBACK_MODELS = ['whisper-large-v3-turbo', 'whisper-large-v3'];
+                    let audioTranscriptionResult = null;
+                    let lastWhisperError = null;
+        
+                    for (const wModel of WHISPER_FALLBACK_MODELS) {
+                        try {
+                            const formData = new FormData();
+                            formData.append('file', blob, contesto.audioFilename || 'audio.mp3');
+                            formData.append('model', wModel);
+                            // Rilevamento automatico della lingua abilitato (Whisper riconosce italiano, inglese, spagnolo, arabo, ecc. in automatico)
+        
+                            const whisperResponse = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+                                method: 'POST',
+                                headers: {
+                                    'Authorization': `Bearer ${GROQ_API_KEY}`
+                                },
+                                body: formData
+                            });
+        
+                            const whisperData = await whisperResponse.json();
+                            if (whisperResponse.ok && whisperData.text) {
+                                audioTranscriptionResult = whisperData.text;
+                                break;
+                            } else {
+                                lastWhisperError = new Error(whisperData.error?.message || "Errore Whisper");
+                            }
+                        } catch (wErr) {
+                            lastWhisperError = wErr;
+                        }
                     }
-                } catch (wErr) {
-                    lastWhisperError = wErr;
+        
+                    if (!audioTranscriptionResult) {
+                        throw new Error(lastWhisperError?.message || "Errore durante la trascrizione dell'audio.");
+                    }
+        
+                    contesto.messageText = audioTranscriptionResult;
                 }
-            }
-
-            if (!audioTranscriptionResult) {
-                throw new Error(lastWhisperError?.message || "Errore durante la trascrizione dell'audio.");
-            }
-
-            contesto.messageText = audioTranscriptionResult;
-        }
 
         // --- SELEZIONE AUTOMATICA DELLE ISTRUZIONI (SOCIAL vs ESPERTO vs IMPORT PRENOTAZIONE) ---
         let systemPrompt = "";
