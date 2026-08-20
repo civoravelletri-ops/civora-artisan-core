@@ -29,29 +29,47 @@ module.exports = async function handler(req, res) {
         const hasDiscount = contesto.originalPrice && contesto.originalPrice > contesto.prezzo;
         const discountPercent = hasDiscount ? Math.round(((contesto.originalPrice - contesto.prezzo) / contesto.originalPrice) * 100) : 0;
 
-        // --- TRASCRIZIONE AUTOMATICA DEI VOCALI AUDIO (Whisper Groq) ---
+        // --- TRASCRIZIONE AUTOMATICA DEI VOCALI AUDIO CON FALLBACK A CASCATA (Whisper Groq) ---
         if (contesto.isBookingImport && contesto.isAudioTranscription && contesto.audioBase64) {
             const audioBuffer = Buffer.from(contesto.audioBase64, 'base64');
             const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
-            const formData = new FormData();
-            formData.append('file', blob, contesto.audioFilename || 'audio.mp3');
-            formData.append('model', 'whisper-large-v3');
-            formData.append('language', 'it');
 
-            const whisperResponse = await fetch('https://api.groq.com/v1/audio/transcriptions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${GROQ_API_KEY}`
-                },
-                body: formData
-            });
+            const WHISPER_FALLBACK_MODELS = ['whisper-large-v3-turbo', 'whisper-large-v3'];
+            let audioTranscriptionResult = null;
+            let lastWhisperError = null;
 
-            const whisperData = await whisperResponse.json();
-            if (!whisperResponse.ok) {
-                throw new Error(whisperData.error?.message || "Errore durante la trascrizione dell'audio.");
+            for (const wModel of WHISPER_FALLBACK_MODELS) {
+                try {
+                    const formData = new FormData();
+                    formData.append('file', blob, contesto.audioFilename || 'audio.mp3');
+                    formData.append('model', wModel);
+                    formData.append('language', 'it');
+
+                    const whisperResponse = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${GROQ_API_KEY}`
+                        },
+                        body: formData
+                    });
+
+                    const whisperData = await whisperResponse.json();
+                    if (whisperResponse.ok && whisperData.text) {
+                        audioTranscriptionResult = whisperData.text;
+                        break;
+                    } else {
+                        lastWhisperError = new Error(whisperData.error?.message || "Errore Whisper");
+                    }
+                } catch (wErr) {
+                    lastWhisperError = wErr;
+                }
             }
-            // Sostituiamo il testo del messaggio con la trascrizione audio
-            contesto.messageText = whisperData.text;
+
+            if (!audioTranscriptionResult) {
+                throw new Error(lastWhisperError?.message || "Errore durante la trascrizione dell'audio.");
+            }
+
+            contesto.messageText = audioTranscriptionResult;
         }
 
         // --- SELEZIONE AUTOMATICA DELLE ISTRUZIONI (SOCIAL vs ESPERTO vs IMPORT PRENOTAZIONE) ---
@@ -59,7 +77,7 @@ module.exports = async function handler(req, res) {
         let userPromptText = "";
 
         if (contesto.isBookingImport) {
-            // STRADA 3: Importazione e parsing intelligente dell'appuntamento (Spporto alle date alternative)
+            // STRADA 3: Importazione e parsing intelligente dell'appuntamento (Supporto alle date alternative)
             systemPrompt = `Sei l'assistente di reception virtuale di un salone di bellezza/studio professionale. Il tuo compito è analizzare un messaggio o la trascrizione di un audio informale, abbreviato o in dialetto, inviato da un cliente per prenotare un appuntamento, ed estrarre i dati in formato JSON.
 
             REGOLE DI ESTRAZIONE E CALCOLO:
@@ -79,7 +97,6 @@ module.exports = async function handler(req, res) {
               "suggestedReply": "Messaggio di risposta"
             }`;
 
-            // Prepariamo la descrizione dell'utente differenziando se ci sono alternative
             userPromptText = `Contesto temporale (Oggi è): ${contesto.currentDate}
             Listino Servizi reali del Negozio:
             ${JSON.stringify(contesto.servicesList)}
@@ -141,40 +158,55 @@ module.exports = async function handler(req, res) {
                 }
             });
         } else {
-            // Se non ci sono immagini, invia una stringa pulita per evitare conflitti di validazione con Groq
             messageContent = userPromptText;
         }
 
-        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${GROQ_API_KEY}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "llama-3.3-70b-versatile",
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    { role: "user", content: messageContent }
-                ],
-                temperature: 0.2, // Bassa per risposte stabili
-                max_tokens: 1200
-            })
-        });
+        // FASE 3: CATENA DI SICUREZZA A CASCATA DEI MODELLI GROQ
+        const GROQ_TEXT_MODELS = [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "openai/gpt-oss-20b",
+            "qwen/qwen3.6-27b"
+        ];
 
-        const data = await response.json();
+        let postGenerato = null;
+        let lastChatError = null;
 
-        // Se la chiamata HTTP a Groq fallisce
-        if (!response.ok) {
-            return res.status(500).json({ errore: "Errore da Groq (Status " + response.status + "): " + (data.error?.message || JSON.stringify(data)) });
+        for (const modelCandidate of GROQ_TEXT_MODELS) {
+            try {
+                const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${GROQ_API_KEY}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        model: modelCandidate,
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            { role: "user", content: messageContent }
+                        ],
+                        temperature: 0.2,
+                        max_tokens: 1200
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
+                    postGenerato = data.choices[0].message.content.trim();
+                    break; // Modello funzionante trovato con successo!
+                } else {
+                    lastChatError = new Error(data.error?.message || `Errore HTTP ${response.status}`);
+                }
+            } catch (callErr) {
+                lastChatError = callErr;
+            }
         }
 
-        // Se Groq risponde positivamente ma non restituisce testo
-        if (!data.choices || data.choices.length === 0) {
-            return res.status(500).json({ errore: "Groq non ha restituito risposte utilizzabili: " + JSON.stringify(data) });
+        if (!postGenerato) {
+            return res.status(500).json({ errore: "Tutti i modelli Groq sono momentaneamente occupati o non disponibili: " + (lastChatError?.message || "") });
         }
-
-        const postGenerato = data.choices[0].message.content.trim();
 
         // Se è una richiesta di importazione appuntamento, ripuliamo l'output e restituiamo un JSON strutturato
         if (contesto.isBookingImport) {
