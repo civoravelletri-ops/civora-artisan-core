@@ -70,11 +70,236 @@ module.exports = async function handler(req, res) {
             contesto.messageText = audioTranscriptionResult;
         }
 
-        // --- SELEZIONE AUTOMATICA DELLE ISTRUZIONI (SOCIAL vs ESPERTO vs IMPORT PRENOTAZIONE) ---
-        let systemPrompt = "";
-        let userPromptText = "";
+        // --- SELEZIONE AUTOMATICA DELLE ISTRUZIONI (SOCIAL vs ESPERTO vs IMPORT PRENOTAZIONE vs REGIA VIDEO) ---
+                let systemPrompt = "";
+                let userPromptText = "";
 
-        if (contesto.isBookingImport) {
+                if (contesto.isVideoScript) {
+                    // STRADA 4: Regista e Sceneggiatore AI per TikTok / Reels / Shorts
+                    systemPrompt = `Sei un Regista e Sceneggiatore professionista di TikTok, Instagram Reels e YouTube Shorts per saloni di bellezza, barbieri ed estetisti.
+                    Il tuo compito è trasformare l'idea dell'utente in un vero copione cinematografico virale diviso in scene (da 3 a 5 scene).
+
+                    REGOLE FONDAMENTALI:
+                    1. Per ogni scena, scrivi il TESTO VERO PAROLA PER PAROLA che il titolare deve dire a voce guardando la telecamera (non dare istruzioni generiche, scrivi la battuta esatta!).
+                    2. Il Gancio iniziale (0-3s) deve essere esplosivo e catturare subito chi sta scorrendo lo schermo.
+                    3. Rispetta la durata e l'idea richiesta (se chiede una storia di un minuto, crea scene dettagliate e piene di fascino; se chiede uno sketch comico, scrivi battute divertenti).
+                    4. Genera una didascalia con emoji e hashtag virali pronta per essere pubblicata.
+
+                    Rispondi ESCLUSIVAMENTE con un JSON valido (senza markdown o altri testi aggiuntivi):
+                    {
+                      "title": "Titolo accattivante del video",
+                      "totalDuration": "60 sec",
+                      "caption": "Didascalia pronta con emoji e #hashtag per TikTok",
+                      "scenes": [
+                        {
+                          "badge": "GANCIO (0-3s)",
+                          "cue": "Frase esatta parola per parola da dire a voce guardando la camera...",
+                          "duration": "3s"
+                        },
+                        {
+                          "badge": "SCENA 2 (3-20s)",
+                          "cue": "Seconda parte del discorso o racconto parola per parola...",
+                          "duration": "17s"
+                        }
+                      ]
+                    }`;
+
+                    userPromptText = `Attività: "${contesto.store_name || 'Salone'}"
+                    Settore: "${contesto.myTypeStore || 'Barbiere'}"
+                    Format scelto: "${contesto.format || 'Commedia'}"
+                    Idea specifica dell'utente: "${contesto.idea || 'Video accattivante per attirare clienti'}"`;
+
+                } else if (contesto.isBookingImport) {
+                    // STRADA 3: Importazione e parsing intelligente dell'appuntamento (Supporto alle date alternative)
+                    systemPrompt = `Sei l'assistente di reception virtuale di un salone di bellezza/studio professionale. Il tuo compito è analizzare un messaggio o la trascrizione di un audio informale, abbreviato o in dialetto, inviato da un cliente per prenotare un appuntamento, ed estrarre i dati in formato JSON.
+
+                    REGOLE DI ESTRAZIONE E CALCOLO:
+                    1. Nome: Estrai solo il nome del cliente (es: "Marco", "Giulia"). Se non lo trovi, lascia "".
+                    2. Data: Calcola la data esatta in formato AAAA-MM-GG basandoti sulla data di oggi che ti viene fornita. Es: se oggi è Domenica 21 Giugno 2026, "domani" sarà "2026-06-22", "mercoledì" o "mercoledì prossimo" sarà il primo mercoledì utile "2026-06-24", ecc.
+                    3. Ora: Estrai l'ora richiesta in formato HH:MM (es: "17:30"). Se l'ora è generica (es: "pomeriggio"), proponi un orario coerente (es: "17:00").
+                    4. Servizio: Identifica quale dei servizi reali del negozio (che trovi nella lista fornita) corrisponde di più alla richiesta del cliente (es: se chiede "baffo" o "radersi" e in listino c'è "Regolazione Barba", seleziona l'ID di quel servizio). Se non trovi riscontri, lascia "".
+                    5. Risposta WhatsApp (CONFERMA): Se NON ti viene fornito l'elenco "alternativeSlots", genera una risposta cordiale per confermare la prenotazione richiesta (es. "Ciao Marco! Ti confermo l'appuntamento...").
+                    6. Risposta WhatsApp (RIFIUTO E SPOSTAMENTO): Se ti viene fornito l'elenco "alternativeSlots", significa che l'orario richiesto era occupato. Genera un messaggio super diplomatico e amichevole dove spieghi che purtroppo quell'orario/giorno è al completo, ma offri esplicitamente le date/ore alternative dell'elenco. Mantieni lo stesso identico tono del cliente (es: se scrive in modo scherzoso/amichevole, rispondigli come un amico con "un abbraccio"; se scrive in modo formale/distaccato, mantieni una risposta professionale ed educata).
+
+                    Rispondi ESCLUSIVAMENTE con un oggetto JSON pulito e valido, senza formattazione markdown (niente racchiuso in tre apici o scritte come \`\`\`json), strutturato esattamente così:
+                    {
+                      "customerName": "Nome",
+                      "date": "YYYY-MM-DD",
+                      "time": "HH:MM",
+                      "serviceId": "ID_DEL_SERVIZIO",
+                      "suggestedReply": "Messaggio di risposta"
+                    }`;
+
+                    userPromptText = `Contesto temporale (Oggi è): ${contesto.currentDate}
+                    Listino Servizi reali del Negozio:
+                    ${JSON.stringify(contesto.servicesList)}
+
+                    ${contesto.isAlternativeProposal ? `!!! ATTENZIONE: IL GIORNO RICHIESTO È COMPLETAMENTE OCCUPATO !!!
+                    Proponi al cliente queste date/ore alternative libere reali:
+                    ${JSON.stringify(contesto.alternativeSlots)}` : ''}
+
+                    Messaggio del cliente da analizzare: "${contesto.messageText}"`;
+
+                } else if (contesto.isAIAssistant || contesto.nota_extra?.includes("Agisci come un esperto")) {
+                    // STRADA 1: Assistente Esperto del Banco
+                    systemPrompt = `Sei l'Assistente Esperto di un banco del Mercato Fresco di Civora.
+                    Il tuo obiettivo è consigliare il cliente, rispondere ai suoi dubbi e aiutarlo a usare al meglio il prodotto.
+
+                    REGOLE DI COMPORTAMENTO:
+                    1. TONO: Amichevole, caloroso e professionale. Usa il "tu".
+                    2. COMPETENZA: Dai consigli pratici su come cucinare il prodotto, come conservarlo e con cosa abbinarlo.
+                    3. STORYTELLING: Esalta la provenienza e la freschezza citando i dati forniti.
+                    4. VENDITA GENTILE: Incoraggia l'acquisto sottolineando la qualità, senza essere insolente.
+                    5. FORMATTAZIONE: Usa i **grassetti** e le emoji per rendere la lettura piacevole.`;
+
+                    userPromptText = `Un cliente ti chiede informazioni su questo prodotto:
+                    - Nome: "${contesto.nome}"
+                    - Categoria: "${contesto.categoria || 'Alimentari'}"
+                    - Provenienza: "${contesto.provenienza || 'Italia'}"
+                    - Descrizione del Venditore: "${contesto.descrizione || ''}"
+                    - Dettagli Tecnici: "${contesto.specifiche || ''}"
+
+                    DOMANDA DEL CLIENTE: "${contesto.nota_extra}"`;
+
+                } else {
+                    // STRADA 2: Senior Copywriter per i post social
+                    systemPrompt = `Sei un Senior Social Media Copywriter da Agenzia di Marketing di Lusso. Il tuo compito è creare post ad ALTO IMPATTO magnetici per promuovere servizi e prodotti.
+                    REGOLE: Inizia con un TITOLO IN GRASSETTO MAIUSCOLO tra emoji. Usa elenchi puntati eleganti. Usa i grassetti per prezzi e urgenza. Crea FOMO se disponibilità limitata.
+                    Rispondi SOLO con il testo finale del post pronto da copiare, senza premesse, commenti o spiegazioni.`;
+
+                    userPromptText = `Dati per il post social:
+                    - Negozio: "${contesto.store_name || 'Salone'}"
+                    - Servizio/Prodotto: "${contesto.nome || 'Servizio Esclusivo'}"
+                    - Prezzo: ${contesto.prezzo || '0'}€ ${hasDiscount ? `(Sconto del ${discountPercent}%)` : ''}
+                    - Durata/Quantità: ${contesto.durata ? `${contesto.durata} minuti` : (contesto.quantita || 'Disponibile')}
+                    - Descrizione: "${contesto.descrizione || 'Trattamento professionale di alta qualità'}"
+                    - Note Extra richieste: "${contesto.note_extra || 'Creatività libera'}"
+                    - Link di Prenotazione Diretta: ${contesto.link_shop || 'https://www.civora.it'}
+
+                    ${isLowStock ? '!!! CREA URGENZA: POSTI / SCORTE IN ESAURIMENTO !!!' : ''}`;
+                }
+
+                // Invio sempre come stringa di testo pulita per massima stabilità e velocità
+                const messageContent = userPromptText;
+
+                // FASE 3: AUTO-DISCOVERY DEI MODELLI GROQ ATTIVI IN TEMPO REALE
+                let dynamicModelsList = [];
+                try {
+                    const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
+                        headers: { "Authorization": `Bearer ${GROQ_API_KEY}` }
+                    });
+                    if (modelsRes.ok) {
+                        const modelsData = await modelsRes.json();
+                        if (modelsData.data && Array.isArray(modelsData.data)) {
+                            const chatModels = modelsData.data
+                                .map(m => m.id)
+                                .filter(id => !id.includes("whisper") && !id.includes("guard") && !id.includes("embed"));
+
+                            chatModels.sort((a, b) => {
+                                const score = (m) => {
+                                    if (m.includes("llama-3.3")) return 100;
+                                    if (m.includes("llama-3.1-70b")) return 90;
+                                    if (m.includes("llama-3.1-8b")) return 80;
+                                    if (m.includes("gpt-oss")) return 70;
+                                    if (m.includes("qwen")) return 60;
+                                    if (m.includes("mixtral")) return 50;
+                                    if (m.includes("gemma")) return 40;
+                                    return 10;
+                                };
+                                return score(b) - score(a);
+                            });
+                            dynamicModelsList = chatModels;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("[Groq Discovery] Impossibile recuperare lista dinamica, uso lista fallback:", e.message);
+                }
+
+                const GROQ_TEXT_MODELS = dynamicModelsList.length > 0 ? dynamicModelsList : [
+                    "llama-3.3-70b-versatile",
+                    "llama-3.1-8b-instant",
+                    "openai/gpt-oss-20b",
+                    "qwen/qwen3.6-27b",
+                    "gemma2-9b-it"
+                ];
+
+                let postGenerato = null;
+                let lastChatError = null;
+
+                for (const modelCandidate of GROQ_TEXT_MODELS) {
+                    try {
+                        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                            method: "POST",
+                            headers: {
+                                "Authorization": `Bearer ${GROQ_API_KEY}`,
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                                model: modelCandidate,
+                                messages: [
+                                    { role: "system", content: systemPrompt },
+                                    { role: "user", content: messageContent }
+                                ],
+                                temperature: 0.2,
+                                max_tokens: 1200
+                            })
+                        });
+
+                        const data = await response.json();
+
+                        if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
+                            postGenerato = data.choices[0].message.content.trim();
+                            console.log(`[Groq AI] Successo con modello: ${modelCandidate}`);
+                            break;
+                        } else {
+                            const errDetail = data.error?.message || `HTTP ${response.status}`;
+                            console.warn(`[Groq AI] Modello ${modelCandidate} ha risposto con errore (${errDetail}), provo successivo...`);
+                            lastChatError = new Error(errDetail);
+                        }
+                    } catch (callErr) {
+                        lastChatError = callErr;
+                    }
+                }
+
+                if (!postGenerato) {
+                    return res.status(500).json({ errore: "Errore durante la generazione con Groq: " + (lastChatError?.message || "Servizio non disponibile") });
+                }
+
+                // Filtro di pulizia: elimina qualsiasi tag <think>...</think> o residuo prima dell'invio
+                let cleanOutput = postGenerato.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+                cleanOutput = cleanOutput.replace(/<\/?think>/gi, "").trim();
+
+                // Se è una richiesta di COPIONE VIDEO REGIA TIKTOK
+                if (contesto.isVideoScript) {
+                    const jsonCleaned = cleanOutput.replace(/```json/g, "").replace(/```/g, "").trim();
+                    try {
+                        const parsedJSON = JSON.parse(jsonCleaned);
+                        return res.status(200).json({ videoScriptData: parsedJSON });
+                    } catch (jsonErr) {
+                        console.error("Errore nel parsing del copione video JSON:", jsonErr);
+                        return res.status(200).json({ rawText: cleanOutput, error: "L'IA non ha restituito un formato JSON valido per il copione." });
+                    }
+                }
+
+                // Se è una richiesta di importazione appuntamento, ripuliamo l'output e restituiamo un JSON strutturato
+                if (contesto.isBookingImport) {
+                    const jsonCleaned = cleanOutput.replace(/```json/g, "").replace(/```/g, "").trim();
+                    try {
+                        const parsedJSON = JSON.parse(jsonCleaned);
+                        return res.status(200).json({ bookingData: parsedJSON });
+                    } catch (jsonErr) {
+                        console.error("Errore nel parsing del JSON restituito da Groq:", jsonErr);
+                        return res.status(200).json({ rawText: cleanOutput, error: "L'IA non ha restituito un formato JSON valido." });
+                    }
+                }
+
+                res.status(200).json({ post: cleanOutput });
+
+            } catch (error) {
+                console.error("[api/social.js] Errore critico:", error);
+                res.status(500).json({ errore: "Errore interno del server: " + error.message });
+            }
+        };
             // STRADA 3: Importazione e parsing intelligente dell'appuntamento (Supporto alle date alternative)
             systemPrompt = `Sei l'assistente di reception virtuale di un salone di bellezza/studio professionale. Il tuo compito è analizzare un messaggio o la trascrizione di un audio informale, abbreviato o in dialetto, inviato da un cliente per prenotare un appuntamento, ed estrarre i dati in formato JSON.
 
@@ -160,7 +385,7 @@ module.exports = async function handler(req, res) {
                     const chatModels = modelsData.data
                         .map(m => m.id)
                         .filter(id => !id.includes("whisper") && !id.includes("guard") && !id.includes("embed"));
-                    
+
                     // Ordina mettendo in cima i modelli più intelligenti e veloci
                     chatModels.sort((a, b) => {
                         const score = (m) => {
