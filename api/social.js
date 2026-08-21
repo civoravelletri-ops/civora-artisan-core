@@ -147,56 +147,93 @@ module.exports = async function handler(req, res) {
         // Invio sempre come stringa di testo pulita per massima stabilità e velocità
         const messageContent = userPromptText;
 
-        // FASE 3: MODELLI GROQ ATTIVI UFFICIALI AD ALTA VELOCITÀ
-                const GROQ_TEXT_MODELS = [
-                    "llama-3.1-8b-instant",
-                    "openai/gpt-oss-20b",
-                    "qwen/qwen3.6-27b",
-                    "gemma2-9b-it"
-                ];
-        
-                let postGenerato = null;
-                let lastChatError = null;
-        
-                for (const modelCandidate of GROQ_TEXT_MODELS) {
-                    try {
-                        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                            method: "POST",
-                            headers: {
-                                "Authorization": `Bearer ${GROQ_API_KEY}`,
-                                "Content-Type": "application/json"
-                            },
-                            body: JSON.stringify({
-                                model: modelCandidate,
-                                messages: [
-                                    { role: "system", content: systemPrompt },
-                                    { role: "user", content: messageContent }
-                                ],
-                                temperature: 0.3,
-                                max_tokens: 1200
-                            })
-                        });
-        
-                        const data = await response.json();
-        
-                        if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
-                            postGenerato = data.choices[0].message.content.trim();
-                            break;
-                        } else {
-                            const errDetail = data.error?.message || `HTTP ${response.status}`;
-                            console.warn(`[Groq] Modello ${modelCandidate} non disponibile (${errDetail}), provo successivo...`);
-                            lastChatError = new Error(errDetail);
-                        }
-                    } catch (callErr) {
-                        lastChatError = callErr;
-                    }
+        // FASE 3: AUTO-DISCOVERY DEI MODELLI GROQ ATTIVI IN TEMPO REALE
+        let dynamicModelsList = [];
+        try {
+            const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
+                headers: { "Authorization": `Bearer ${GROQ_API_KEY}` }
+            });
+            if (modelsRes.ok) {
+                const modelsData = await modelsRes.json();
+                if (modelsData.data && Array.isArray(modelsData.data)) {
+                    // Filtra solo i modelli di testo per chat (esclude whisper, guard, embeddings)
+                    const chatModels = modelsData.data
+                        .map(m => m.id)
+                        .filter(id => !id.includes("whisper") && !id.includes("guard") && !id.includes("embed"));
+                    
+                    // Ordina mettendo in cima i modelli più intelligenti e veloci
+                    chatModels.sort((a, b) => {
+                        const score = (m) => {
+                            if (m.includes("llama-3.3")) return 100;
+                            if (m.includes("llama-3.1-70b")) return 90;
+                            if (m.includes("llama-3.1-8b")) return 80;
+                            if (m.includes("gpt-oss")) return 70;
+                            if (m.includes("qwen")) return 60;
+                            if (m.includes("mixtral")) return 50;
+                            if (m.includes("gemma")) return 40;
+                            return 10;
+                        };
+                        return score(b) - score(a);
+                    });
+                    dynamicModelsList = chatModels;
                 }
-
-        if (!postGenerato) {
-            return res.status(500).json({ errore: "Errore durante la generazione con Groq: " + (lastChatError?.message || "Servizio momentaneamente non disponibile.") });
+            }
+        } catch (e) {
+            console.warn("[Groq Discovery] Impossibile recuperare lista dinamica, uso lista fallback:", e.message);
         }
 
-        // Filtro di pulizia: elimina qualsiasi tag <think>...</think> o residui prima dell'invio
+        // Se la chiamata ai modelli non risponde, usa una lista sicura di fallback
+        const GROQ_TEXT_MODELS = dynamicModelsList.length > 0 ? dynamicModelsList : [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "openai/gpt-oss-20b",
+            "qwen/qwen3.6-27b",
+            "gemma2-9b-it"
+        ];
+
+        let postGenerato = null;
+        let lastChatError = null;
+
+        for (const modelCandidate of GROQ_TEXT_MODELS) {
+            try {
+                const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${GROQ_API_KEY}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        model: modelCandidate,
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            { role: "user", content: messageContent }
+                        ],
+                        temperature: 0.2,
+                        max_tokens: 1200
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
+                    postGenerato = data.choices[0].message.content.trim();
+                    console.log(`[Groq AI] Successo con modello: ${modelCandidate}`);
+                    break;
+                } else {
+                    const errDetail = data.error?.message || `HTTP ${response.status}`;
+                    console.warn(`[Groq AI] Modello ${modelCandidate} ha risposto con errore (${errDetail}), provo successivo...`);
+                    lastChatError = new Error(errDetail);
+                }
+            } catch (callErr) {
+                lastChatError = callErr;
+            }
+        }
+
+        if (!postGenerato) {
+            return res.status(500).json({ errore: "Errore durante la generazione con Groq: " + (lastChatError?.message || "Servizio non disponibile") });
+        }
+
+        // Filtro di pulizia: elimina qualsiasi tag <think>...</think> o residuo prima dell'invio
         let cleanOutput = postGenerato.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
         cleanOutput = cleanOutput.replace(/<\/?think>/gi, "").trim();
 
