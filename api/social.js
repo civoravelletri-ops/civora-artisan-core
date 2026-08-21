@@ -147,46 +147,50 @@ module.exports = async function handler(req, res) {
         // Invio sempre come stringa di testo pulita per massima stabilità e velocità
         const messageContent = userPromptText;
 
-        // FASE 3: CATENA DI SICUREZZA DEI MODELLI GROQ
-        const GROQ_TEXT_MODELS = [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant"
-        ];
-
-        let postGenerato = null;
-        let lastChatError = null;
-
-        for (const modelCandidate of GROQ_TEXT_MODELS) {
-            try {
-                const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${GROQ_API_KEY}`,
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        model: modelCandidate,
-                        messages: [
-                            { role: "system", content: systemPrompt },
-                            { role: "user", content: messageContent }
-                        ],
-                        temperature: 0.2,
-                        max_tokens: 1200
-                    })
-                });
-
-                const data = await response.json();
-
-                if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
-                    postGenerato = data.choices[0].message.content.trim();
-                    break;
-                } else {
-                    lastChatError = new Error(data.error?.message || `Errore HTTP ${response.status}`);
+        // FASE 3: MODELLI GROQ ATTIVI UFFICIALI AD ALTA VELOCITÀ
+                const GROQ_TEXT_MODELS = [
+                    "llama-3.1-8b-instant",
+                    "openai/gpt-oss-20b",
+                    "qwen/qwen3.6-27b",
+                    "gemma2-9b-it"
+                ];
+        
+                let postGenerato = null;
+                let lastChatError = null;
+        
+                for (const modelCandidate of GROQ_TEXT_MODELS) {
+                    try {
+                        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                            method: "POST",
+                            headers: {
+                                "Authorization": `Bearer ${GROQ_API_KEY}`,
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                                model: modelCandidate,
+                                messages: [
+                                    { role: "system", content: systemPrompt },
+                                    { role: "user", content: messageContent }
+                                ],
+                                temperature: 0.3,
+                                max_tokens: 1200
+                            })
+                        });
+        
+                        const data = await response.json();
+        
+                        if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
+                            postGenerato = data.choices[0].message.content.trim();
+                            break;
+                        } else {
+                            const errDetail = data.error?.message || `HTTP ${response.status}`;
+                            console.warn(`[Groq] Modello ${modelCandidate} non disponibile (${errDetail}), provo successivo...`);
+                            lastChatError = new Error(errDetail);
+                        }
+                    } catch (callErr) {
+                        lastChatError = callErr;
+                    }
                 }
-            } catch (callErr) {
-                lastChatError = callErr;
-            }
-        }
 
         if (!postGenerato) {
             return res.status(500).json({ errore: "Errore durante la generazione con Groq: " + (lastChatError?.message || "Servizio momentaneamente non disponibile.") });
