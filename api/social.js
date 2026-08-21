@@ -33,18 +33,18 @@ module.exports = async function handler(req, res) {
                 if (contesto.isBookingImport && contesto.isAudioTranscription && contesto.audioBase64) {
                     const audioBuffer = Buffer.from(contesto.audioBase64, 'base64');
                     const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
-        
+
                     const WHISPER_FALLBACK_MODELS = ['whisper-large-v3-turbo', 'whisper-large-v3'];
                     let audioTranscriptionResult = null;
                     let lastWhisperError = null;
-        
+
                     for (const wModel of WHISPER_FALLBACK_MODELS) {
                         try {
                             const formData = new FormData();
                             formData.append('file', blob, contesto.audioFilename || 'audio.mp3');
                             formData.append('model', wModel);
                             // Rilevamento automatico della lingua abilitato (Whisper riconosce italiano, inglese, spagnolo, arabo, ecc. in automatico)
-        
+
                             const whisperResponse = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
                                 method: 'POST',
                                 headers: {
@@ -52,7 +52,7 @@ module.exports = async function handler(req, res) {
                                 },
                                 body: formData
                             });
-        
+
                             const whisperData = await whisperResponse.json();
                             if (whisperResponse.ok && whisperData.text) {
                                 audioTranscriptionResult = whisperData.text;
@@ -64,11 +64,11 @@ module.exports = async function handler(req, res) {
                             lastWhisperError = wErr;
                         }
                     }
-        
+
                     if (!audioTranscriptionResult) {
                         throw new Error(lastWhisperError?.message || "Errore durante la trascrizione dell'audio.");
                     }
-        
+
                     contesto.messageText = audioTranscriptionResult;
                 }
 
@@ -205,22 +205,25 @@ module.exports = async function handler(req, res) {
         }
 
         if (!postGenerato) {
-            return res.status(500).json({ errore: "Tutti i modelli Groq sono momentaneamente occupati o non disponibili: " + (lastChatError?.message || "") });
-        }
-
-        // Se è una richiesta di importazione appuntamento, ripuliamo l'output e restituiamo un JSON strutturato
-        if (contesto.isBookingImport) {
-            const jsonCleaned = postGenerato.replace(/```json/g, "").replace(/```/g, "").trim();
-            try {
-                const parsedJSON = JSON.parse(jsonCleaned);
-                return res.status(200).json({ bookingData: parsedJSON });
-            } catch (jsonErr) {
-                console.error("Errore nel parsing del JSON restituito da Groq:", jsonErr);
-                return res.status(200).json({ rawText: postGenerato, error: "L'IA non ha restituito un formato JSON valido." });
-            }
-        }
-
-        res.status(200).json({ post: postGenerato });
+                    return res.status(500).json({ errore: "Tutti i modelli Groq sono momentaneamente occupati o non disponibili: " + (lastChatError?.message || "") });
+                }
+        
+                // Pulizia globale dei tag di ragionamento <think>...</think> per tutti i post e testi
+                const cleanOutput = postGenerato.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+        
+                // Se è una richiesta di importazione appuntamento, ripuliamo l'output e restituiamo un JSON strutturato
+                if (contesto.isBookingImport) {
+                    const jsonCleaned = cleanOutput.replace(/```json/g, "").replace(/```/g, "").trim();
+                    try {
+                        const parsedJSON = JSON.parse(jsonCleaned);
+                        return res.status(200).json({ bookingData: parsedJSON });
+                    } catch (jsonErr) {
+                        console.error("Errore nel parsing del JSON restituito da Groq:", jsonErr);
+                        return res.status(200).json({ rawText: cleanOutput, error: "L'IA non ha restituito un formato JSON valido." });
+                    }
+                }
+        
+                res.status(200).json({ post: cleanOutput });
 
     } catch (error) {
         res.status(500).json({ errore: "La magia si è interrotta: " + error.message });
