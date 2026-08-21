@@ -161,69 +161,72 @@ module.exports = async function handler(req, res) {
             messageContent = userPromptText;
         }
 
-        // FASE 3: CATENA DI SICUREZZA A CASCATA DEI MODELLI GROQ
-        const GROQ_TEXT_MODELS = [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "openai/gpt-oss-20b",
-            "qwen/qwen3.6-27b"
-        ];
-
-        let postGenerato = null;
-        let lastChatError = null;
-
-        for (const modelCandidate of GROQ_TEXT_MODELS) {
-            try {
-                const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${GROQ_API_KEY}`,
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        model: modelCandidate,
-                        messages: [
-                            { role: "system", content: systemPrompt },
-                            { role: "user", content: messageContent }
-                        ],
-                        temperature: 0.2,
-                        max_tokens: 1200
-                    })
-                });
-
-                const data = await response.json();
-
-                if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
-                    postGenerato = data.choices[0].message.content.trim();
-                    break; // Modello funzionante trovato con successo!
-                } else {
-                    lastChatError = new Error(data.error?.message || `Errore HTTP ${response.status}`);
-                }
-            } catch (callErr) {
-                lastChatError = callErr;
-            }
-        }
-
-        if (!postGenerato) {
-                    return res.status(500).json({ errore: "Tutti i modelli Groq sono momentaneamente occupati o non disponibili: " + (lastChatError?.message || "") });
-                }
-        
-                // Pulizia globale dei tag di ragionamento <think>...</think> per tutti i post e testi
-                const cleanOutput = postGenerato.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-        
-                // Se è una richiesta di importazione appuntamento, ripuliamo l'output e restituiamo un JSON strutturato
-                if (contesto.isBookingImport) {
-                    const jsonCleaned = cleanOutput.replace(/```json/g, "").replace(/```/g, "").trim();
-                    try {
-                        const parsedJSON = JSON.parse(jsonCleaned);
-                        return res.status(200).json({ bookingData: parsedJSON });
-                    } catch (jsonErr) {
-                        console.error("Errore nel parsing del JSON restituito da Groq:", jsonErr);
-                        return res.status(200).json({ rawText: cleanOutput, error: "L'IA non ha restituito un formato JSON valido." });
-                    }
-                }
-        
-                res.status(200).json({ post: cleanOutput });
+      // FASE 3: CATENA DI SICUREZZA DEI MODELLI GROQ CON RAGIONAMENTO NASCOSTO
+              const GROQ_TEXT_MODELS = [
+                  "llama-3.3-70b-versatile",
+                  "llama-3.1-8b-instant",
+                  "openai/gpt-oss-20b"
+              ];
+      
+              let postGenerato = null;
+              let lastChatError = null;
+      
+              for (const modelCandidate of GROQ_TEXT_MODELS) {
+                  try {
+                      const requestBody = {
+                          model: modelCandidate,
+                          messages: [
+                              { role: "system", content: systemPrompt },
+                              { role: "user", content: messageContent }
+                          ],
+                          temperature: 0.2,
+                          max_tokens: 1200,
+                          reasoning_format: "hidden" // Disattiva ed esclude del tutto i pensieri <think>
+                      };
+      
+                      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                          method: "POST",
+                          headers: {
+                              "Authorization": `Bearer ${GROQ_API_KEY}`,
+                              "Content-Type": "application/json"
+                          },
+                          body: JSON.stringify(requestBody)
+                      });
+      
+                      const data = await response.json();
+      
+                      if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
+                          postGenerato = data.choices[0].message.content.trim();
+                          break;
+                      } else {
+                          lastChatError = new Error(data.error?.message || `Errore HTTP ${response.status}`);
+                      }
+                  } catch (callErr) {
+                      lastChatError = callErr;
+                  }
+              }
+      
+              if (!postGenerato) {
+                  return res.status(500).json({ errore: "Tutti i modelli Groq sono momentaneamente occupati o non disponibili: " + (lastChatError?.message || "") });
+              }
+      
+              // Filtro di sicurezza totale contro qualsiasi tag <think>...</think> o residui di ragionamento
+              let cleanOutput = postGenerato.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+              cleanOutput = cleanOutput.replace(/<\/?think>/gi, "").trim();
+      
+              // Se è una richiesta di importazione appuntamento, ripuliamo l'output e restituiamo un JSON strutturato
+              if (contesto.isBookingImport) {
+                  const jsonCleaned = cleanOutput.replace(/```json/g, "").replace(/```/g, "").trim();
+                  try {
+                      const parsedJSON = JSON.parse(jsonCleaned);
+                      return res.status(200).json({ bookingData: parsedJSON });
+                  } catch (jsonErr) {
+                      console.error("Errore nel parsing del JSON restituito da Groq:", jsonErr);
+                      return res.status(200).json({ rawText: cleanOutput, error: "L'IA non ha restituito un formato JSON valido." });
+                  }
+              }
+      
+              res.status(200).json({ post: cleanOutput });
 
     } catch (error) {
         res.status(500).json({ errore: "La magia si è interrotta: " + error.message });
