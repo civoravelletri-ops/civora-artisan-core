@@ -161,11 +161,10 @@ module.exports = async function handler(req, res) {
             messageContent = userPromptText;
         }
 
-      // FASE 3: CATENA DI SICUREZZA DEI MODELLI GROQ CON RAGIONAMENTO NASCOSTO
+      // FASE 3: CATENA DI SICUREZZA A CASCATA DEI MODELLI GROQ
               const GROQ_TEXT_MODELS = [
                   "llama-3.3-70b-versatile",
-                  "llama-3.1-8b-instant",
-                  "openai/gpt-oss-20b"
+                  "llama-3.1-8b-instant"
               ];
       
               let postGenerato = null;
@@ -173,24 +172,21 @@ module.exports = async function handler(req, res) {
       
               for (const modelCandidate of GROQ_TEXT_MODELS) {
                   try {
-                      const requestBody = {
-                          model: modelCandidate,
-                          messages: [
-                              { role: "system", content: systemPrompt },
-                              { role: "user", content: messageContent }
-                          ],
-                          temperature: 0.2,
-                          max_tokens: 1200,
-                          reasoning_format: "hidden" // Disattiva ed esclude del tutto i pensieri <think>
-                      };
-      
                       const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                           method: "POST",
                           headers: {
                               "Authorization": `Bearer ${GROQ_API_KEY}`,
                               "Content-Type": "application/json"
                           },
-                          body: JSON.stringify(requestBody)
+                          body: JSON.stringify({
+                              model: modelCandidate,
+                              messages: [
+                                  { role: "system", content: systemPrompt },
+                                  { role: "user", content: messageContent }
+                              ],
+                              temperature: 0.2,
+                              max_tokens: 1200
+                          })
                       });
       
                       const data = await response.json();
@@ -210,7 +206,7 @@ module.exports = async function handler(req, res) {
                   return res.status(500).json({ errore: "Tutti i modelli Groq sono momentaneamente occupati o non disponibili: " + (lastChatError?.message || "") });
               }
       
-              // Filtro di sicurezza totale contro qualsiasi tag <think>...</think> o residui di ragionamento
+              // Filtro di sicurezza: elimina qualsiasi blocco <think>...</think> o residuo prima dell'invio
               let cleanOutput = postGenerato.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
               cleanOutput = cleanOutput.replace(/<\/?think>/gi, "").trim();
       
