@@ -65,7 +65,7 @@ ${testo_italiano}`;
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "Qwen 3.6 27B",
+                model: "llama 3.3 70B",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPromptContent }
