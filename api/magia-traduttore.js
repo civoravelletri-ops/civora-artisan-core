@@ -65,7 +65,7 @@ ${testo_italiano}`;
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "llama-3.1-8b-instant",
+                model: "GPT-OSS-120B",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPromptContent }
