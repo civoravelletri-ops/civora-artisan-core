@@ -61,21 +61,21 @@ ${testo_italiano}`;
 
     try {
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${GROQ_API_KEY}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "llama-3.1-8b-instant",
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    { role: "user", content: userPromptContent }
-                ],
-                temperature: 0.2, // Ridotta leggermente per minimizzare i comportamenti di formattazione imprevisti
-                response_format: { type: "json_object" } // FORZA Groq a sputare fuori un JSON perfetto
-            })
-        });
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${GROQ_API_KEY}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        model: "llama-3.3-70b-versatile",
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            { role: "user", content: userPromptContent }
+                        ],
+                        temperature: 0.2,
+                        response_format: { type: "json_object" }
+                    })
+                });
 
         const data = await response.json();
 
