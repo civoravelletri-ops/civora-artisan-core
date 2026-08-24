@@ -90,7 +90,7 @@ Il testo deve essere direttamente il contenuto da inserire nel campo.`;
                 if (campo === "short_description_profile") {
                     userPromptContent = `${baseInfo}\n${actionPrompt} Crea uno slogan accattivante e conciso (max 150 caratteri). Testo di partenza: "${currentText}"`;
                 } else if (campo === "description_profile") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi una descrizione completa e persuasiva (3-4 paragrafi). Descrivi storia, filosofia, unicità e l'esperienza cliente. Adatta il tono alla tipologia "${entityType}". Testo di partenza: "${currentText}"`;
+                    userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi una descrizione completa, elegante e persuasiva di 2-3 paragrafi (massimo 1000 caratteri in totale). Descrivi storia, filosofia, unicità e l'esperienza cliente. Adatta il tono alla tipologia "${entityType}". Testo di partenza: "${currentText}"`;
                 } else if (campo === "tags_profile") {
                     userPromptContent = `${baseInfo}\n${actionPrompt} Genera 7-10 parole chiave (tags) pertinenti e popolari, separate da virgola. Includi termini relativi alla tipologia "${entityType}" e ai benefici offerti. Testo di partenza: "${currentText}"`;
                 } else if (campo === "specializations_profile") {
