@@ -31,9 +31,8 @@ module.exports = async function handler(req, res) {
             return res.status(200).json(fallback);
         }
 
-        // REGOLA RIGIDA: vieta il copia-incolla del testo originale
         const systemPrompt = `Sei un traduttore professionista multilingue per attività commerciali e saloni di bellezza.
-Il tuo compito è tradurre il testo italiano in TUTTE queste 12 lingue:
+Traduci il testo italiano in TUTTE queste 12 lingue:
 1. en (Inglese)
 2. es (Spagnolo)
 3. fr (Francese)
@@ -47,15 +46,16 @@ Il tuo compito è tradurre il testo italiano in TUTTE queste 12 lingue:
 11. hi (Hindi)
 12. tr (Turco)
 
-REGOLE CRUCIALI:
-- DEVI TRADURRE OGNI SINGOLA LINGUA. È SEVERAMENTE VIETATO lasciare il testo in italiano per le lingue straniere!
-- Mantieni un tono elegante, chiaro e commerciale.
-- Rispondi ESCLUSIVAMENTE con un JSON valido con tutte le 12 chiavi:
+REGOLE TASSATIVE:
+- Devi tradurre il testo in ciascuna lingua. Non lasciare il testo in italiano per le lingue straniere!
+- Mantieni un tono commerciale, elegante ed essenziale.
+- Rispondi ESCLUSIVAMENTE con un oggetto JSON valido racchiuso tra parentesi graffe, senza spiegazioni, senza commenti e senza tag markdown.
+Struttura richiesta:
 {"en":"...","es":"...","fr":"...","de":"...","pt":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
 
-        const userPrompt = `Contesto: ${contesto}\nTesto originale da tradurre in tutte le 12 lingue:\n"""\n${testo_italiano}\n"""`;
+        const userPrompt = `Contesto: ${contesto}\nTraduci questo testo in tutte le 12 lingue:\n"""\n${testo_italiano}\n"""`;
 
-        // === AUTO-DISCOVERY DEI MODELLI GROQ ATTIVI ===
+        // === AUTO-DISCOVERY CON FILTRI PULITI ===
         let dynamicModelsList = [];
         try {
             const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
@@ -64,18 +64,32 @@ REGOLE CRUCIALI:
             if (modelsRes.ok) {
                 const modelsData = await modelsRes.json();
                 if (modelsData.data && Array.isArray(modelsData.data)) {
+                    // Escludiamo modelli vocali, compound, guard, embedding e vision
                     const chatModels = modelsData.data
                         .map(m => m.id)
-                        .filter(id => !id.includes("whisper") && !id.includes("guard") && !id.includes("embed") && !id.includes("vision"));
+                        .filter(id => {
+                            const low = id.toLowerCase();
+                            return !low.includes("whisper") &&
+                                   !low.includes("guard") &&
+                                   !low.includes("embed") &&
+                                   !low.includes("vision") &&
+                                   !low.includes("orpheus") &&
+                                   !low.includes("canopylabs") &&
+                                   !low.includes("compound") &&
+                                   !low.includes("safeguard") &&
+                                   !low.includes("allam");
+                        });
 
-                    // Priorità al 70B che gestisce traduzioni lunghe senza tagliare
+                    // Ordiniamo con priorità ai modelli più affidabili per traduzioni
                     chatModels.sort((a, b) => {
                         const score = (m) => {
-                            if (m.includes("llama-3.3-70b")) return 100;
-                            if (m.includes("llama-3.1-70b")) return 90;
-                            if (m.includes("llama-3.1-8b")) return 80;
-                            if (m.includes("mixtral")) return 50;
-                            if (m.includes("gemma")) return 40;
+                            const low = m.toLowerCase();
+                            if (low.includes("llama-3.3-70b")) return 100;
+                            if (low.includes("llama-3.1-8b")) return 90;
+                            if (low.includes("gpt-oss-120b")) return 85;
+                            if (low.includes("gpt-oss-20b")) return 80;
+                            if (low.includes("qwen3.6-27b")) return 75;
+                            if (low.includes("gemma2-9b")) return 70;
                             return 10;
                         };
                         return score(b) - score(a);
@@ -84,12 +98,18 @@ REGOLE CRUCIALI:
                 }
             }
         } catch (e) {
-            console.warn("[magia-traduttore Discovery] Uso lista fallback:", e.message);
+            console.warn("[magia-traduttore Discovery] Uso fallback:", e.message);
         }
 
         const candidateModels = dynamicModelsList.length > 0
             ? dynamicModelsList
-            : ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"];
+            : [
+                "llama-3.1-8b-instant",
+                "llama-3.3-70b-versatile",
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b",
+                "qwen/qwen3.6-27b"
+              ];
 
         let traduzioniJSON = null;
         let lastError = null;
@@ -104,13 +124,12 @@ REGOLE CRUCIALI:
                     },
                     body: JSON.stringify({
                         model: modelCandidate,
-                        response_format: { type: "json_object" },
                         messages: [
                             { role: "system", content: systemPrompt },
                             { role: "user", content: userPrompt }
                         ],
                         temperature: 0.2,
-                        max_tokens: 4096 // Aumentato a 4096 per non troncare i testi lunghi
+                        max_tokens: 4096
                     })
                 });
 
@@ -118,7 +137,10 @@ REGOLE CRUCIALI:
 
                 if (response.ok && data.choices && data.choices[0]?.message?.content) {
                     let content = data.choices[0].message.content.trim();
+
+                    // Pulizia tag <think>, markdown e delimitatori
                     content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+                    content = content.replace(/<\/?think>/gi, "").trim();
                     content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
 
                     const firstBrace = content.indexOf('{');
@@ -141,13 +163,14 @@ REGOLE CRUCIALI:
                         }
                     }
 
-                    if (traduzioniJSON && typeof traduzioniJSON === 'object') {
-                        console.log(`[magia-traduttore] ✅ Successo con modello: ${modelCandidate}`);
+                    // Verifica che contenga almeno inglese ed un'altra lingua
+                    if (traduzioniJSON && typeof traduzioniJSON === 'object' && (traduzioniJSON.en || traduzioniJSON.es)) {
+                        console.log(`[magia-traduttore] ✅ Traduzione completata con successo usando: ${modelCandidate}`);
                         break;
                     }
                 } else {
                     const msg = data.error?.message || `HTTP ${response.status}`;
-                    console.warn(`[magia-traduttore] ${modelCandidate} fallito (${msg}), provo successivo...`);
+                    console.warn(`[magia-traduttore] Modello ${modelCandidate} non riuscito (${msg}), provo il successivo...`);
                     lastError = new Error(msg);
                 }
             } catch (callErr) {
@@ -156,7 +179,7 @@ REGOLE CRUCIALI:
         }
 
         if (!traduzioniJSON) {
-            console.warn("[magia-traduttore] Fallback su italiano:", lastError?.message);
+            console.warn("[magia-traduttore] Fallback su italiano. Ultimo errore:", lastError?.message);
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
