@@ -34,7 +34,7 @@ module.exports = async function handler(req, res) {
         if (currentSector === "cura_persona") {
             systemPrompt = `Sei un esperto di marketing per il settore Wellness, Beauty e Salute.
 Il tuo obiettivo è trasmettere fiducia, relax e professionalità per un'attività di "${contesto.myTypeStore || 'Cura della Persona'}".
-Enfatizza il benessere del cliente e il risultato emozionale. Usa un linguaggio caldo ed elegante.`;
+Enfatizza il benessere del cliente e il risultato emozionale. Usa un linguaggio caldo, elegante ed essenziale.`;
         } else if (currentSector === "veterinario") {
             systemPrompt = `Sei un esperto di marketing per cliniche veterinarie e pet care. Trasmetti professionalità, empatia e cura.`;
         } else if (currentSector === "agrigarden") {
@@ -43,73 +43,48 @@ Enfatizza il benessere del cliente e il risultato emozionale. Usa un linguaggio 
             systemPrompt = `Sei un esperto di marketing per negozi e attività commerciali.`;
         }
 
-        systemPrompt += `\n\nREGOLE FONDAMENTALI TASSATIVE:
-1. NON scrivere assolutamente il tuo processo di pensiero o frasi come "Here's a thinking process", "Thinking Process", "Analyze User Input", ecc.
-2. Inizia la risposta IMMEDIATAMENTE con il testo finale in italiano.
-3. NON usare virgolette all'inizio e alla fine.
-4. Rispondi ESCLUSIVAMENTE con il testo richiesto.`;
+        systemPrompt += `\n\nREGOLA TASSATIVA: Rispondi SOLO ed ESCLUSIVAMENTE con il testo finale in italiano. Nessun commento, nessuna spiegazione, nessun ragionamento in inglese.`;
 
         let userPromptContent = '';
 
         if (currentSector === "cura_persona") {
-            const infoBaseServizio = `Servizio: "${contesto.nome}". Categoria: "${contesto.categoria} / ${contesto.sottocategoria || ''}". Tipo Attività: "${contesto.myTypeStore}". Prezzo: ${contesto.prezzo}€. Durata: ${contesto.durata} min.`;
-
-            if (campo === "titolo_cura") {
-                userPromptContent = infoBaseServizio + `\nGenera un titolo professionale (max 60 caratteri).`;
-                maxTokensBudget = 80;
-            } else if (campo === "descrizione_breve_cura") {
-                userPromptContent = infoBaseServizio + `\nGenera una descrizione brevissima (slogan, max 150 caratteri).`;
-                maxTokensBudget = 100;
-            } else if (campo.endsWith("_profile") || campo.endsWith("_cura_product")) {
-                const isProfile = campo.endsWith("_profile");
-                const entityName = isProfile ? (contesto.store_name || "questo studio") : (contesto.product_name || "questo prodotto");
-                const entityType = isProfile ? (contesto.myTypeStore || "attività di cura della persona") : (contesto.product_category || "prodotto");
-                const baseInfo = isProfile ?
-                    `Nome Studio: "${entityName}". Tipologia: "${entityType}".` :
-                    `Prodotto: "${entityName}". Categoria: "${entityType}".`;
-
-                const currentText = (contesto.currentFieldValue || "").trim();
-                let actionPrompt = currentText ?
-                    `Migliora e riscrivi questo testo in modo elegante, mantenendo l'intento originale:` :
-                    `Genera un testo originale per questo campo:`;
-
-                if (campo === "short_description_profile") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Crea uno slogan accattivante (max 150 caratteri). Testo di partenza: "${currentText}"`;
-                    maxTokensBudget = 100;
-                } else if (campo === "description_profile") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi una descrizione calda ed elegante di ESATTAMENTE 2 brevi paragrafi (totale 500-700 caratteri). NON superare assolutamente gli 800 caratteri! Inizia direttamente con la prima parola del testo. Testo di partenza: "${currentText}"`;
-                    maxTokensBudget = 400;
-                } else if (campo === "tags_profile" || campo === "specializations_profile") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Genera 6-8 voci separate da virgola. Testo di partenza: "${currentText}"`;
-                    maxTokensBudget = 150;
-                } else {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Genera il contenuto per "${campo}". Testo di partenza: "${currentText}"`;
-                    maxTokensBudget = 250;
-                }
-            }
-        } else if (currentSector === "veterinario") {
-            const isProfile = campo.endsWith("_profile_vet");
-            const entityName = isProfile ? (contesto.store_name || "clinica") : "servizio";
-            const entityType = isProfile ? (contesto.myTypeStore || "attività veterinaria") : "servizio";
-            const baseInfo = `Entità: "${entityName}". Tipologia: "${entityType}".`;
+            const isProfile = campo.endsWith("_profile");
+            const entityName = isProfile ? (contesto.store_name || "questo studio") : (contesto.product_name || "questo servizio");
+            const entityType = isProfile ? (contesto.myTypeStore || "attività di cura della persona") : (contesto.product_category || "cura della persona");
+            const baseInfo = `Attività: "${entityName}" (${entityType}).`;
             const currentText = (contesto.currentFieldValue || "").trim();
 
+            if (campo === "short_description_profile") {
+                userPromptContent = `${baseInfo}\nCrea uno slogan accattivante (max 140 caratteri). Testo di partenza: "${currentText}"`;
+                maxTokensBudget = 100;
+            } else if (campo === "description_profile") {
+                userPromptContent = `${baseInfo}\nScrivi una descrizione calda ed elegante per i clienti di ESATTAMENTE 2 brevi paragrafi (circa 500-600 caratteri in totale). Testo di partenza: "${currentText}"`;
+                maxTokensBudget = 400;
+            } else if (campo === "tags_profile" || campo === "specializations_profile") {
+                userPromptContent = `${baseInfo}\nGenera 6-8 voci separate da virgola. Testo di partenza: "${currentText}"`;
+                maxTokensBudget = 150;
+            } else {
+                userPromptContent = `${baseInfo}\nGenera il contenuto per "${campo}". Testo di partenza: "${currentText}"`;
+                maxTokensBudget = 250;
+            }
+        } else if (currentSector === "veterinario") {
+            const currentText = (contesto.currentFieldValue || "").trim();
             if (campo === "short_description_profile_vet") {
-                userPromptContent = `${baseInfo}\nCrea uno slogan conciso (max 150 caratteri). Testo di partenza: "${currentText}"`;
+                userPromptContent = `Clinica: "${contesto.store_name}". Crea uno slogan conciso (max 140 caratteri).`;
                 maxTokensBudget = 100;
             } else if (campo === "description_profile_vet") {
-                userPromptContent = `${baseInfo}\nScrivi una descrizione di 2 brevi paragrafi (max 700 caratteri). Testo di partenza: "${currentText}"`;
+                userPromptContent = `Clinica: "${contesto.store_name}". Scrivi una descrizione di 2 brevi paragrafi (max 600 caratteri).`;
                 maxTokensBudget = 400;
             } else {
-                userPromptContent = `${baseInfo}\nGenera 5-7 voci separate da virgola per "${campo}".`;
+                userPromptContent = `Genera 5-7 voci separate da virgola per "${campo}".`;
                 maxTokensBudget = 150;
             }
         } else if (campo === "storia_azienda") {
             userPromptContent = `Riscrivi questa filosofia aziendale per un vivaio: "${(contesto.testo || '').trim()}".`;
             maxTokensBudget = 500;
         } else if (task === "estimate_shipping_attributes") {
-            systemPrompt = `Rispondi ESCLUSIVAMENTE con un JSON valido con: "weight" (kg), "length" (cm), "width" (cm), "height" (cm). Esempio: {"weight": 3.5, "length": 25, "width": 25, "height": 60}`;
-            userPromptContent = `Estima peso e dimensioni imballo per: Nome: "${contesto.productName || contesto.nome}", Prezzo: "${contesto.price || '0'} €"`;
+            systemPrompt = `Rispondi ESCLUSIVAMENTE con un JSON valido con: "weight" (kg), "length" (cm), "width" (cm), "height" (cm).`;
+            userPromptContent = `Estima peso e dimensioni per: "${contesto.productName || contesto.nome}".`;
             maxTokensBudget = 150;
         } else {
             userPromptContent = `Genera un contenuto commerciale conciso per "${task}" relativo a "${contesto.nome || contesto.productName}".`;
@@ -126,7 +101,11 @@ Enfatizza il benessere del cliente e il risultato emozionale. Usa un linguaggio 
             responseFormat = { "type": "json_object" };
         }
 
-        const candidateModels = ["openai/gpt-oss-20b", "qwen/qwen3.6-27b", "openai/gpt-oss-120b"];
+        const candidateModels = [
+            "openai/gpt-oss-20b",
+            "qwen/qwen3.6-27b",
+            "openai/gpt-oss-120b"
+        ];
 
         let testoGenerato = null;
         let lastError = null;
@@ -139,6 +118,13 @@ Enfatizza il benessere del cliente e il risultato emozionale. Usa un linguaggio 
                     temperature: temperature,
                     max_tokens: maxTokensBudget
                 };
+
+                // Configurazione esatta per disattivare i ragionamenti in base al modello
+                if (modelCandidate.includes("gpt-oss")) {
+                    bodyRequest.include_reasoning = false;
+                } else if (modelCandidate.includes("qwen")) {
+                    bodyRequest.reasoning_format = "hidden";
+                }
 
                 if (responseFormat) {
                     bodyRequest.response_format = responseFormat;
@@ -158,9 +144,13 @@ Enfatizza il benessere del cliente e il risultato emozionale. Usa un linguaggio 
                 if (response.ok && data.choices && data.choices.length > 0) {
                     const choice = data.choices[0];
                     testoGenerato = (choice.message?.content || "").trim();
-                    if (testoGenerato) break;
+                    if (testoGenerato) {
+                        console.log(`[Magia AI] Generato con successo da: ${modelCandidate}`);
+                        break;
+                    }
                 } else {
                     const errMsg = data.error?.message || `HTTP ${response.status}`;
+                    console.warn(`[Magia AI] Modello ${modelCandidate} fallito: ${errMsg}`);
                     lastError = new Error(errMsg);
                 }
             } catch (callErr) {
@@ -172,22 +162,21 @@ Enfatizza il benessere del cliente e il risultato emozionale. Usa un linguaggio 
             return res.status(500).json({ errore: "Errore durante la generazione: " + (lastError?.message || "Servizio non disponibile") });
         }
 
-        // === PULIZIA AVANZATA DEI PENSIERI DELL'AI (Anti-Thinking) ===
+        // === PULIZIA ROBUSTA DEL TESTO ===
         testoGenerato = testoGenerato.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
         testoGenerato = testoGenerato.replace(/<\/?think>/gi, "").trim();
 
-        // Rimuove blocchi "Here's a thinking process:" o simili generati come testo normale
-        const thinkingMatch = testoGenerato.match(/(?:here(?:'s| is) (?:a |my )?(?:thinking|thought) process[\s\S]*?\n\n)([\s\S]+)/i);
-        if (thinkingMatch && thinkingMatch[1]) {
-            testoGenerato = thinkingMatch[1].trim();
+        // Estrazione testo se ci sono sezioni Draft / Mental Refinement
+        if (/Draft Generation|Mental Refinement/i.test(testoGenerato)) {
+            const splitDraft = testoGenerato.split(/(?:Draft Generation[^\n]*\n|Mental Refinement[^\n]*\n)/i);
+            if (splitDraft.length > 1) {
+                testoGenerato = splitDraft[splitDraft.length - 1].trim();
+            }
         }
 
-        const analyzeMatch = testoGenerato.match(/(?:analyze user input[\s\S]*?\n\n)([\s\S]+)/i);
-        if (analyzeMatch && analyzeMatch[1]) {
-            testoGenerato = analyzeMatch[1].trim();
-        }
-
-        // Rimuove virgolette iniziali e finali superflue
+        // Rimuove eventuali elenchi numerati o puntati di thinking rimasti
+        testoGenerato = testoGenerato.replace(/^\s*\d+\.\s+\*\*[^*]+\*\*[\s\S]*?\n\n/gim, "").trim();
+        testoGenerato = testoGenerato.replace(/^\s*-\s+[^\n]+\n/gm, "").trim();
         testoGenerato = testoGenerato.replace(/^["']+|["']+$/g, "").trim();
 
         // 1. Spedizione JSON
@@ -205,7 +194,7 @@ Enfatizza il benessere del cliente e il risultato emozionale. Usa un linguaggio 
             }
         }
 
-        // 2. Risposta pulita finale
+        // 2. Risposta finale pulita
         return res.status(200).json({ risultato: testoGenerato });
 
     } catch (error) {
