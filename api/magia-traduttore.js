@@ -16,7 +16,7 @@ module.exports = async function handler(req, res) {
     try {
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
         testo_italiano = (body.testo_italiano || body.text || "").trim();
-        const contesto = body.contesto || "servizio salone";
+        const contesto = body.contesto || "servizio commerciale";
         const GROQ_API_KEY = process.env.GROQ_API_KEY || process.env.GROQ_KEY || process.env.GROQ_AI_KEY || process.env.GROQ_TOKEN;
 
         if (!testo_italiano) {
@@ -26,20 +26,34 @@ module.exports = async function handler(req, res) {
         }
 
         if (!GROQ_API_KEY) {
-            console.error("Manca GROQ_API_KEY su Vercel!");
+            console.error("[magia-traduttore] Manca GROQ_API_KEY su Vercel!");
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
         }
 
-        const systemPrompt = `Sei un traduttore professionista per attività commerciali e saloni di bellezza.
-Traduci il testo fornito in queste 11 lingue: "en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr".
-Mantieni un tono naturale, commerciale ed elegante. Se il testo è una lista separata da virgole, mantieni le virgole.
-Rispondi ESCLUSIVAMENTE con un oggetto JSON valido.`;
+        const systemPrompt = `Sei un traduttore professionista per attività commerciali.
+Il tuo compito è tradurre il testo fornito in 11 lingue ("en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr").
+Mantieni un tono commerciale naturale. Se il testo è una lista di parole separate da virgole, mantieni le virgole.
 
-        const userPrompt = `Contesto: ${contesto}
-Testo in italiano da tradurre in formato JSON:
-${testo_italiano}`;
+Rispondi ESCLUSIVAMENTE con un oggetto JSON valido, strutturato esattamente così:
+{
+  "en": "...",
+  "es": "...",
+  "fr": "...",
+  "de": "...",
+  "ru": "...",
+  "ar": "...",
+  "ro": "...",
+  "zh": "...",
+  "sq": "...",
+  "hi": "...",
+  "tr": "..."
+}`;
+
+        const userPrompt = `Contesto del testo: ${contesto}
+Testo in italiano da tradurre:
+"${testo_italiano}"`;
 
         const GROQ_TEXT_MODELS = [
             "llama-3.3-70b-versatile",
@@ -65,22 +79,30 @@ ${testo_italiano}`;
                             { role: "system", content: systemPrompt },
                             { role: "user", content: userPrompt }
                         ],
-                        temperature: 0.1,
-                        response_format: { type: "json_object" }
+                        temperature: 0.2,
+                        max_tokens: 1500
                     })
                 });
 
                 const data = await response.json();
 
                 if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
-                    const rawContent = data.choices[0].message.content.trim();
-                    const cleanJSON = rawContent.replace(/```json/g, "").replace(/```/g, "").trim();
-                    traduzioniJSON = JSON.parse(cleanJSON);
-                    console.log(`[Magia Traduttore] Successo con modello: ${modelCandidate}`);
+                    let content = data.choices[0].message.content.trim();
+                    content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+                    content = content.replace(/```json/g, "").replace(/```/g, "").trim();
+
+                    const start = content.indexOf('{');
+                    const end = content.lastIndexOf('}');
+                    if (start !== -1 && end !== -1) {
+                        content = content.substring(start, end + 1);
+                    }
+
+                    traduzioniJSON = JSON.parse(content);
+                    console.log(`[magia-traduttore] Successo con modello: ${modelCandidate}`);
                     break;
                 } else {
                     const errMsg = data.error?.message || `HTTP ${response.status}`;
-                    console.warn(`[Magia Traduttore] Modello ${modelCandidate} (${errMsg}), provo successivo...`);
+                    console.warn(`[magia-traduttore] Modello ${modelCandidate} non riuscito: ${errMsg}`);
                     lastError = new Error(errMsg);
                 }
             } catch (callErr) {
@@ -89,7 +111,7 @@ ${testo_italiano}`;
         }
 
         if (!traduzioniJSON) {
-            console.warn("Groq non disponibile, uso fallback italiano.");
+            console.warn("[magia-traduttore] Tutti i modelli falliti, uso fallback:", lastError?.message);
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
@@ -98,7 +120,7 @@ ${testo_italiano}`;
         return res.status(200).json(traduzioniJSON);
 
     } catch (error) {
-        console.error("[api/magia-traduttore.js] Errore catturato:", error.message);
+        console.error("[api/magia-traduttore.js] Errore critico:", error);
         const fallback = {};
         I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano || "");
         return res.status(200).json(fallback);
