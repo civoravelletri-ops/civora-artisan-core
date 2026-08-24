@@ -31,25 +31,56 @@ module.exports = async function handler(req, res) {
             return res.status(200).json(fallback);
         }
 
-        const systemPrompt = `Sei un traduttore professionista. Traduci il testo nelle seguenti lingue: "en", "es", "fr", "de", "pt", "ru", "ar", "ro", "zh", "sq", "hi", "tr".
-Rispondi TASSATIVAMENTE ed ESCLUSIVAMENTE con un JSON valido con questa struttura:
+        const systemPrompt = `Sei un traduttore professionista per attività commerciali e saloni di bellezza.
+Traduci il testo fornito in queste lingue: "en", "es", "fr", "de", "pt", "ru", "ar", "ro", "zh", "sq", "hi", "tr".
+Mantieni un tono commerciale, elegante ed essenziale. Se il testo è lungo, mantieni la traduzione concisa e chiara.
+Se è una lista separata da virgole, mantieni le virgole.
+
+Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
 {"en":"...","es":"...","fr":"...","de":"...","pt":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
 
         const userPrompt = `Contesto: ${contesto}\nTesto da tradurre:\n"${testo_italiano}"`;
 
-        // Modelli testati e funzionanti su Groq
-        const GROQ_TEXT_MODELS = [
-            "llama-3.1-8b-instant",
-            "gemma2-9b-it"
-        ];
+        // === AUTO-DISCOVERY DEI MODELLI GROQ ATTIVI (uguale a magia.js) ===
+        let dynamicModelsList = [];
+        try {
+            const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
+                headers: { "Authorization": `Bearer ${GROQ_API_KEY.trim()}` }
+            });
+            if (modelsRes.ok) {
+                const modelsData = await modelsRes.json();
+                if (modelsData.data && Array.isArray(modelsData.data)) {
+                    const chatModels = modelsData.data
+                        .map(m => m.id)
+                        .filter(id => !id.includes("whisper") && !id.includes("guard") && !id.includes("embed") && !id.includes("vision"));
+
+                    chatModels.sort((a, b) => {
+                        const score = (m) => {
+                            if (m.includes("llama-3.3")) return 100;
+                            if (m.includes("llama-3.1-70b")) return 90;
+                            if (m.includes("llama-3.1-8b")) return 80;
+                            if (m.includes("mixtral")) return 50;
+                            if (m.includes("gemma")) return 40;
+                            return 10;
+                        };
+                        return score(b) - score(a);
+                    });
+                    dynamicModelsList = chatModels;
+                }
+            }
+        } catch (e) {
+            console.warn("[magia-traduttore Discovery] Uso lista fallback:", e.message);
+        }
+
+        const candidateModels = dynamicModelsList.length > 0
+            ? dynamicModelsList
+            : ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "gemma2-9b-it"];
 
         let traduzioniJSON = null;
         let lastError = null;
 
-        for (const modelCandidate of GROQ_TEXT_MODELS) {
+        for (const modelCandidate of candidateModels) {
             try {
-                console.log(`[magia-traduttore] Tento con il modello: ${modelCandidate}...`);
-
                 const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                     method: "POST",
                     headers: {
@@ -58,19 +89,19 @@ Rispondi TASSATIVAMENTE ed ESCLUSIVAMENTE con un JSON valido con questa struttur
                     },
                     body: JSON.stringify({
                         model: modelCandidate,
-                        response_format: { type: "json_object" }, // Chiede a Groq output JSON
+                        response_format: { type: "json_object" },
                         messages: [
                             { role: "system", content: systemPrompt },
                             { role: "user", content: userPrompt }
                         ],
                         temperature: 0.1,
-                        max_tokens: 1500
+                        max_tokens: 2500
                     })
                 });
 
                 const data = await response.json();
 
-                if (response.ok && data.choices && data.choices[0]?.message?.content) {
+                if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
                     let content = data.choices[0].message.content.trim();
                     content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
                     content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
@@ -88,26 +119,29 @@ Rispondi TASSATIVAMENTE ed ESCLUSIVAMENTE con un JSON valido con questa struttur
                         if (!repaired.endsWith('}')) {
                             repaired += repaired.endsWith('"') ? '}' : '"}';
                         }
-                        traduzioniJSON = JSON.parse(repaired);
+                        try {
+                            traduzioniJSON = JSON.parse(repaired);
+                        } catch (e2) {
+                            traduzioniJSON = null;
+                        }
                     }
 
                     if (traduzioniJSON && typeof traduzioniJSON === 'object') {
-                        console.log(`[magia-traduttore] ✅ Successo con modello: ${modelCandidate}`);
+                        console.log(`[magia-traduttore] ✅ Successo per (${contesto}) con: ${modelCandidate}`);
                         break;
                     }
                 } else {
-                    const msg = data.error?.message || `HTTP ${response.status} - ${JSON.stringify(data)}`;
-                    console.error(`[magia-traduttore] ❌ Fallito per ${modelCandidate}:`, msg);
-                    lastError = new Error(msg);
+                    const errMsg = data.error?.message || `HTTP ${response.status}`;
+                    console.warn(`[magia-traduttore] Modello ${modelCandidate} fallito (${errMsg}), provo successivo...`);
+                    lastError = new Error(errMsg);
                 }
             } catch (callErr) {
-                console.error(`[magia-traduttore] ❌ Eccezione con ${modelCandidate}:`, callErr.message);
                 lastError = callErr;
             }
         }
 
         if (!traduzioniJSON) {
-            console.warn("[magia-traduttore] Tutti i modelli hanno fallito. Errore:", lastError?.message);
+            console.warn("[magia-traduttore] Fallback su italiano. Ultimo errore:", lastError?.message);
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
@@ -116,7 +150,7 @@ Rispondi TASSATIVAMENTE ed ESCLUSIVAMENTE con un JSON valido con questa struttur
         return res.status(200).json(traduzioniJSON);
 
     } catch (error) {
-        console.error("[magia-traduttore] Errore critico:", error);
+        console.error("[api/magia-traduttore.js] Errore critico:", error);
         const fallback = {};
         I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano || "");
         return res.status(200).json(fallback);
