@@ -1,5 +1,4 @@
 module.exports = async function handler(req, res) {
-    // Permetti al tuo sito di chiamare questa funzione (CORS)
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -23,165 +22,97 @@ module.exports = async function handler(req, res) {
         }
 
         if (!GROQ_API_KEY) {
-            return res.status(500).json({ errore: "Manca la chiave d'accesso GROQ_API_KEY nelle variabili d'ambiente di Vercel." });
+            return res.status(500).json({ errore: "Manca GROQ_API_KEY nelle variabili d'ambiente di Vercel." });
         }
 
-        // Prepariamo il messaggio per l'IA (Tono differenziato tra i vari settori)
         let systemPrompt = "";
-        let temperature = 0.6;
-        let maxTokensBudget = 1000;
+        let temperature = 0.5;
+        let maxTokensBudget = 800;
 
         const currentSector = contesto.settore || "";
 
         if (currentSector === "cura_persona") {
             systemPrompt = `Sei un esperto di marketing per il settore Wellness, Beauty e Salute.
 Il tuo obiettivo è trasmettere fiducia, relax e professionalità per un'attività di "${contesto.myTypeStore || 'Cura della Persona'}".
-Non limitarti a descrivere l'azione tecnica, ma enfatizza il benessere del cliente e il risultato emozionale.
-Usa un linguaggio caldo, rassicurante ed elegante. Sii conciso ed essenziale.`;
+Enfatizza il benessere del cliente e il risultato emozionale. Usa un linguaggio caldo ed elegante.`;
         } else if (currentSector === "veterinario") {
-            systemPrompt = `Sei un esperto di marketing per cliniche e ambulatori veterinari, pet shop e servizi per animali.
-Il tuo obiettivo è trasmettere professionalità, empatia, cura e affidabilità.
-Enfatizza la salute e il benessere degli animali, la competenza del personale e la tranquillità dei proprietari.
-Usa un linguaggio chiaro, rassicurante e informativo, adatto a un settore medico-veterinario. Sii conciso.`;
+            systemPrompt = `Sei un esperto di marketing per cliniche veterinarie e pet care. Trasmetti professionalità, empatia e cura.`;
         } else if (currentSector === "agrigarden") {
-            systemPrompt = `Sei l'Assistente Digitale di Civora per AgriGarden.
-Il tuo tono è ispiratore, rustico, umano e sincero.
-Usa parole come 'radici', 'passione', 'tradizione', 'natura', 'cura'.
-Se ti viene chiesto di generare la filosofia aziendale ("storia_azienda"), rispondi ESCLUSIVAMENTE con un array JSON di 4 stringhe diverse:
-1. Poetica ed Emozionale
-2. Concreta ed Esperta
-3. Familiare ed Accogliente
-4. Breve e d'Impatto
-Non aggiungere altro testo. Esempio:["Testo 1", "Testo 2", "Testo 3", "Testo 4"]`;
+            systemPrompt = `Sei l'Assistente Digitale per AgriGarden. Tono rustico, sincero e umano.`;
         } else {
-            systemPrompt = `Sei un esperto di marketing per negozi locali e il tuo compito è generare contenuti specifici per prodotti e servizi commerciali.
-Utilizza un linguaggio semplice, persuasivo e adatto a un pubblico locale.`;
+            systemPrompt = `Sei un esperto di marketing per negozi e attività commerciali.`;
         }
 
-        systemPrompt += `\n\nREGOLA FONDAMENTALE: Rispondi SOLO E UNICAMENTE con il testo richiesto per il campo specificato.
-NON includere etichette come "Descrizione breve:", "Tags:", ecc.
-NON usare virgolette all'inizio e alla fine del testo generato.
-Il testo deve essere direttamente il contenuto da inserire nel campo.`;
+        systemPrompt += `\n\nREGOLE FONDAMENTALI TASSATIVE:
+1. NON scrivere assolutamente il tuo processo di pensiero o frasi come "Here's a thinking process", "Thinking Process", "Analyze User Input", ecc.
+2. Inizia la risposta IMMEDIATAMENTE con il testo finale in italiano.
+3. NON usare virgolette all'inizio e alla fine.
+4. Rispondi ESCLUSIVAMENTE con il testo richiesto.`;
 
         let userPromptContent = '';
 
-        // === LOGICA PER SETTORE CURA DELLA PERSONA (Wellness/Beauty/Salute) ===
         if (currentSector === "cura_persona") {
             const infoBaseServizio = `Servizio: "${contesto.nome}". Categoria: "${contesto.categoria} / ${contesto.sottocategoria || ''}". Tipo Attività: "${contesto.myTypeStore}". Prezzo: ${contesto.prezzo}€. Durata: ${contesto.durata} min.`;
 
             if (campo === "titolo_cura") {
-                userPromptContent = infoBaseServizio + `\nGenera un titolo professionale e invitante (max 60 caratteri) per questo servizio. Deve suonare esclusivo e curato.`;
+                userPromptContent = infoBaseServizio + `\nGenera un titolo professionale (max 60 caratteri).`;
                 maxTokensBudget = 80;
             } else if (campo === "descrizione_breve_cura") {
-                userPromptContent = infoBaseServizio + `\nGenera una descrizione brevissima e poetica (max 150 caratteri). Uno slogan che faccia desiderare di prenotare subito.`;
+                userPromptContent = infoBaseServizio + `\nGenera una descrizione brevissima (slogan, max 150 caratteri).`;
                 maxTokensBudget = 100;
-            } else if (campo === "descrizione_esperienza_cura") {
-                userPromptContent = infoBaseServizio + `\nScrivi una descrizione dell'esperienza cliente di 2 brevi paragrafi (circa 400-600 caratteri in totale). Parla di atmosfera e relax.`;
-                maxTokensBudget = 300;
             } else if (campo.endsWith("_profile") || campo.endsWith("_cura_product")) {
                 const isProfile = campo.endsWith("_profile");
-                const entityName = isProfile ? (contesto.store_name || "questo studio/salone") : (contesto.product_name || "questo prodotto di cura della persona");
-                const entityType = isProfile ? (contesto.myTypeStore || "un'attività di cura della persona") : (contesto.product_category || contesto.myTypeStore || "un prodotto di cura della persona");
+                const entityName = isProfile ? (contesto.store_name || "questo studio") : (contesto.product_name || "questo prodotto");
+                const entityType = isProfile ? (contesto.myTypeStore || "attività di cura della persona") : (contesto.product_category || "prodotto");
                 const baseInfo = isProfile ?
                     `Nome Studio: "${entityName}". Tipologia: "${entityType}".` :
-                    `Prodotto: "${entityName}". Categoria: "${entityType}". Sottocategoria: "${contesto.product_subcategory || 'non specificata'}". Marca: "${contesto.product_brand || 'non specificata'}". Tipo Attività: "${contesto.myTypeStore}".`;
+                    `Prodotto: "${entityName}". Categoria: "${entityType}".`;
 
                 const currentText = (contesto.currentFieldValue || "").trim();
                 let actionPrompt = currentText ?
-                    `Migliora e riscrivi il seguente testo in modo persuasivo ed elegante. Mantieni l'intento originale e adattalo al contesto di ${entityName} (${entityType}).` :
-                    `Genera un testo per questo campo basandoti sulle informazioni fornite.`;
+                    `Migliora e riscrivi questo testo in modo elegante, mantenendo l'intento originale:` :
+                    `Genera un testo originale per questo campo:`;
 
                 if (campo === "short_description_profile") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Crea uno slogan accattivante e conciso (massimo 150 caratteri). Testo di partenza: "${currentText}"`;
+                    userPromptContent = `${baseInfo}\n${actionPrompt} Crea uno slogan accattivante (max 150 caratteri). Testo di partenza: "${currentText}"`;
                     maxTokensBudget = 100;
                 } else if (campo === "description_profile") {
-                    // ✅ LIMITE RIGIDO: esattamente 2 brevi paragrafi, max 600-800 caratteri
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi una descrizione calda, professionale ed elegante di ESATTAMENTE 2 brevi paragrafi (lunghezza totale tra 500 e 750 caratteri). NON superare assolutamente gli 800 caratteri in totale! Testo di partenza: "${currentText}"`;
-                    maxTokensBudget = 350;
-                } else if (campo === "tags_profile") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Genera 7-10 parole chiave (tags) pertinenti, separate da virgola. Testo di partenza: "${currentText}"`;
+                    userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi una descrizione calda ed elegante di ESATTAMENTE 2 brevi paragrafi (totale 500-700 caratteri). NON superare assolutamente gli 800 caratteri! Inizia direttamente con la prima parola del testo. Testo di partenza: "${currentText}"`;
+                    maxTokensBudget = 400;
+                } else if (campo === "tags_profile" || campo === "specializations_profile") {
+                    userPromptContent = `${baseInfo}\n${actionPrompt} Genera 6-8 voci separate da virgola. Testo di partenza: "${currentText}"`;
                     maxTokensBudget = 150;
-                } else if (campo === "specializations_profile") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Genera 5-7 specializzazioni chiave, separate da virgola. Testo di partenza: "${currentText}"`;
-                    maxTokensBudget = 150;
-                } else if (campo === "product_name_cura_product") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Genera un nome di prodotto accattivante e professionale (max 60 caratteri). Testo di partenza: "${currentText}"`;
-                    maxTokensBudget = 80;
-                } else if (campo === "short_description_product_cura") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Crea una descrizione brevissima (slogan, max 150 caratteri) per il prodotto. Testo di partenza: "${currentText}"`;
-                    maxTokensBudget = 100;
-                } else if (campo === "description_product_cura") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi una descrizione persuasiva di 2 brevi paragrafi per il prodotto (max 600 caratteri). Testo di partenza: "${currentText}"`;
-                    maxTokensBudget = 300;
-                } else if (campo === "tags_product_cura" || campo === "keywords_product_cura") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Genera 7-10 parole chiave separate da virgola. Testo di partenza: "${currentText}"`;
-                    maxTokensBudget = 150;
-                } else if (campo === "ingredients_product_cura") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi un elenco sintetico di ingredienti chiave. Testo di partenza: "${currentText}"`;
-                    maxTokensBudget = 150;
-                } else if (campo === "allergens_product_cura" || campo === "attributes_product_cura") {
-                    userPromptContent = `${baseInfo}\n${actionPrompt} Genera un elenco separato da virgola. Testo di partenza: "${currentText}"`;
-                    maxTokensBudget = 150;
+                } else {
+                    userPromptContent = `${baseInfo}\n${actionPrompt} Genera il contenuto per "${campo}". Testo di partenza: "${currentText}"`;
+                    maxTokensBudget = 250;
                 }
             }
-        }
-        // === LOGICA PER SETTORE VETERINARIO ===
-        else if (currentSector === "veterinario") {
+        } else if (currentSector === "veterinario") {
             const isProfile = campo.endsWith("_profile_vet");
-            const entityName = isProfile ? (contesto.store_name || "questa clinica veterinaria") : (contesto.service_name || contesto.product_name || "questo servizio/prodotto per animali");
-            const entityType = isProfile ? (contesto.myTypeStore || "un'attività veterinaria") : (contesto.service_category || contesto.product_category || "un prodotto/servizio per animali");
+            const entityName = isProfile ? (contesto.store_name || "clinica") : "servizio";
+            const entityType = isProfile ? (contesto.myTypeStore || "attività veterinaria") : "servizio";
             const baseInfo = `Entità: "${entityName}". Tipologia: "${entityType}".`;
-
             const currentText = (contesto.currentFieldValue || "").trim();
-            let actionPrompt = currentText ?
-                `Migliora e riscrivi il seguente testo in modo empatico e professionale. Mantieni l'intento originale e adattalo al contesto di ${entityName} (${entityType}).` :
-                `Genera un testo basandoti sulle informazioni fornite.`;
 
             if (campo === "short_description_profile_vet") {
-                userPromptContent = `${baseInfo}\n${actionPrompt} Crea uno slogan accattivante e conciso (max 150 caratteri). Testo di partenza: "${currentText}"`;
+                userPromptContent = `${baseInfo}\nCrea uno slogan conciso (max 150 caratteri). Testo di partenza: "${currentText}"`;
                 maxTokensBudget = 100;
             } else if (campo === "description_profile_vet") {
-                userPromptContent = `${baseInfo}\n${actionPrompt} Scrivi una descrizione completa ed empatica di 2 brevi paragrafi (max 750 caratteri). Testo di partenza: "${currentText}"`;
-                maxTokensBudget = 350;
-            } else if (campo === "tags_profile_vet" || campo === "specializations_profile_vet") {
-                userPromptContent = `${baseInfo}\n${actionPrompt} Genera 5-7 voci separate da virgola. Testo di partenza: "${currentText}"`;
+                userPromptContent = `${baseInfo}\nScrivi una descrizione di 2 brevi paragrafi (max 700 caratteri). Testo di partenza: "${currentText}"`;
+                maxTokensBudget = 400;
+            } else {
+                userPromptContent = `${baseInfo}\nGenera 5-7 voci separate da virgola per "${campo}".`;
                 maxTokensBudget = 150;
-            } else if (campo === "titolo_vet_service") {
-                userPromptContent = `Servizio: "${contesto.nome}".\n${actionPrompt} Genera un titolo chiaro e professionale (max 60 caratteri).`;
-                maxTokensBudget = 80;
-            } else if (campo === "descrizione_breve_vet_service") {
-                userPromptContent = `Servizio: "${contesto.nome}".\n${actionPrompt} Genera uno slogan brevissimo (max 150 caratteri).`;
-                maxTokensBudget = 100;
-            } else if (campo === "descrizione_esperienza_vet_service") {
-                userPromptContent = `Servizio: "${contesto.nome}".\n${actionPrompt} Scrivi una descrizione rassicurante di 2 brevi paragrafi (max 600 caratteri).`;
-                maxTokensBudget = 300;
             }
-        }
-        // === LOGICA SPECIFICA AGRIGARDEN ===
-        else if (campo === "storia_azienda") {
-            const testoPartenza = (contesto.testo || "").trim();
-            userPromptContent = `Riscrivi questa filosofia aziendale per un vivaio, rendendola autentica e profonda: "${testoPartenza}".`;
+        } else if (campo === "storia_azienda") {
+            userPromptContent = `Riscrivi questa filosofia aziendale per un vivaio: "${(contesto.testo || '').trim()}".`;
             maxTokensBudget = 500;
-        }
-        // === LOGICA: STIMA SPEDIZIONE ===
-        else if (task === "estimate_shipping_attributes") {
-            systemPrompt = `Sei un esperto di logistica e-commerce per florovivaismo e piante.
-Rispondi ESCLUSIVAMENTE con un JSON valido con le chiavi: "weight" (kg), "length" (cm), "width" (cm), "height" (cm). Esempio: {"weight": 3.5, "length": 25, "width": 25, "height": 60}`;
-            userPromptContent = `Estima peso e dimensioni imballo per: Nome: "${contesto.productName || contesto.nome}", Prezzo: "${contesto.price || '0'} €", Desc: "${contesto.productShortDescription || ''}"`;
-            maxTokensBudget = 150;
-        }
-        // === LOGICA GENERICA PRODOTTI / SERVIZI ===
-        else if (task.includes("descrizione_breve")) {
-            userPromptContent = `Genera uno slogan commerciale di massimo 150 caratteri per "${contesto.nome || contesto.productName}".`;
-            maxTokensBudget = 100;
-        } else if (task.includes("descrizione_completa") || task.includes("descrizione")) {
-            userPromptContent = `Genera una descrizione commerciale accattivante di 2 brevi paragrafi (max 600 caratteri) per "${contesto.nome || contesto.productName}".`;
-            maxTokensBudget = 300;
-        } else if (task.includes("tags") || task.includes("keywords")) {
-            userPromptContent = `Genera 5-7 tag separati da virgola per "${contesto.nome || contesto.productName}".`;
+        } else if (task === "estimate_shipping_attributes") {
+            systemPrompt = `Rispondi ESCLUSIVAMENTE con un JSON valido con: "weight" (kg), "length" (cm), "width" (cm), "height" (cm). Esempio: {"weight": 3.5, "length": 25, "width": 25, "height": 60}`;
+            userPromptContent = `Estima peso e dimensioni imballo per: Nome: "${contesto.productName || contesto.nome}", Prezzo: "${contesto.price || '0'} €"`;
             maxTokensBudget = 150;
         } else {
-            userPromptContent = `Genera un contenuto conciso per "${task}" relativo a "${contesto.nome || contesto.productName}".`;
+            userPromptContent = `Genera un contenuto commerciale conciso per "${task}" relativo a "${contesto.nome || contesto.productName}".`;
             maxTokensBudget = 300;
         }
 
@@ -191,36 +122,11 @@ Rispondi ESCLUSIVAMENTE con un JSON valido con le chiavi: "weight" (kg), "length
         ];
 
         let responseFormat = null;
-        const isVision = (task === "visione_immagine" || task === "importazione_agenda_ia");
-
-        if (task === "visione_immagine" || task === "estimate_shipping_attributes") {
+        if (task === "estimate_shipping_attributes") {
             responseFormat = { "type": "json_object" };
         }
 
-        if (isVision) {
-            let promptVisione = contesto.istruzioni_extra ||
-                "Analizza questa immagine di un prodotto. Rispondi in JSON con chiavi: 'titolo', 'descrizione', 'prezzo'.";
-
-            if (task === "importazione_agenda_ia") {
-                promptVisione = `Estrai gli appuntamenti dall'immagine dell'agenda. Rispondi con JSON: {"prenotazioni": [{"data": "2026-07-28", "ora": "10:30", "cliente": "Marco Rossi", "telefono": "+393331234567", "servizio": "Taglio", "note": null}]}`;
-            }
-
-            messages = [
-                {
-                    role: "user",
-                    content: [
-                        { type: "text", text: promptVisione },
-                        { type: "image_url", image_url: { url: contesto.imageUrl } }
-                    ]
-                }
-            ];
-            maxTokensBudget = 1200;
-        }
-
-        // Modelli attivi e affidabili su Groq
-        const candidateModels = isVision
-            ? ["qwen/qwen3.6-27b"]
-            : ["openai/gpt-oss-20b", "qwen/qwen3.6-27b", "openai/gpt-oss-120b"];
+        const candidateModels = ["openai/gpt-oss-20b", "qwen/qwen3.6-27b", "openai/gpt-oss-120b"];
 
         let testoGenerato = null;
         let lastError = null;
@@ -251,14 +157,10 @@ Rispondi ESCLUSIVAMENTE con un JSON valido con le chiavi: "weight" (kg), "length
 
                 if (response.ok && data.choices && data.choices.length > 0) {
                     const choice = data.choices[0];
-                    testoGenerato = (choice.message?.content || choice.message?.reasoning_content || "").trim();
-                    if (testoGenerato) {
-                        console.log(`[Magia AI] Successo con: ${modelCandidate}`);
-                        break;
-                    }
+                    testoGenerato = (choice.message?.content || "").trim();
+                    if (testoGenerato) break;
                 } else {
                     const errMsg = data.error?.message || `HTTP ${response.status}`;
-                    console.warn(`[Magia AI] Modello ${modelCandidate} fallito (${errMsg}), provo successivo...`);
                     lastError = new Error(errMsg);
                 }
             } catch (callErr) {
@@ -270,11 +172,25 @@ Rispondi ESCLUSIVAMENTE con un JSON valido con le chiavi: "weight" (kg), "length
             return res.status(500).json({ errore: "Errore durante la generazione: " + (lastError?.message || "Servizio non disponibile") });
         }
 
-        // Pulizia tag <think>, virgolette e markdown
+        // === PULIZIA AVANZATA DEI PENSIERI DELL'AI (Anti-Thinking) ===
         testoGenerato = testoGenerato.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
         testoGenerato = testoGenerato.replace(/<\/?think>/gi, "").trim();
 
-        // 1. Stima Spedizione JSON
+        // Rimuove blocchi "Here's a thinking process:" o simili generati come testo normale
+        const thinkingMatch = testoGenerato.match(/(?:here(?:'s| is) (?:a |my )?(?:thinking|thought) process[\s\S]*?\n\n)([\s\S]+)/i);
+        if (thinkingMatch && thinkingMatch[1]) {
+            testoGenerato = thinkingMatch[1].trim();
+        }
+
+        const analyzeMatch = testoGenerato.match(/(?:analyze user input[\s\S]*?\n\n)([\s\S]+)/i);
+        if (analyzeMatch && analyzeMatch[1]) {
+            testoGenerato = analyzeMatch[1].trim();
+        }
+
+        // Rimuove virgolette iniziali e finali superflue
+        testoGenerato = testoGenerato.replace(/^["']+|["']+$/g, "").trim();
+
+        // 1. Spedizione JSON
         if (task === "estimate_shipping_attributes") {
             try {
                 const start = testoGenerato.indexOf('{');
@@ -285,26 +201,15 @@ Rispondi ESCLUSIVAMENTE con un JSON valido con le chiavi: "weight" (kg), "length
                 JSON.parse(testoGenerato);
                 return res.status(200).json({ risultato: testoGenerato });
             } catch (e) {
-                const fallback = testoGenerato.replace(/```json/g, "").replace(/```/g, "").trim();
-                return res.status(200).json({ risultato: fallback });
+                return res.status(200).json({ risultato: testoGenerato });
             }
         }
 
-        // 2. AgriGarden Array
-        if (currentSector === "agrigarden" && campo === "storia_azienda") {
-            try {
-                const parsed = JSON.parse(testoGenerato);
-                return res.status(200).json({ risultato: parsed });
-            } catch (e) {
-                return res.status(200).json({ risultato: [testoGenerato] });
-            }
-        }
-
-        // 3. Risposta Testuale
+        // 2. Risposta pulita finale
         return res.status(200).json({ risultato: testoGenerato });
 
     } catch (error) {
-        console.error("[api/magia.js] Errore critico:", error);
-        res.status(500).json({ errore: "La magia si è interrotta: " + error.message });
+        console.error("[api/magia.js] Errore:", error);
+        res.status(500).json({ errore: "Errore: " + error.message });
     }
 };
