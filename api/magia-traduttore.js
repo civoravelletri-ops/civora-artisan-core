@@ -44,7 +44,6 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
 
         const GROQ_TEXT_MODELS = [
             "groq/llama 3.3 70B",
-            "openai/gpt-oss-120b"
         ];
 
         let traduzioniJSON = null;
