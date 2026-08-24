@@ -1,5 +1,4 @@
 module.exports = async function handler(req, res) {
-    // Intestazioni CORS
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -16,7 +15,7 @@ module.exports = async function handler(req, res) {
     try {
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
         testo_italiano = (body.testo_italiano || body.text || "").trim();
-        const contesto = body.contesto || "servizio commerciale";
+        const contesto = body.contesto || "servizio salone";
         const GROQ_API_KEY = process.env.GROQ_API_KEY || process.env.GROQ_KEY || process.env.GROQ_AI_KEY || process.env.GROQ_TOKEN;
 
         if (!testo_italiano) {
@@ -32,35 +31,17 @@ module.exports = async function handler(req, res) {
             return res.status(200).json(fallback);
         }
 
-        const systemPrompt = `REGOLA DI SICUREZZA: NON RAGIONARE, NON INCLUDERE TAG <think> E NON SCRIVERE TESTO FUORI DAL JSON.
-Inizia la tua risposta DIRETTAMENTE con la parentesi graffa aperta { e chiudila con }.
+        const systemPrompt = `Sei un traduttore professionista per attività commerciali. Traduci il testo in 11 lingue ("en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr").
+Rispondi ESCLUSIVAMENTE con un JSON puro valido senza tag o commenti:
+{"en":"...","es":"...","fr":"...","de":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
 
-Sei un traduttore professionista per attività commerciali. Traduci il testo in 11 lingue ("en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr").
-Se il testo è una lista di parole con virgole, mantieni le virgole.
-
-Rispondi ESCLUSIVAMENTE con un JSON strutturato così:
-{
-  "en": "...",
-  "es": "...",
-  "fr": "...",
-  "de": "...",
-  "ru": "...",
-  "ar": "...",
-  "ro": "...",
-  "zh": "...",
-  "sq": "...",
-  "hi": "...",
-  "tr": "..."
-}`;
-
-        const userPrompt = `Contesto: ${contesto}
-Testo in italiano da tradurre:
-"${testo_italiano}"`;
+        const userPrompt = `Contesto: ${contesto}\nTraduci questo testo in italiano:\n"${testo_italiano}"`;
 
         const GROQ_TEXT_MODELS = [
             "openai/gpt-oss-20b",
-            "openai/gpt-oss-120b",
-            "qwen/qwen3.6-27b"
+            "groq/compound-mini",
+            "qwen/qwen3.6-27b",
+            "openai/gpt-oss-120b"
         ];
 
         let traduzioniJSON = null;
@@ -81,7 +62,7 @@ Testo in italiano da tradurre:
                             { role: "user", content: userPrompt }
                         ],
                         temperature: 0.1,
-                        max_tokens: 3500
+                        max_tokens: 800
                     })
                 });
 
@@ -90,24 +71,24 @@ Testo in italiano da tradurre:
                 if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
                     let content = data.choices[0].message.content.trim();
                     content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-                    content = content.replace(/```json/g, "").replace(/```/g, "").trim();
+                    content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
 
-                    const start = content.indexOf('{');
-                    const end = content.lastIndexOf('}');
-                    if (start !== -1 && end !== -1) {
-                        content = content.substring(start, end + 1);
+                    const firstBrace = content.indexOf('{');
+                    const lastBrace = content.lastIndexOf('}');
+                    if (firstBrace !== -1 && lastBrace > firstBrace) {
+                        content = content.substring(firstBrace, lastBrace + 1);
                     }
 
                     try {
                         traduzioniJSON = JSON.parse(content);
-                        console.log(`[magia-traduttore] Successo immediato con: ${modelCandidate}`);
+                        console.log(`[magia-traduttore] Successo con: ${modelCandidate}`);
                         break;
                     } catch (parseE) {
-                        console.warn(`[magia-traduttore] JSON non completato su ${modelCandidate}, provo successivo...`);
+                        console.warn(`[magia-traduttore] Parse fallito su ${modelCandidate}:`, content);
                     }
                 } else {
                     const errMsg = data.error?.message || `HTTP ${response.status}`;
-                    console.warn(`[magia-traduttore] Modello ${modelCandidate} fallito: ${errMsg}`);
+                    console.warn(`[magia-traduttore] Modello ${modelCandidate} non riuscito: ${errMsg}`);
                     lastError = new Error(errMsg);
                 }
             } catch (callErr) {
