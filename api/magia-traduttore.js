@@ -11,8 +11,10 @@ export default async function handler(req, res) {
         return;
     }
 
-    const { testo_italiano, contesto } = req.body;
-    const GROQ_API_KEY = process.env.GROQ_API_KEY;
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+        const testo_italiano = body.testo_italiano;
+        const contesto = body.contesto;
+        const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
     // Lista aggiornata delle 11 lingue (per i fallback e il prompt)
         const I18N_LANGS = ["en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr"];
