@@ -43,7 +43,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
         const userPrompt = `Contesto: ${contesto}\nTesto da tradurre:\n"${testo_italiano}"`;
 
         const GROQ_TEXT_MODELS = [
-            "groq/llama 3.3 70B",
+            "groq/llama-3.1-8b-instant",
         ];
 
         let traduzioniJSON = null;
