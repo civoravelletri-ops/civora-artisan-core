@@ -25,26 +25,22 @@ module.exports = async function handler(req, res) {
         }
 
         if (!GROQ_API_KEY) {
-            console.error("[magia-traduttore] Manca GROQ_API_KEY su Vercel!");
+            console.error("[magia-traduttore] Manca GROQ_API_KEY nelle variabili d'ambiente!");
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
         }
 
-        const systemPrompt = `Sei un traduttore professionista per attività commerciali e saloni di bellezza.
-Traduci il testo fornito in queste lingue: "en", "es", "fr", "de", "pt", "ru", "ar", "ro", "zh", "sq", "hi", "tr".
-Mantieni un tono commerciale, elegante ed essenziale. Se il testo è lungo, mantieni la traduzione concisa e chiara.
-Se è una lista separata da virgole, mantieni le virgole.
-
-Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
+        const systemPrompt = `Sei un traduttore professionista. Traduci il testo nelle seguenti lingue: "en", "es", "fr", "de", "pt", "ru", "ar", "ro", "zh", "sq", "hi", "tr".
+Rispondi TASSATIVAMENTE ed ESCLUSIVAMENTE con un JSON valido con questa struttura:
 {"en":"...","es":"...","fr":"...","de":"...","pt":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
 
         const userPrompt = `Contesto: ${contesto}\nTesto da tradurre:\n"${testo_italiano}"`;
 
-        // ✅ NOMI CORRETTI DEI MODELLI SU GROQ:
+        // Modelli testati e funzionanti su Groq
         const GROQ_TEXT_MODELS = [
             "llama-3.1-8b-instant",
-            "llama-3.3-70b-versatile"
+            "gemma2-9b-it"
         ];
 
         let traduzioniJSON = null;
@@ -52,27 +48,29 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
 
         for (const modelCandidate of GROQ_TEXT_MODELS) {
             try {
+                console.log(`[magia-traduttore] Tento con il modello: ${modelCandidate}...`);
+
                 const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                     method: "POST",
                     headers: {
-                        "Authorization": `Bearer ${GROQ_API_KEY}`,
+                        "Authorization": `Bearer ${GROQ_API_KEY.trim()}`,
                         "Content-Type": "application/json"
                     },
                     body: JSON.stringify({
                         model: modelCandidate,
-                        response_format: { type: "json_object" }, // Forza la risposta in formato JSON nativo
+                        response_format: { type: "json_object" }, // Chiede a Groq output JSON
                         messages: [
                             { role: "system", content: systemPrompt },
                             { role: "user", content: userPrompt }
                         ],
                         temperature: 0.1,
-                        max_tokens: 1800
+                        max_tokens: 1500
                     })
                 });
 
                 const data = await response.json();
 
-                if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
+                if (response.ok && data.choices && data.choices[0]?.message?.content) {
                     let content = data.choices[0].message.content.trim();
                     content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
                     content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
@@ -88,31 +86,28 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
                     } catch (e1) {
                         let repaired = content.trim();
                         if (!repaired.endsWith('}')) {
-                            if (repaired.endsWith('"')) repaired += '}';
-                            else repaired += '"}';
+                            repaired += repaired.endsWith('"') ? '}' : '"}';
                         }
-                        try {
-                            traduzioniJSON = JSON.parse(repaired);
-                        } catch (e2) {
-                            traduzioniJSON = null;
-                        }
+                        traduzioniJSON = JSON.parse(repaired);
                     }
 
-                    if (traduzioniJSON) {
-                        console.log(`[magia-traduttore] Successo per (${contesto}) con: ${modelCandidate}`);
+                    if (traduzioniJSON && typeof traduzioniJSON === 'object') {
+                        console.log(`[magia-traduttore] ✅ Successo con modello: ${modelCandidate}`);
                         break;
                     }
                 } else {
-                    const errMsg = data.error?.message || `HTTP ${response.status}`;
-                    lastError = new Error(errMsg);
+                    const msg = data.error?.message || `HTTP ${response.status} - ${JSON.stringify(data)}`;
+                    console.error(`[magia-traduttore] ❌ Fallito per ${modelCandidate}:`, msg);
+                    lastError = new Error(msg);
                 }
             } catch (callErr) {
+                console.error(`[magia-traduttore] ❌ Eccezione con ${modelCandidate}:`, callErr.message);
                 lastError = callErr;
             }
         }
 
         if (!traduzioniJSON) {
-            console.warn("[magia-traduttore] Fallback su italiano:", lastError?.message);
+            console.warn("[magia-traduttore] Tutti i modelli hanno fallito. Errore:", lastError?.message);
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
@@ -121,7 +116,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
         return res.status(200).json(traduzioniJSON);
 
     } catch (error) {
-        console.error("[api/magia-traduttore.js] Errore critico:", error);
+        console.error("[magia-traduttore] Errore critico:", error);
         const fallback = {};
         I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano || "");
         return res.status(200).json(fallback);
