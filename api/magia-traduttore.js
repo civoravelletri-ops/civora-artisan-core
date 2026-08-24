@@ -31,20 +31,24 @@ module.exports = async function handler(req, res) {
             return res.status(200).json(fallback);
         }
 
-        const systemPrompt = `You are a professional human translator.
-Translate the entire provided Italian text into these 12 languages: en, es, fr, de, pt, ru, ar, ro, zh, sq, hi, tr.
+        const systemPrompt = `You are a professional human translator for beauty salons and businesses.
+Translate the provided Italian text into these 12 languages: en, es, fr, de, pt, ru, ar, ro, zh, sq, hi, tr.
 
 STRICT RULES:
-1. Provide the FULL, complete translation for each language.
-2. DO NOT use ellipsis, dots ("..."), or placeholders. Write the actual translated sentences.
-3. Respond ONLY with a valid JSON object where keys are the 2-letter language codes and values are the complete translated text strings.`;
+1. Provide the complete translation for EACH language.
+2. DO NOT use dots ("...") or placeholders.
+3. Respond ONLY with a valid JSON object matching this structure:
+{"en":"...","es":"...","fr":"...","de":"...","pt":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
 
-        const userPrompt = `Context: ${contesto}\nItalian text to translate fully into all 12 languages:\n"""\n${testo_italiano}\n"""`;
+        const userPrompt = `Context: ${contesto}\nItalian text to translate:\n"""${testo_italiano}"""`;
 
-        // Modelli attivi e veloci
+        // Calcolo compatto per non superare MAI il limite di token per minuto (TPM)
+        const tokenBudget = Math.min(Math.max(Math.ceil(testo_italiano.length * 2.2), 450), 1200);
+
+        // Qwen è il più veloce e affidabile per il multilingua
         const candidateModels = [
-            "openai/gpt-oss-20b",
             "qwen/qwen3.6-27b",
+            "openai/gpt-oss-20b",
             "openai/gpt-oss-120b"
         ];
 
@@ -53,22 +57,42 @@ STRICT RULES:
 
         for (const modelCandidate of candidateModels) {
             try {
-                const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                const bodyRequest = {
+                    model: modelCandidate,
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userPrompt }
+                    ],
+                    temperature: 0.2,
+                    max_tokens: tokenBudget
+                };
+
+                if (modelCandidate.includes("qwen")) {
+                    bodyRequest.reasoning_effort = "none";
+                }
+
+                let response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                     method: "POST",
                     headers: {
                         "Authorization": `Bearer ${GROQ_API_KEY.trim()}`,
                         "Content-Type": "application/json"
                     },
-                    body: JSON.stringify({
-                        model: modelCandidate,
-                        messages: [
-                            { role: "system", content: systemPrompt },
-                            { role: "user", content: userPrompt }
-                        ],
-                        temperature: 0.2,
-                        max_tokens: 2200
-                    })
+                    body: JSON.stringify(bodyRequest)
                 });
+
+                // Se incontra un rate-limit temporaneo (429), aspetta 2.5 secondi e fa un micro-retry
+                if (response.status === 429) {
+                    console.warn(`[magia-traduttore] 429 su ${modelCandidate}, attendo 2.5s e riprovo...`);
+                    await new Promise(r => setTimeout(r, 2500));
+                    response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${GROQ_API_KEY.trim()}`,
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify(bodyRequest)
+                    });
+                }
 
                 const data = await response.json();
 
@@ -76,7 +100,6 @@ STRICT RULES:
                     const choice = data.choices[0];
                     let content = (choice.message?.content || choice.message?.reasoning_content || "").trim();
 
-                    // Pulizia tag e markdown
                     content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
                     content = content.replace(/<\/?think>/gi, "").trim();
                     content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
@@ -107,18 +130,17 @@ STRICT RULES:
                             }
                         }
 
-                        // VALIDATORE: Scarta se il testo è "..." o inferiore a 3 caratteri (quando il testo originale è lungo)
                         const isValidTranslation = (val) => {
                             if (!val || typeof val !== 'string') return false;
                             const t = val.trim();
                             if (t === '...' || t === '..' || t === '.' || t === '') return false;
-                            if (testo_italiano.length > 20 && t.length < 5) return false;
+                            if (testo_italiano.length > 20 && t.length < 4) return false;
                             return true;
                         };
 
                         const validCount = I18N_LANGS.filter(lang => isValidTranslation(flatObject[lang])).length;
 
-                        if (validCount >= 6) { // Se almeno 6 lingue sono traduzioni valide e reali
+                        if (validCount >= 4) {
                             finalTranslations = {};
                             I18N_LANGS.forEach(lang => {
                                 finalTranslations[lang] = isValidTranslation(flatObject[lang])
@@ -126,10 +148,8 @@ STRICT RULES:
                                     : testo_italiano;
                             });
 
-                            console.log(`[magia-traduttore] ✅ Successo con ${modelCandidate} (${validCount}/12 lingue tradotte per esteso)`);
+                            console.log(`[magia-traduttore] ✅ Successo con: ${modelCandidate} (${validCount}/12 lingue validate)`);
                             break;
-                        } else {
-                            console.warn(`[magia-traduttore] Il modello ${modelCandidate} ha restituito puntini o testo non valido, provo successivo...`);
                         }
                     }
                 } else {
@@ -144,7 +164,7 @@ STRICT RULES:
         }
 
         if (!finalTranslations) {
-            console.warn("[magia-traduttore] Fallback su testo italiano:", lastError?.message);
+            console.warn("[magia-traduttore] Fallback su italiano:", lastError?.message);
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
