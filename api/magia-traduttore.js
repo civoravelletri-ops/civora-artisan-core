@@ -31,23 +31,19 @@ module.exports = async function handler(req, res) {
             return res.status(200).json(fallback);
         }
 
-        const systemPrompt = `You are a professional translator for local businesses and beauty salons.
-Translate the input Italian text into these 12 languages: "en", "es", "fr", "de", "pt", "ru", "ar", "ro", "zh", "sq", "hi", "tr".
-Maintain an elegant and concise tone. Translate every language, do not copy Italian text into foreign languages.
-
-Respond ONLY with a valid JSON object matching this structure:
+        const systemPrompt = `You are a professional multilingual translator.
+Translate the Italian text into all these 12 languages: en, es, fr, de, pt, ru, ar, ro, zh, sq, hi, tr.
+Do not leave any language in Italian. Translate everything.
+Return ONLY valid JSON matching this exact structure:
 {"en":"...","es":"...","fr":"...","de":"...","pt":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
 
         const userPrompt = `Context: ${contesto}\nText to translate:\n"""${testo_italiano}"""`;
 
-        // Calcolo dinamico max_tokens per evitare il rate-limit (TPM) su Groq
-        const tokenBudget = Math.min(Math.max(testo_italiano.length * 6, 800), 2000);
-
-        // Llama-3.1-8b-instant ha 60.000 TPM di limite (non va mai in rate limit)
+        // Modelli attivi e supportati su Groq
         const candidateModels = [
-            "llama-3.1-8b-instant",
-            "gemma2-9b-it",
-            "qwen/qwen3.6-27b"
+            "openai/gpt-oss-20b",
+            "qwen/qwen3.6-27b",
+            "openai/gpt-oss-120b"
         ];
 
         let finalTranslations = null;
@@ -68,15 +64,19 @@ Respond ONLY with a valid JSON object matching this structure:
                             { role: "user", content: userPrompt }
                         ],
                         temperature: 0.1,
-                        max_tokens: tokenBudget
+                        max_tokens: 1500
                     })
                 });
 
                 const data = await response.json();
 
-                if (response.ok && data.choices && data.choices[0]?.message?.content) {
-                    let content = data.choices[0].message.content.trim();
+                if (response.ok && data.choices && data.choices.length > 0) {
+                    const choice = data.choices[0];
+                    let content = (choice.message?.content || choice.message?.reasoning_content || "").trim();
+
+                    // Rimuove blocchi di pensiero, markdown e tag
                     content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+                    content = content.replace(/<\/?think>/gi, "").trim();
                     content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
 
                     const firstBrace = content.indexOf('{');
@@ -97,23 +97,29 @@ Respond ONLY with a valid JSON object matching this structure:
                     }
 
                     if (parsed && typeof parsed === 'object') {
+                        // Scompatta se l'oggetto è annidato
                         let flatObject = parsed;
-                        for (const wrapperKey of ["translations", "data", "languages", "traduzioni", "result"]) {
-                            if (parsed[wrapperKey] && typeof parsed[wrapperKey] === 'object') {
-                                flatObject = parsed[wrapperKey];
+                        for (const k of ["translations", "data", "languages", "traduzioni", "result"]) {
+                            if (parsed[k] && typeof parsed[k] === 'object') {
+                                flatObject = parsed[k];
                                 break;
                             }
                         }
 
-                        finalTranslations = {};
-                        I18N_LANGS.forEach(lang => {
-                            finalTranslations[lang] = (flatObject[lang] && typeof flatObject[lang] === 'string' && flatObject[lang].trim())
-                                ? flatObject[lang].trim()
-                                : testo_italiano;
-                        });
+                        // Verifica che ci siano le traduzioni
+                        const hasKeys = I18N_LANGS.some(lang => flatObject[lang] && typeof flatObject[lang] === 'string' && flatObject[lang].trim() !== '');
 
-                        console.log(`[magia-traduttore] ✅ Successo con: ${modelCandidate}`);
-                        break;
+                        if (hasKeys) {
+                            finalTranslations = {};
+                            I18N_LANGS.forEach(lang => {
+                                finalTranslations[lang] = (flatObject[lang] && typeof flatObject[lang] === 'string' && flatObject[lang].trim())
+                                    ? flatObject[lang].trim()
+                                    : testo_italiano;
+                            });
+
+                            console.log(`[magia-traduttore] ✅ Successo con modello: ${modelCandidate}`);
+                            break;
+                        }
                     }
                 } else {
                     const msg = data.error?.message || `HTTP ${response.status}`;
@@ -121,12 +127,13 @@ Respond ONLY with a valid JSON object matching this structure:
                     lastError = new Error(msg);
                 }
             } catch (callErr) {
+                console.warn(`[magia-traduttore] Errore con ${modelCandidate}:`, callErr.message);
                 lastError = callErr;
             }
         }
 
         if (!finalTranslations) {
-            console.warn("[magia-traduttore] Fallback su italiano:", lastError?.message);
+            console.warn("[magia-traduttore] Fallback finale su testo italiano:", lastError?.message);
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
@@ -135,7 +142,7 @@ Respond ONLY with a valid JSON object matching this structure:
         return res.status(200).json(finalTranslations);
 
     } catch (error) {
-        console.error("[magia-traduttore] Errore:", error);
+        console.error("[magia-traduttore] Errore critico:", error);
         const fallback = {};
         I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano || "");
         return res.status(200).json(fallback);
