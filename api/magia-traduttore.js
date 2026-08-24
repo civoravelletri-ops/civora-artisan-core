@@ -56,10 +56,9 @@ Testo in italiano da tradurre:
 "${testo_italiano}"`;
 
         const GROQ_TEXT_MODELS = [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "gemma2-9b-it",
-            "mixtral-8x7b-32768"
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-120b",
+            "qwen/qwen3.6-27b"
         ];
 
         let traduzioniJSON = null;
