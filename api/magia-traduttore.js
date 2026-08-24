@@ -32,11 +32,13 @@ module.exports = async function handler(req, res) {
             return res.status(200).json(fallback);
         }
 
-        const systemPrompt = `Sei un traduttore professionista per attività commerciali.
-Il tuo compito è tradurre il testo fornito in 11 lingue ("en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr").
-Mantieni un tono commerciale naturale. Se il testo è una lista di parole separate da virgole, mantieni le virgole.
+        const systemPrompt = `REGOLA DI SICUREZZA: NON RAGIONARE, NON INCLUDERE TAG <think> E NON SCRIVERE TESTO FUORI DAL JSON.
+Inizia la tua risposta DIRETTAMENTE con la parentesi graffa aperta { e chiudila con }.
 
-Rispondi ESCLUSIVAMENTE con un oggetto JSON valido, strutturato esattamente così:
+Sei un traduttore professionista per attività commerciali. Traduci il testo in 11 lingue ("en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr").
+Se il testo è una lista di parole con virgole, mantieni le virgole.
+
+Rispondi ESCLUSIVAMENTE con un JSON strutturato così:
 {
   "en": "...",
   "es": "...",
@@ -51,7 +53,7 @@ Rispondi ESCLUSIVAMENTE con un oggetto JSON valido, strutturato esattamente cos�
   "tr": "..."
 }`;
 
-        const userPrompt = `Contesto del testo: ${contesto}
+        const userPrompt = `Contesto: ${contesto}
 Testo in italiano da tradurre:
 "${testo_italiano}"`;
 
@@ -78,8 +80,8 @@ Testo in italiano da tradurre:
                             { role: "system", content: systemPrompt },
                             { role: "user", content: userPrompt }
                         ],
-                        temperature: 0.2,
-                        max_tokens: 1500
+                        temperature: 0.1,
+                        max_tokens: 3500
                     })
                 });
 
@@ -96,12 +98,16 @@ Testo in italiano da tradurre:
                         content = content.substring(start, end + 1);
                     }
 
-                    traduzioniJSON = JSON.parse(content);
-                    console.log(`[magia-traduttore] Successo con modello: ${modelCandidate}`);
-                    break;
+                    try {
+                        traduzioniJSON = JSON.parse(content);
+                        console.log(`[magia-traduttore] Successo immediato con: ${modelCandidate}`);
+                        break;
+                    } catch (parseE) {
+                        console.warn(`[magia-traduttore] JSON non completato su ${modelCandidate}, provo successivo...`);
+                    }
                 } else {
                     const errMsg = data.error?.message || `HTTP ${response.status}`;
-                    console.warn(`[magia-traduttore] Modello ${modelCandidate} non riuscito: ${errMsg}`);
+                    console.warn(`[magia-traduttore] Modello ${modelCandidate} fallito: ${errMsg}`);
                     lastError = new Error(errMsg);
                 }
             } catch (callErr) {
@@ -110,7 +116,7 @@ Testo in italiano da tradurre:
         }
 
         if (!traduzioniJSON) {
-            console.warn("[magia-traduttore] Tutti i modelli falliti, uso fallback:", lastError?.message);
+            console.warn("[magia-traduttore] Fallback su italiano:", lastError?.message);
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
