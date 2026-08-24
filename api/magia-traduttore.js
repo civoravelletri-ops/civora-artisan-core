@@ -31,17 +31,31 @@ module.exports = async function handler(req, res) {
             return res.status(200).json(fallback);
         }
 
-        const systemPrompt = `Sei un traduttore professionista per attività commerciali e saloni di bellezza.
-Traduci il testo fornito in queste lingue: "en", "es", "fr", "de", "pt", "ru", "ar", "ro", "zh", "sq", "hi", "tr".
-Mantieni un tono commerciale, elegante ed essenziale. Se il testo è lungo, mantieni la traduzione concisa e chiara.
-Se è una lista separata da virgole, mantieni le virgole.
+        // REGOLA RIGIDA: vieta il copia-incolla del testo originale
+        const systemPrompt = `Sei un traduttore professionista multilingue per attività commerciali e saloni di bellezza.
+Il tuo compito è tradurre il testo italiano in TUTTE queste 12 lingue:
+1. en (Inglese)
+2. es (Spagnolo)
+3. fr (Francese)
+4. de (Tedesco)
+5. pt (Portoghese)
+6. ru (Russo)
+7. ar (Arabo)
+8. ro (Rumeno)
+9. zh (Cinese)
+10. sq (Albanese)
+11. hi (Hindi)
+12. tr (Turco)
 
-Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
+REGOLE CRUCIALI:
+- DEVI TRADURRE OGNI SINGOLA LINGUA. È SEVERAMENTE VIETATO lasciare il testo in italiano per le lingue straniere!
+- Mantieni un tono elegante, chiaro e commerciale.
+- Rispondi ESCLUSIVAMENTE con un JSON valido con tutte le 12 chiavi:
 {"en":"...","es":"...","fr":"...","de":"...","pt":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
 
-        const userPrompt = `Contesto: ${contesto}\nTesto da tradurre:\n"${testo_italiano}"`;
+        const userPrompt = `Contesto: ${contesto}\nTesto originale da tradurre in tutte le 12 lingue:\n"""\n${testo_italiano}\n"""`;
 
-        // === AUTO-DISCOVERY DEI MODELLI GROQ ATTIVI (uguale a magia.js) ===
+        // === AUTO-DISCOVERY DEI MODELLI GROQ ATTIVI ===
         let dynamicModelsList = [];
         try {
             const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
@@ -54,9 +68,10 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
                         .map(m => m.id)
                         .filter(id => !id.includes("whisper") && !id.includes("guard") && !id.includes("embed") && !id.includes("vision"));
 
+                    // Priorità al 70B che gestisce traduzioni lunghe senza tagliare
                     chatModels.sort((a, b) => {
                         const score = (m) => {
-                            if (m.includes("llama-3.3")) return 100;
+                            if (m.includes("llama-3.3-70b")) return 100;
                             if (m.includes("llama-3.1-70b")) return 90;
                             if (m.includes("llama-3.1-8b")) return 80;
                             if (m.includes("mixtral")) return 50;
@@ -74,7 +89,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
 
         const candidateModels = dynamicModelsList.length > 0
             ? dynamicModelsList
-            : ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "gemma2-9b-it"];
+            : ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"];
 
         let traduzioniJSON = null;
         let lastError = null;
@@ -94,14 +109,14 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
                             { role: "system", content: systemPrompt },
                             { role: "user", content: userPrompt }
                         ],
-                        temperature: 0.1,
-                        max_tokens: 2500
+                        temperature: 0.2,
+                        max_tokens: 4096 // Aumentato a 4096 per non troncare i testi lunghi
                     })
                 });
 
                 const data = await response.json();
 
-                if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
+                if (response.ok && data.choices && data.choices[0]?.message?.content) {
                     let content = data.choices[0].message.content.trim();
                     content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
                     content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
@@ -127,13 +142,13 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
                     }
 
                     if (traduzioniJSON && typeof traduzioniJSON === 'object') {
-                        console.log(`[magia-traduttore] ✅ Successo per (${contesto}) con: ${modelCandidate}`);
+                        console.log(`[magia-traduttore] ✅ Successo con modello: ${modelCandidate}`);
                         break;
                     }
                 } else {
-                    const errMsg = data.error?.message || `HTTP ${response.status}`;
-                    console.warn(`[magia-traduttore] Modello ${modelCandidate} fallito (${errMsg}), provo successivo...`);
-                    lastError = new Error(errMsg);
+                    const msg = data.error?.message || `HTTP ${response.status}`;
+                    console.warn(`[magia-traduttore] ${modelCandidate} fallito (${msg}), provo successivo...`);
+                    lastError = new Error(msg);
                 }
             } catch (callErr) {
                 lastError = callErr;
@@ -141,7 +156,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
         }
 
         if (!traduzioniJSON) {
-            console.warn("[magia-traduttore] Fallback su italiano. Ultimo errore:", lastError?.message);
+            console.warn("[magia-traduttore] Fallback su italiano:", lastError?.message);
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
@@ -150,7 +165,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
         return res.status(200).json(traduzioniJSON);
 
     } catch (error) {
-        console.error("[api/magia-traduttore.js] Errore critico:", error);
+        console.error("[magia-traduttore] Errore critico:", error);
         const fallback = {};
         I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano || "");
         return res.status(200).json(fallback);
