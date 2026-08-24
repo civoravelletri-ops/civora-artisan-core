@@ -31,15 +31,17 @@ module.exports = async function handler(req, res) {
             return res.status(200).json(fallback);
         }
 
-        const systemPrompt = `You are a professional multilingual translator.
-Translate the Italian text into all these 12 languages: en, es, fr, de, pt, ru, ar, ro, zh, sq, hi, tr.
-Do not leave any language in Italian. Translate everything.
-Return ONLY valid JSON matching this exact structure:
-{"en":"...","es":"...","fr":"...","de":"...","pt":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
+        const systemPrompt = `You are a professional human translator.
+Translate the entire provided Italian text into these 12 languages: en, es, fr, de, pt, ru, ar, ro, zh, sq, hi, tr.
 
-        const userPrompt = `Context: ${contesto}\nText to translate:\n"""${testo_italiano}"""`;
+STRICT RULES:
+1. Provide the FULL, complete translation for each language.
+2. DO NOT use ellipsis, dots ("..."), or placeholders. Write the actual translated sentences.
+3. Respond ONLY with a valid JSON object where keys are the 2-letter language codes and values are the complete translated text strings.`;
 
-        // Modelli attivi e supportati su Groq
+        const userPrompt = `Context: ${contesto}\nItalian text to translate fully into all 12 languages:\n"""\n${testo_italiano}\n"""`;
+
+        // Modelli attivi e veloci
         const candidateModels = [
             "openai/gpt-oss-20b",
             "qwen/qwen3.6-27b",
@@ -63,8 +65,8 @@ Return ONLY valid JSON matching this exact structure:
                             { role: "system", content: systemPrompt },
                             { role: "user", content: userPrompt }
                         ],
-                        temperature: 0.1,
-                        max_tokens: 1500
+                        temperature: 0.2,
+                        max_tokens: 2200
                     })
                 });
 
@@ -74,7 +76,7 @@ Return ONLY valid JSON matching this exact structure:
                     const choice = data.choices[0];
                     let content = (choice.message?.content || choice.message?.reasoning_content || "").trim();
 
-                    // Rimuove blocchi di pensiero, markdown e tag
+                    // Pulizia tag e markdown
                     content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
                     content = content.replace(/<\/?think>/gi, "").trim();
                     content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
@@ -97,7 +99,6 @@ Return ONLY valid JSON matching this exact structure:
                     }
 
                     if (parsed && typeof parsed === 'object') {
-                        // Scompatta se l'oggetto è annidato
                         let flatObject = parsed;
                         for (const k of ["translations", "data", "languages", "traduzioni", "result"]) {
                             if (parsed[k] && typeof parsed[k] === 'object') {
@@ -106,19 +107,29 @@ Return ONLY valid JSON matching this exact structure:
                             }
                         }
 
-                        // Verifica che ci siano le traduzioni
-                        const hasKeys = I18N_LANGS.some(lang => flatObject[lang] && typeof flatObject[lang] === 'string' && flatObject[lang].trim() !== '');
+                        // VALIDATORE: Scarta se il testo è "..." o inferiore a 3 caratteri (quando il testo originale è lungo)
+                        const isValidTranslation = (val) => {
+                            if (!val || typeof val !== 'string') return false;
+                            const t = val.trim();
+                            if (t === '...' || t === '..' || t === '.' || t === '') return false;
+                            if (testo_italiano.length > 20 && t.length < 5) return false;
+                            return true;
+                        };
 
-                        if (hasKeys) {
+                        const validCount = I18N_LANGS.filter(lang => isValidTranslation(flatObject[lang])).length;
+
+                        if (validCount >= 6) { // Se almeno 6 lingue sono traduzioni valide e reali
                             finalTranslations = {};
                             I18N_LANGS.forEach(lang => {
-                                finalTranslations[lang] = (flatObject[lang] && typeof flatObject[lang] === 'string' && flatObject[lang].trim())
+                                finalTranslations[lang] = isValidTranslation(flatObject[lang])
                                     ? flatObject[lang].trim()
                                     : testo_italiano;
                             });
 
-                            console.log(`[magia-traduttore] ✅ Successo con modello: ${modelCandidate}`);
+                            console.log(`[magia-traduttore] ✅ Successo con ${modelCandidate} (${validCount}/12 lingue tradotte per esteso)`);
                             break;
+                        } else {
+                            console.warn(`[magia-traduttore] Il modello ${modelCandidate} ha restituito puntini o testo non valido, provo successivo...`);
                         }
                     }
                 } else {
@@ -133,7 +144,7 @@ Return ONLY valid JSON matching this exact structure:
         }
 
         if (!finalTranslations) {
-            console.warn("[magia-traduttore] Fallback finale su testo italiano:", lastError?.message);
+            console.warn("[magia-traduttore] Fallback su testo italiano:", lastError?.message);
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
