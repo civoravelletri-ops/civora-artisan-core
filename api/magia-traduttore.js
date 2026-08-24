@@ -25,77 +25,30 @@ module.exports = async function handler(req, res) {
         }
 
         if (!GROQ_API_KEY) {
-            console.error("[magia-traduttore] Manca GROQ_API_KEY nelle variabili d'ambiente!");
+            console.error("[magia-traduttore] Manca GROQ_API_KEY!");
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
         }
 
-        const systemPrompt = `You are a professional multilingual translator.
-Translate the provided Italian text into these 12 languages: en, es, fr, de, pt, ru, ar, ro, zh, sq, hi, tr.
-Keep a commercial, elegant and professional tone.
+        const systemPrompt = `You are a professional translator for local businesses and beauty salons.
+Translate the input Italian text into these 12 languages: "en", "es", "fr", "de", "pt", "ru", "ar", "ro", "zh", "sq", "hi", "tr".
+Maintain an elegant and concise tone. Translate every language, do not copy Italian text into foreign languages.
 
-IMPORTANT INSTRUCTIONS:
-- Translate EVERY language. DO NOT return empty strings.
-- Output ONLY a flat JSON object without any wrapping or markdown.
-Exact JSON format:
+Respond ONLY with a valid JSON object matching this structure:
 {"en":"...","es":"...","fr":"...","de":"...","pt":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
 
-        const userPrompt = `Context: ${contesto}\nItalian text to translate:\n"""${testo_italiano}"""`;
+        const userPrompt = `Context: ${contesto}\nText to translate:\n"""${testo_italiano}"""`;
 
-        // === AUTO-DISCOVERY MODELLI ===
-        let dynamicModelsList = [];
-        try {
-            const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
-                headers: { "Authorization": `Bearer ${GROQ_API_KEY.trim()}` }
-            });
-            if (modelsRes.ok) {
-                const modelsData = await modelsRes.json();
-                if (modelsData.data && Array.isArray(modelsData.data)) {
-                    const chatModels = modelsData.data
-                        .map(m => m.id)
-                        .filter(id => {
-                            const low = id.toLowerCase();
-                            return !low.includes("whisper") &&
-                                   !low.includes("guard") &&
-                                   !low.includes("embed") &&
-                                   !low.includes("vision") &&
-                                   !low.includes("orpheus") &&
-                                   !low.includes("canopylabs") &&
-                                   !low.includes("compound") &&
-                                   !low.includes("safeguard") &&
-                                   !low.includes("allam");
-                        });
+        // Calcolo dinamico max_tokens per evitare il rate-limit (TPM) su Groq
+        const tokenBudget = Math.min(Math.max(testo_italiano.length * 6, 800), 2000);
 
-                    chatModels.sort((a, b) => {
-                        const score = (m) => {
-                            const low = m.toLowerCase();
-                            if (low.includes("llama-3.3-70b")) return 100;
-                            if (low.includes("llama-3.1-8b")) return 90;
-                            if (low.includes("gpt-oss-120b")) return 85;
-                            if (low.includes("qwen3.6-27b")) return 80;
-                            if (low.includes("gpt-oss-20b")) return 75;
-                            if (low.includes("gemma2-9b")) return 70;
-                            return 10;
-                        };
-                        return score(b) - score(a);
-                    });
-                    dynamicModelsList = chatModels;
-                }
-            }
-        } catch (e) {
-            console.warn("[magia-traduttore Discovery] Fallback:", e.message);
-        }
-
-        const candidateModels = dynamicModelsList.length > 0
-            ? dynamicModelsList
-            : [
-                "llama-3.1-8b-instant",
-                "llama-3.3-70b-versatile",
-                "openai/gpt-oss-120b",
-                "qwen/qwen3.6-27b",
-                "openai/gpt-oss-20b"
-              ];
+        // Llama-3.1-8b-instant ha 60.000 TPM di limite (non va mai in rate limit)
+        const candidateModels = [
+            "llama-3.1-8b-instant",
+            "gemma2-9b-it",
+            "qwen/qwen3.6-27b"
+        ];
 
         let finalTranslations = null;
         let lastError = null;
@@ -115,19 +68,15 @@ Exact JSON format:
                             { role: "user", content: userPrompt }
                         ],
                         temperature: 0.1,
-                        max_tokens: 3500
+                        max_tokens: tokenBudget
                     })
                 });
 
                 const data = await response.json();
 
-                if (response.ok && data.choices && data.choices.length > 0) {
-                    const choice = data.choices[0];
-                    let content = (choice.message?.content || choice.message?.reasoning_content || "").trim();
-
-                    // Pulizia approfondita
+                if (response.ok && data.choices && data.choices[0]?.message?.content) {
+                    let content = data.choices[0].message.content.trim();
                     content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-                    content = content.replace(/<\/?think>/gi, "").trim();
                     content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
 
                     const firstBrace = content.indexOf('{');
@@ -148,30 +97,23 @@ Exact JSON format:
                     }
 
                     if (parsed && typeof parsed === 'object') {
-                        // Scompatta se il modello ha annidato le lingue in "translations", "languages", ecc.
                         let flatObject = parsed;
-                        for (const wrapperKey of ["translations", "data", "languages", "traduzioni", "result", "output"]) {
+                        for (const wrapperKey of ["translations", "data", "languages", "traduzioni", "result"]) {
                             if (parsed[wrapperKey] && typeof parsed[wrapperKey] === 'object') {
                                 flatObject = parsed[wrapperKey];
                                 break;
                             }
                         }
 
-                        // Verifichiamo e normalizziamo le lingue
-                        const validKeysCount = I18N_LANGS.filter(lang => flatObject[lang] && typeof flatObject[lang] === 'string' && flatObject[lang].trim() !== '').length;
+                        finalTranslations = {};
+                        I18N_LANGS.forEach(lang => {
+                            finalTranslations[lang] = (flatObject[lang] && typeof flatObject[lang] === 'string' && flatObject[lang].trim())
+                                ? flatObject[lang].trim()
+                                : testo_italiano;
+                        });
 
-                        // Se ha tradotto con successo almeno la maggior parte delle lingue
-                        if (validKeysCount >= 2) {
-                            finalTranslations = {};
-                            I18N_LANGS.forEach(lang => {
-                                finalTranslations[lang] = (flatObject[lang] && flatObject[lang].trim()) ? flatObject[lang].trim() : testo_italiano;
-                            });
-
-                            console.log(`[magia-traduttore] ✅ Traduzione completata con successo usando: ${modelCandidate} (${validKeysCount}/12 lingue validate)`);
-                            break;
-                        } else {
-                            console.warn(`[magia-traduttore] Risposta di ${modelCandidate} conteneva campi vuoti, provo successivo...`);
-                        }
+                        console.log(`[magia-traduttore] ✅ Successo con: ${modelCandidate}`);
+                        break;
                     }
                 } else {
                     const msg = data.error?.message || `HTTP ${response.status}`;
@@ -179,13 +121,12 @@ Exact JSON format:
                     lastError = new Error(msg);
                 }
             } catch (callErr) {
-                console.warn(`[magia-traduttore] Errore con ${modelCandidate}:`, callErr.message);
                 lastError = callErr;
             }
         }
 
         if (!finalTranslations) {
-            console.warn("[magia-traduttore] Fallback finale su testo italiano.");
+            console.warn("[magia-traduttore] Fallback su italiano:", lastError?.message);
             const fallback = {};
             I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
             return res.status(200).json(fallback);
@@ -194,7 +135,7 @@ Exact JSON format:
         return res.status(200).json(finalTranslations);
 
     } catch (error) {
-        console.error("[magia-traduttore] Errore critico:", error);
+        console.error("[magia-traduttore] Errore:", error);
         const fallback = {};
         I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano || "");
         return res.status(200).json(fallback);
