@@ -65,7 +65,7 @@ ${testo_italiano}`;
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "GPT-OSS-120B",
+                model: "Qwen 3.6 27B",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPromptContent }
