@@ -1,103 +1,128 @@
-export default async function handler(req, res) {
-    // Intestazioni CORS (permettono al tuo sito di comunicare con Vercel)
+module.exports = async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
-    // Gestione della pre-richiesta OPTIONS
     if (req.method === 'OPTIONS') {
         res.status(200).end();
         return;
     }
 
-    const { testo_italiano, contesto } = req.body;
-    const GROQ_API_KEY = process.env.GROQ_API_KEY;
+    // Elenco completo delle lingue con 'hi' (Hindi) incluso
+    const I18N_LANGS = ["en", "es", "fr", "de", "pt", "ru", "ar", "ro", "zh", "sq", "hi", "tr"];
+    let testo_italiano = "";
 
-    // Lista aggiornata delle 11 lingue (per i fallback e il prompt)
-        const I18N_LANGS = ["en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr"];
-    
-        if (!testo_italiano || testo_italiano.trim() === "") {
-            // Se il testo è vuoto, restituisci un oggetto con tutte le lingue vuote
+    try {
+        const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+        testo_italiano = (body.testo_italiano || body.text || "").trim();
+        const contesto = body.contesto || "profilo studio";
+        const GROQ_API_KEY = process.env.GROQ_API_KEY || process.env.GROQ_KEY || process.env.GROQ_AI_KEY || process.env.GROQ_TOKEN;
+
+        if (!testo_italiano) {
             const emptyTranslations = {};
             I18N_LANGS.forEach(lang => emptyTranslations[lang] = "");
             return res.status(200).json(emptyTranslations);
         }
-    
-        // Diciamo all'IA chi è e cosa deve fare. Le imponiamo di rispondere SOLO in formato JSON.
-        const systemPrompt = `Sei un traduttore professionista ed esperto di marketing per attività commerciali locali, inclusi saloni di bellezza, studi medici e cliniche veterinarie.
-            Il tuo compito è prendere il testo in italiano e tradurlo in 11 lingue.
-            Mantieni un tono commerciale, persuasivo e naturale, adattandolo leggermente al contesto fornito (es. più empatico per un veterinario, più elegante per un salone).
-            Se il testo è una lista di parole separate da virgola (tags), mantieni la separazione con le virgole.
-    
-            REGOLA DI FORMATTAZIONE JSON DI MASSIMA IMPORTANZA:
-            - Devi restituire UNICAMENTE un oggetto JSON valido.
-            - Non aggiungere MAI commenti, spiegazioni, saluti o testo fuori dal JSON.
-            - Ogni valore del JSON deve essere una stringa pulita.
-            - NON avvolgere le singole traduzioni in doppie virgolette interne (es. ""testo"" o \\"\\"testo\\"\\" è severamente vietato).
-            - Se devi includere delle virgolette nella traduzione, usa le virgolette singole (es. 'testo') oppure esegui il corretto escape con una sola barra rovesciata (\\").
-            - Assicurati che non ci siano virgolette spurie o ridondanti all'inizio o alla fine della stringa tradotta.
-    
-            L'oggetto JSON deve avere ESATTAMENTE queste 11 chiavi (ISO 639-1 per le lingue):
-            "en" (Inglese)
-            "es" (Spagnolo)
-            "fr" (Francese)
-            "de" (Tedesco)
-            "ru" (Russo)
-            "ar" (Arabo standard)
-            "ro" (Rumeno)
-            "zh" (Cinese semplificato)
-            "sq" (Albanese)
-            "hi" (Hindi)
-            "tr" (Turco)`;
 
-    // Rimosse le virgolette fisiche dal prompt dell'utente attorno al testo per evitare di confondere il modello
-    const userPromptContent = `Contesto del testo: ${contesto || "Generico"}
-
-Testo in italiano da tradurre (traduci solo il contenuto puro, senza racchiuderlo in virgolette esterne extra):
-${testo_italiano}`;
-
-    try {
-        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${GROQ_API_KEY}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "llama 3.3 70B",
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    { role: "user", content: userPromptContent }
-                ],
-                temperature: 0.2, // Ridotta leggermente per minimizzare i comportamenti di formattazione imprevisti
-                response_format: { type: "json_object" } // FORZA Groq a sputare fuori un JSON perfetto
-            })
-        });
-
-        const data = await response.json();
-
-        if (data.error) {
-            console.error("Errore da Groq API:", data.error);
-            throw new Error(data.error.message);
+        if (!GROQ_API_KEY) {
+            console.error("[magia-traduttore] Manca GROQ_API_KEY su Vercel!");
+            const fallback = {};
+            I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
+            return res.status(200).json(fallback);
         }
 
-        if (!data.choices || data.choices.length === 0) {
-            throw new Error("L'IA non ha restituito risultati validi.");
+        const systemPrompt = `Sei un traduttore professionista per attività commerciali e saloni di bellezza.
+Traduci il testo fornito in queste lingue: "en", "es", "fr", "de", "pt", "ru", "ar", "ro", "zh", "sq", "hi", "tr".
+Mantieni un tono commerciale, elegante ed essenziale. Se il testo è lungo, mantieni la traduzione concisa e chiara.
+Se è una lista separata da virgole, mantieni le virgole.
+
+Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
+{"en":"...","es":"...","fr":"...","de":"...","pt":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
+
+        const userPrompt = `Contesto: ${contesto}\nTesto da tradurre:\n"${testo_italiano}"`;
+
+        const GROQ_TEXT_MODELS = [
+            "groq/llama 3.3 70B",
+            "openai/gpt-oss-120b"
+        ];
+
+        let traduzioniJSON = null;
+        let lastError = null;
+
+        for (const modelCandidate of GROQ_TEXT_MODELS) {
+            try {
+                const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${GROQ_API_KEY}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        model: modelCandidate,
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            { role: "user", content: userPrompt }
+                        ],
+                        temperature: 0.1,
+                        max_tokens: 1800
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.choices && data.choices.length > 0 && data.choices[0].message?.content) {
+                    let content = data.choices[0].message.content.trim();
+                    content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+                    content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
+
+                    const firstBrace = content.indexOf('{');
+                    const lastBrace = content.lastIndexOf('}');
+                    if (firstBrace !== -1 && lastBrace > firstBrace) {
+                        content = content.substring(firstBrace, lastBrace + 1);
+                    }
+
+                    try {
+                        traduzioniJSON = JSON.parse(content);
+                    } catch (e1) {
+                        let repaired = content.trim();
+                        if (!repaired.endsWith('}')) {
+                            if (repaired.endsWith('"')) repaired += '}';
+                            else repaired += '"}';
+                        }
+                        try {
+                            traduzioniJSON = JSON.parse(repaired);
+                        } catch (e2) {
+                            traduzioniJSON = null;
+                        }
+                    }
+
+                    if (traduzioniJSON) {
+                        console.log(`[magia-traduttore] Successo per (${contesto}) con: ${modelCandidate}`);
+                        break;
+                    }
+                } else {
+                    const errMsg = data.error?.message || `HTTP ${response.status}`;
+                    lastError = new Error(errMsg);
+                }
+            } catch (callErr) {
+                lastError = callErr;
+            }
         }
 
-        // Il testo restituito è già un JSON perfetto in formato stringa
-        const jsonString = data.choices[0].message.content.trim();
-        const traduzioni = JSON.parse(jsonString);
+        if (!traduzioniJSON) {
+            console.warn("[magia-traduttore] Fallback su italiano:", lastError?.message);
+            const fallback = {};
+            I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
+            return res.status(200).json(fallback);
+        }
 
-        // Inviamo il pacchetto di 10 lingue al sito
-        res.status(200).json(traduzioni);
+        return res.status(200).json(traduzioniJSON);
 
     } catch (error) {
-        console.error("Errore magia-traduttore:", error);
-        // In caso di errore critico, restituiamo il testo originale in italiano su tutte le lingue per non bloccare il salvataggio
-        const fallbackTranslations = {};
-        I18N_LANGS.forEach(lang => fallbackTranslations[lang] = testo_italiano);
-        res.status(200).json(fallbackTranslations);
+        console.error("[api/magia-traduttore.js] Errore critico:", error);
+        const fallback = {};
+        I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano || "");
+        return res.status(200).json(fallback);
     }
-}
+};
