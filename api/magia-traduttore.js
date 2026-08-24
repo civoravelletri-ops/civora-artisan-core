@@ -9,13 +9,14 @@ module.exports = async function handler(req, res) {
         return;
     }
 
-    const I18N_LANGS = ["en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr"];
+    // Le 10 lingue di destinazione ufficiali di Civora (+ it di base)
+    const I18N_LANGS = ["en", "es", "fr", "de", "pt", "ro", "zh", "ar", "sq", "tr"];
     let testo_italiano = "";
 
     try {
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
         testo_italiano = (body.testo_italiano || body.text || "").trim();
-        const contesto = body.contesto || "servizio salone";
+        const contesto = body.contesto || "profilo studio";
         const GROQ_API_KEY = process.env.GROQ_API_KEY || process.env.GROQ_KEY || process.env.GROQ_AI_KEY || process.env.GROQ_TOKEN;
 
         if (!testo_italiano) {
@@ -31,11 +32,15 @@ module.exports = async function handler(req, res) {
             return res.status(200).json(fallback);
         }
 
-        const systemPrompt = `Sei un traduttore professionista per attività commerciali. Traduci il testo in 11 lingue ("en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr").
-Rispondi ESCLUSIVAMENTE con un JSON puro valido senza tag o commenti:
-{"en":"...","es":"...","fr":"...","de":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
+        const systemPrompt = `Sei un traduttore professionista per attività commerciali e saloni di bellezza.
+Traduci il testo fornito in queste 10 lingue: "en", "es", "fr", "de", "pt", "ro", "zh", "sq", "ar", "tr".
+Mantieni un tono commerciale, elegante ed essenziale. Se il testo è lungo, mantieni la traduzione concisa e chiara.
+Se è una lista separata da virgole, mantieni le virgole.
 
-        const userPrompt = `Contesto: ${contesto}\nTraduci questo testo in italiano:\n"${testo_italiano}"`;
+Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
+{"en":"...","es":"...","fr":"...","de":"...","pt":"...","ro":"...","zh":"...","sq":"...","ar":"...","tr":"..."}`;
+
+        const userPrompt = `Contesto: ${contesto}\nTesto da tradurre:\n"${testo_italiano}"`;
 
         const GROQ_TEXT_MODELS = [
             "openai/gpt-oss-20b",
@@ -62,7 +67,7 @@ Rispondi ESCLUSIVAMENTE con un JSON puro valido senza tag o commenti:
                             { role: "user", content: userPrompt }
                         ],
                         temperature: 0.1,
-                        max_tokens: 800
+                        max_tokens: 1800
                     })
                 });
 
@@ -79,16 +84,28 @@ Rispondi ESCLUSIVAMENTE con un JSON puro valido senza tag o commenti:
                         content = content.substring(firstBrace, lastBrace + 1);
                     }
 
+                    // Riparatore JSON rapido anti-taglio
                     try {
                         traduzioniJSON = JSON.parse(content);
-                        console.log(`[magia-traduttore] Successo con: ${modelCandidate}`);
+                    } catch (e1) {
+                        let repaired = content.trim();
+                        if (!repaired.endsWith('}')) {
+                            if (repaired.endsWith('"')) repaired += '}';
+                            else repaired += '"}';
+                        }
+                        try {
+                            traduzioniJSON = JSON.parse(repaired);
+                        } catch (e2) {
+                            traduzioniJSON = null;
+                        }
+                    }
+
+                    if (traduzioniJSON) {
+                        console.log(`[magia-traduttore] Successo per (${contesto}) con: ${modelCandidate}`);
                         break;
-                    } catch (parseE) {
-                        console.warn(`[magia-traduttore] Parse fallito su ${modelCandidate}:`, content);
                     }
                 } else {
                     const errMsg = data.error?.message || `HTTP ${response.status}`;
-                    console.warn(`[magia-traduttore] Modello ${modelCandidate} non riuscito: ${errMsg}`);
                     lastError = new Error(errMsg);
                 }
             } catch (callErr) {
