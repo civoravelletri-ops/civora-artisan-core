@@ -9,7 +9,6 @@ module.exports = async function handler(req, res) {
         return;
     }
 
-    // Elenco completo delle lingue con 'hi' (Hindi) incluso
     const I18N_LANGS = ["en", "es", "fr", "de", "pt", "ru", "ar", "ro", "zh", "sq", "hi", "tr"];
     let testo_italiano = "";
 
@@ -42,8 +41,10 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
 
         const userPrompt = `Contesto: ${contesto}\nTesto da tradurre:\n"${testo_italiano}"`;
 
+        // ✅ NOMI CORRETTI DEI MODELLI SU GROQ:
         const GROQ_TEXT_MODELS = [
-            "groq/llama-3.1-8b-instant",
+            "llama-3.1-8b-instant",
+            "llama-3.3-70b-versatile"
         ];
 
         let traduzioniJSON = null;
@@ -59,6 +60,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
                     },
                     body: JSON.stringify({
                         model: modelCandidate,
+                        response_format: { type: "json_object" }, // Forza la risposta in formato JSON nativo
                         messages: [
                             { role: "system", content: systemPrompt },
                             { role: "user", content: userPrompt }
