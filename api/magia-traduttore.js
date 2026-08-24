@@ -9,8 +9,8 @@ module.exports = async function handler(req, res) {
         return;
     }
 
-    // Le 10 lingue di destinazione ufficiali di Civora (+ it di base)
-    const I18N_LANGS = ["en", "es", "fr", "de", "pt", "ro", "zh", "ar", "sq", "tr"];
+    // Elenco completo delle lingue con 'hi' (Hindi) incluso
+    const I18N_LANGS = ["en", "es", "fr", "de", "pt", "ru", "ar", "ro", "zh", "sq", "hi", "tr"];
     let testo_italiano = "";
 
     try {
@@ -33,12 +33,12 @@ module.exports = async function handler(req, res) {
         }
 
         const systemPrompt = `Sei un traduttore professionista per attività commerciali e saloni di bellezza.
-Traduci il testo fornito in queste 10 lingue: "en", "es", "fr", "de", "pt", "ro", "zh", "sq", "ar", "tr".
+Traduci il testo fornito in queste lingue: "en", "es", "fr", "de", "pt", "ru", "ar", "ro", "zh", "sq", "hi", "tr".
 Mantieni un tono commerciale, elegante ed essenziale. Se il testo è lungo, mantieni la traduzione concisa e chiara.
 Se è una lista separata da virgole, mantieni le virgole.
 
 Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
-{"en":"...","es":"...","fr":"...","de":"...","pt":"...","ro":"...","zh":"...","sq":"...","ar":"...","tr":"..."}`;
+{"en":"...","es":"...","fr":"...","de":"...","pt":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
 
         const userPrompt = `Contesto: ${contesto}\nTesto da tradurre:\n"${testo_italiano}"`;
 
@@ -84,7 +84,6 @@ Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
                         content = content.substring(firstBrace, lastBrace + 1);
                     }
 
-                    // Riparatore JSON rapido anti-taglio
                     try {
                         traduzioniJSON = JSON.parse(content);
                     } catch (e1) {
