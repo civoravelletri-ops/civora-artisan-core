@@ -26,22 +26,18 @@ module.exports = async function handler(req, res) {
         }
 
         let systemPrompt = "";
-        let temperature = 0.3;
-        let maxTokensBudget = 800;
-
         const currentSector = contesto.settore || "";
 
         if (currentSector === "cura_persona") {
             systemPrompt = `Sei un copywriter e marketing specialist per saloni di bellezza e cura della persona.
-Scrivi testi eleganti, caldi, persuasivi e rassicuranti.
-NON scrivere mai i tuoi pensieri, note o passaggi mentali in inglese.
-Rispondi DIRETTAMENTE con il testo promozionale definitivo in lingua italiana.`;
+Scrivi testi eleganti, caldi, persuasivi e commerciali in lingua italiana.
+Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgolette e senza spiegazioni.`;
         } else if (currentSector === "veterinario") {
-            systemPrompt = `Sei un copywriter per cliniche veterinarie. Tono empatico, rassicurante e professionale in italiano.`;
+            systemPrompt = `Sei un copywriter per cliniche veterinarie. Tono empatico e professionale in lingua italiana.`;
         } else if (currentSector === "agrigarden") {
-            systemPrompt = `Sei l'Assistente Digitale per AgriGarden. Tono rustico e umano in italiano.`;
+            systemPrompt = `Sei l'Assistente Digitale per AgriGarden. Tono rustico e umano in lingua italiana.`;
         } else {
-            systemPrompt = `Sei un esperto copywriter commerciale in lingua italiana.`;
+            systemPrompt = `Sei un copywriter commerciale in lingua italiana.`;
         }
 
         let userPromptContent = '';
@@ -49,45 +45,39 @@ Rispondi DIRETTAMENTE con il testo promozionale definitivo in lingua italiana.`;
         if (currentSector === "cura_persona") {
             const isProfile = campo.endsWith("_profile");
             const entityName = isProfile ? (contesto.store_name || "questo studio") : (contesto.product_name || "questo servizio");
-            const entityType = isProfile ? (contesto.myTypeStore || "salone e cura della persona") : "cura della persona";
+            const entityType = isProfile ? (contesto.myTypeStore || "salone di bellezza") : "cura della persona";
             const baseInfo = `Attività: "${entityName}" (${entityType}).`;
             const currentText = (contesto.currentFieldValue || "").trim();
 
             if (campo === "short_description_profile") {
-                userPromptContent = `${baseInfo}\nCrea un breve slogan ad effetto (massimo 120 caratteri).`;
-                maxTokensBudget = 100;
+                userPromptContent = `${baseInfo}\nCrea un breve slogan ad effetto (massimo 120 caratteri) che catturi l'attenzione. Rispondi solo con lo slogan.`;
             } else if (campo === "description_profile") {
-                userPromptContent = `${baseInfo}\nScrivi una descrizione accogliente ed elegante per i clienti di ESATTAMENTE 2 brevi paragrafi (circa 500-600 caratteri in totale). Non superare 750 caratteri.`;
-                maxTokensBudget = 400;
-            } else if (campo === "tags_profile" || campo === "specializations_profile") {
-                userPromptContent = `${baseInfo}\nGenera 6-8 voci commerciali separate solo da virgola.`;
-                maxTokensBudget = 150;
+                userPromptContent = `${baseInfo}\nScrivi una descrizione accogliente ed elegante per i clienti di ESATTAMENTE 2 brevi paragrafi (circa 500-650 caratteri in totale). Non superare i 750 caratteri totali.`;
+            } else if (campo === "tags_profile") {
+                userPromptContent = `${baseInfo}\nGenera 7-10 parole chiave (tags) separate ESCLUSIVAMENTE da virgola, senza numeri e senza punti elenco. Esempio: bellezza, relax, cura viso, benessere, trattamenti`;
+            } else if (campo === "specializations_profile") {
+                userPromptContent = `${baseInfo}\nGenera 5-7 specializzazioni chiave separate ESCLUSIVAMENTE da virgola, senza numeri e senza punti elenco. Esempio: Taglio personalizzato, Trattamenti bio, Colore naturale, Modellatura barba`;
             } else {
-                userPromptContent = `${baseInfo}\nGenera il contenuto per il campo "${campo}". Testo base: "${currentText}"`;
-                maxTokensBudget = 250;
+                userPromptContent = `${baseInfo}\nGenera il contenuto per "${campo}". Testo base: "${currentText}"`;
             }
         } else if (currentSector === "veterinario") {
             const currentText = (contesto.currentFieldValue || "").trim();
             if (campo === "short_description_profile_vet") {
-                userPromptContent = `Clinica: "${contesto.store_name}". Crea uno slogan (max 120 caratteri).`;
-                maxTokensBudget = 100;
+                userPromptContent = `Clinica: "${contesto.store_name}". Crea uno slogan accattivante (max 120 caratteri).`;
             } else if (campo === "description_profile_vet") {
-                userPromptContent = `Clinica: "${contesto.store_name}". Scrivi una descrizione di 2 brevi paragrafi (max 600 caratteri).`;
-                maxTokensBudget = 400;
+                userPromptContent = `Clinica: "${contesto.store_name}". Scrivi una descrizione di 2 brevi paragrafi (max 650 caratteri).`;
+            } else if (campo === "tags_profile_vet" || campo === "specializations_profile_vet") {
+                userPromptContent = `Clinica: "${contesto.store_name}". Genera 6-8 voci separate da virgola, senza elenchi numerati.`;
             } else {
-                userPromptContent = `Genera 5-7 voci separate da virgola per "${campo}".`;
-                maxTokensBudget = 150;
+                userPromptContent = `Genera il contenuto per "${campo}".`;
             }
         } else if (campo === "storia_azienda") {
             userPromptContent = `Riscrivi questa filosofia aziendale per un vivaio: "${(contesto.testo || '').trim()}".`;
-            maxTokensBudget = 500;
         } else if (task === "estimate_shipping_attributes") {
-            systemPrompt = `Rispondi ESCLUSIVAMENTE con un JSON valido con: "weight" (kg), "length" (cm), "width" (cm), "height" (cm).`;
+            systemPrompt = `Rispondi ESCLUSIVAMENTE con un JSON valido: {"weight": 3.5, "length": 25, "width": 25, "height": 60}`;
             userPromptContent = `Estima peso e dimensioni per: "${contesto.productName || contesto.nome}".`;
-            maxTokensBudget = 150;
         } else {
-            userPromptContent = `Genera un contenuto commerciale conciso per "${task}" relativo a "${contesto.nome || contesto.productName}".`;
-            maxTokensBudget = 300;
+            userPromptContent = `Genera un contenuto conciso per "${task}" relativo a "${contesto.nome || contesto.productName}".`;
         }
 
         let messages = [
@@ -100,10 +90,10 @@ Rispondi DIRETTAMENTE con il testo promozionale definitivo in lingua italiana.`;
             responseFormat = { "type": "json_object" };
         }
 
-        // Modelli attivi e stabili su Groq
+        // Qwen con modalità non-ragionamento (istantanea e pulita al 100%)
         const candidateModels = [
-            "openai/gpt-oss-20b",
             "qwen/qwen3.6-27b",
+            "openai/gpt-oss-20b",
             "openai/gpt-oss-120b"
         ];
 
@@ -115,9 +105,16 @@ Rispondi DIRETTAMENTE con il testo promozionale definitivo in lingua italiana.`;
                 const bodyRequest = {
                     model: modelCandidate,
                     messages: messages,
-                    temperature: temperature,
-                    max_tokens: maxTokensBudget
+                    temperature: 0.7,
+                    max_tokens: 800 // Spazio sufficiente per non troncare mai
                 };
+
+                // Disattiva il ragionamento su Qwen (risponde subito in italiano senza pensieri)
+                if (modelCandidate.includes("qwen")) {
+                    bodyRequest.reasoning_effort = "none";
+                } else if (modelCandidate.includes("gpt-oss")) {
+                    bodyRequest.include_reasoning = false;
+                }
 
                 if (responseFormat) {
                     bodyRequest.response_format = responseFormat;
@@ -136,46 +133,42 @@ Rispondi DIRETTAMENTE con il testo promozionale definitivo in lingua italiana.`;
 
                 if (response.ok && data.choices && data.choices.length > 0) {
                     const choice = data.choices[0];
-                    testoGenerato = (choice.message?.content || choice.message?.reasoning_content || "").trim();
+                    testoGenerato = (choice.message?.content || "").trim();
                     if (testoGenerato) {
                         console.log(`[Magia AI] Successo con: ${modelCandidate}`);
                         break;
                     }
                 } else {
-                    const errMsg = data.error?.message || `HTTP ${response.status} - ${JSON.stringify(data)}`;
-                    console.warn(`[Magia AI] Modello ${modelCandidate} fallito:`, errMsg);
+                    const errMsg = data.error?.message || `HTTP ${response.status}`;
+                    console.warn(`[Magia AI] Modello ${modelCandidate} fallito: ${errMsg}`);
                     lastError = new Error(errMsg);
                 }
             } catch (callErr) {
-                console.warn(`[Magia AI] Errore connessione ${modelCandidate}:`, callErr.message);
                 lastError = callErr;
             }
         }
 
         if (!testoGenerato) {
-            return res.status(500).json({ errore: "Errore durante la generazione: " + (lastError?.message || "Nessuna risposta dai modelli Groq") });
+            return res.status(500).json({ errore: "Errore durante la generazione: " + (lastError?.message || "Servizio non disponibile") });
         }
 
-        // === PULIZIA RADICALE E INTELLIGENTE DEL TESTO GENERATO ===
+        // === PULIZIA FINALE SICURA ===
         testoGenerato = testoGenerato.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
         testoGenerato = testoGenerato.replace(/<\/?think>/gi, "").trim();
 
-        // 1. Se il modello ha incluso passaggi di bozza (es. "Draft Generation:", "Draft:", "Bozza:"), prendiamo solo la parte finale
-        if (/Draft Generation|Mental Refinement|Draft:|Bozza:/i.test(testoGenerato)) {
-            const splitDraft = testoGenerato.split(/(?:Draft Generation[^\n]*\n|Mental Refinement[^\n]*\n|Draft:\s*\n|Bozza:\s*\n)/i);
+        // Se è presente qualsiasi residuo di "Here's a thinking process"
+        if (/Draft Generation|Mental Refinement|thinking process/i.test(testoGenerato)) {
+            const splitDraft = testoGenerato.split(/(?:Draft Generation[^\n]*\n|Mental Refinement[^\n]*\n|thinking process[^\n]*\n)/i);
             if (splitDraft.length > 1) {
                 testoGenerato = splitDraft[splitDraft.length - 1].trim();
             }
         }
 
-        // 2. Se inizia con elenchi puntati di ragionamento in inglese ("1. **Analyze...**"), li rimuove
+        // Rimuove elenchi numerati iniziali
         testoGenerato = testoGenerato.replace(/^\s*\d+\.\s+\*\*[^*]+\*\*[\s\S]*?\n\n/gim, "").trim();
-        testoGenerato = testoGenerato.replace(/^\s*-\s+[^\n]+\n/gm, "").trim();
-
-        // 3. Rimuove virgolette all'inizio e alla fine
         testoGenerato = testoGenerato.replace(/^["']+|["']+$/g, "").trim();
 
-        // 4. Stima Spedizione JSON
+        // 1. Spedizione JSON
         if (task === "estimate_shipping_attributes") {
             try {
                 const start = testoGenerato.indexOf('{');
@@ -190,11 +183,11 @@ Rispondi DIRETTAMENTE con il testo promozionale definitivo in lingua italiana.`;
             }
         }
 
-        // Risposta finale pulita
+        // 2. Risultato finale
         return res.status(200).json({ risultato: testoGenerato });
 
     } catch (error) {
-        console.error("[api/magia.js] Errore critico:", error);
+        console.error("[api/magia.js] Errore:", error);
         res.status(500).json({ errore: "Errore: " + error.message });
     }
 };
