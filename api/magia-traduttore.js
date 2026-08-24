@@ -11,12 +11,13 @@ module.exports = async function handler(req, res) {
     }
 
     const I18N_LANGS = ["en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr"];
+    let testo_italiano = "";
 
     try {
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-        const testo_italiano = (body.testo_italiano || body.text || "").trim();
+        testo_italiano = (body.testo_italiano || body.text || "").trim();
         const contesto = body.contesto || "servizio salone";
-        const GROQ_API_KEY = process.env.GROQ_API_KEY;
+        const GROQ_API_KEY = process.env.GROQ_API_KEY || process.env.GROQ_KEY || process.env.GROQ_AI_KEY || process.env.GROQ_TOKEN;
 
         if (!testo_italiano) {
             const emptyTranslations = {};
@@ -31,31 +32,25 @@ module.exports = async function handler(req, res) {
             return res.status(200).json(fallback);
         }
 
-        const systemPrompt = `Sei un traduttore professionista ed esperto di marketing per attività commerciali locali e saloni di bellezza.
-Il tuo compito è prendere il testo in italiano e tradurlo in 11 lingue.
-Mantieni un tono commerciale, elegante e naturale. Se il testo è una lista di parole separate da virgola (tags), mantieni la separazione con le virgole.
-
-REGOLA JSON:
-- Rispondi ESCLUSIVAMENTE con un oggetto JSON valido.
-- Nessun testo fuori dal JSON.
-
-Chiavi richieste: "en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr".`;
+        const systemPrompt = `Sei un traduttore professionista per attività commerciali e saloni di bellezza.
+Traduci il testo fornito in queste 11 lingue: "en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "tr".
+Mantieni un tono naturale, commerciale ed elegante. Se il testo è una lista separata da virgole, mantieni le virgole.
+Rispondi ESCLUSIVAMENTE con un oggetto JSON valido.`;
 
         const userPrompt = `Contesto: ${contesto}
-Testo in italiano da tradurre:
+Testo in italiano da tradurre in formato JSON:
 ${testo_italiano}`;
 
-        // MODELLI UFFICIALI AD ALTA VELOCITÀ CERTIFICATI PER JSON MODE (Senza perdite di tempo)
-                const GROQ_TEXT_MODELS = [
-                    "llama-3.3-70b-versatile",
-                    "gemma2-9b-it",
-                    "mixtral-8x7b-32768"
-                ];
+        const GROQ_TEXT_MODELS = [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "gemma2-9b-it",
+            "mixtral-8x7b-32768"
+        ];
 
         let traduzioniJSON = null;
         let lastError = null;
 
-        // 2. CICLO DI TENTATIVO SUI MODELLI ATTIVI
         for (const modelCandidate of GROQ_TEXT_MODELS) {
             try {
                 const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -85,7 +80,7 @@ ${testo_italiano}`;
                     break;
                 } else {
                     const errMsg = data.error?.message || `HTTP ${response.status}`;
-                    console.warn(`[Magia Traduttore] Modello ${modelCandidate} fallito (${errMsg}), provo successivo...`);
+                    console.warn(`[Magia Traduttore] Modello ${modelCandidate} (${errMsg}), provo successivo...`);
                     lastError = new Error(errMsg);
                 }
             } catch (callErr) {
@@ -94,14 +89,16 @@ ${testo_italiano}`;
         }
 
         if (!traduzioniJSON) {
-            throw new Error("Nessun modello Groq ha risposto: " + (lastError?.message || "Errore sconosciuto"));
+            console.warn("Groq non disponibile, uso fallback italiano.");
+            const fallback = {};
+            I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano);
+            return res.status(200).json(fallback);
         }
 
-        // Restituisci il dizionario tradotto
         return res.status(200).json(traduzioniJSON);
 
     } catch (error) {
-        console.error("[api/magia-traduttore.js] Errore critico:", error.message);
+        console.error("[api/magia-traduttore.js] Errore catturato:", error.message);
         const fallback = {};
         I18N_LANGS.forEach(lang => fallback[lang] = testo_italiano || "");
         return res.status(200).json(fallback);
