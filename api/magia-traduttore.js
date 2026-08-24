@@ -45,43 +45,12 @@ Chiavi richieste: "en", "es", "fr", "de", "ru", "ar", "ro", "zh", "sq", "hi", "t
 Testo in italiano da tradurre:
 ${testo_italiano}`;
 
-        // 1. AUTO-DISCOVERY MODELLI GROQ ATTIVI IN TEMPO REALE (Come in social.js)
-        let dynamicModelsList = [];
-        try {
-            const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
-                headers: { "Authorization": `Bearer ${GROQ_API_KEY}` }
-            });
-            if (modelsRes.ok) {
-                const modelsData = await modelsRes.json();
-                if (modelsData.data && Array.isArray(modelsData.data)) {
-                    const chatModels = modelsData.data
-                        .map(m => m.id)
-                        .filter(id => !id.includes("whisper") && !id.includes("guard") && !id.includes("embed"));
-
-                    chatModels.sort((a, b) => {
-                        const score = (m) => {
-                            if (m.includes("llama-3.3")) return 100;
-                            if (m.includes("llama-3.1-70b")) return 90;
-                            if (m.includes("llama-3.1-8b")) return 80;
-                            if (m.includes("mixtral")) return 50;
-                            if (m.includes("gemma")) return 40;
-                            return 10;
-                        };
-                        return score(b) - score(a);
-                    });
-                    dynamicModelsList = chatModels;
-                }
-            }
-        } catch (e) {
-            console.warn("[Groq Discovery] Uso lista fallback:", e.message);
-        }
-
-        const GROQ_TEXT_MODELS = dynamicModelsList.length > 0 ? dynamicModelsList : [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "gemma2-9b-it",
-            "mixtral-8x7b-32768"
-        ];
+        // MODELLI UFFICIALI AD ALTA VELOCITÀ CERTIFICATI PER JSON MODE (Senza perdite di tempo)
+                const GROQ_TEXT_MODELS = [
+                    "llama-3.3-70b-versatile",
+                    "gemma2-9b-it",
+                    "mixtral-8x7b-32768"
+                ];
 
         let traduzioniJSON = null;
         let lastError = null;
