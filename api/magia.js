@@ -47,41 +47,55 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                 let messages = [];
 
                 // 📸 GESTIONE SPECIALE VISION: IMPORTAZIONE VISIVA AGENDA DA FOTO
-                if (isVisionTask) {
-                    systemPrompt = `Sei un assistente esperto di OCR e riconoscimento visivo di agende cartacee e calendari per saloni di bellezza e barbieri.
-        Analizza con estrema cura l'immagine fornita ed estrai TUTTI gli appuntamenti leggibili.
-        Rispondi ESCLUSIVAMENTE con un oggetto JSON valido contenente la chiave "prenotazioni", strutturato esattamente così:
-        {
-          "prenotazioni": [
-            {
-              "data": "YYYY-MM-DD",
-              "ora": "HH:MM",
-              "cliente": "Nome del cliente",
-              "telefono": "Numero di telefono se presente, altrimenti stringa vuota",
-              "servizio": "Nome del servizio se presente, altrimenti Taglio o Trattamento",
-              "note": "Eventuali note aggiuntive o dettagli se presenti, altrimenti stringa vuota"
-            }
-          ]
-        }`;
-
-                    messages = [
-                        { role: "system", content: systemPrompt },
-                        {
-                            role: "user",
-                            content: [
+                        if (isVisionTask) {
+                            const currentYear = contesto.currentYear || new Date().getFullYear();
+                
+                            systemPrompt = `Sei un assistente esperto di OCR e decifratura di agende e calendari per saloni di bellezza e barbieri.
+                L'anno corrente di riferimento da usare è il ${currentYear}.
+                
+                REGOLE CRUCIALI PER LE DATE:
+                1. Se sull'agenda è indicata una settimana (es. "Settimana dal 28 Ottobre al 3 Novembre"), calcola con precisione il giorno progressivo per ogni riga della tabella:
+                   - Lunedì = 28 Ottobre -> ${currentYear}-10-28
+                   - Martedì = 29 Ottobre -> ${currentYear}-10-29
+                   - Mercoledì = 30 Ottobre -> ${currentYear}-10-30
+                   - Giovedì = 31 Ottobre -> ${currentYear}-10-31
+                   - Venerdì = 01 Novembre -> ${currentYear}-11-01
+                   - Sabato = 02 Novembre -> ${currentYear}-11-02
+                2. Usa SEMPRE il formato data "YYYY-MM-DD" e l'ora "HH:MM" a 24 ore.
+                3. Se per un appuntamento non è scritto il nome del cliente ma solo il servizio/lettera, lascia "cliente": "".
+                
+                Rispondi ESCLUSIVAMENTE con un oggetto JSON valido contenente la chiave "prenotazioni", strutturato esattamente così:
+                {
+                  "prenotazioni": [
+                    {
+                      "data": "YYYY-MM-DD",
+                      "ora": "HH:MM",
+                      "cliente": "Nome del cliente se presente, altrimenti stringa vuota",
+                      "telefono": "Numero di telefono se presente, altrimenti stringa vuota",
+                      "servizio": "Nome o abbreviazione del servizio rilevato",
+                      "note": "Eventuali note o cancellature rilevate, altrimenti stringa vuota"
+                    }
+                  ]
+                }`;
+                
+                            messages = [
+                                { role: "system", content: systemPrompt },
                                 {
-                                    type: "text",
-                                    text: "Estrai tutti gli appuntamenti presenti in questa foto dell'agenda e restituiscili rigorosamente in formato JSON."
-                                },
-                                {
-                                    type: "image_url",
-                                    image_url: {
-                                        url: rawImageUrl
-                                    }
+                                    role: "user",
+                                    content: [
+                                        {
+                                            type: "text",
+                                            text: `Estrai tutti gli appuntamenti presenti in questa foto dell'agenda usando l'anno ${currentYear} e calcolando la data esatta per ogni giorno della settimana. Restituisci solo JSON.`
+                                        },
+                                        {
+                                            type: "image_url",
+                                            image_url: {
+                                                url: rawImageUrl
+                                            }
+                                        }
+                                    ]
                                 }
-                            ]
-                        }
-                    ];
+                            ];
                 } else if (currentSector === "cura_persona") {
                     const isProfile = campo.endsWith("_profile");
                     const entityName = isProfile ? (contesto.store_name || "questo studio") : (contesto.product_name || "questo servizio");
@@ -244,7 +258,7 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                         return res.status(200).json({ risultato: testoGenerato });
                     }
                 }
-        
+
                 // 2. Risultato finale per testi e descrizioni
                 return res.status(200).json({ risultato: testoGenerato });
 
