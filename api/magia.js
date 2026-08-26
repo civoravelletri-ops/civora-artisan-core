@@ -41,61 +41,123 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
         }
 
         let userPromptContent = '';
+                const isVisionTask = (task === "importazione_agenda_ia" || campo === "importazione_agenda_ia");
+                const rawImageUrl = contesto.imageUrl || contesto.imageBase64 || "";
 
-        if (currentSector === "cura_persona") {
-            const isProfile = campo.endsWith("_profile");
-            const entityName = isProfile ? (contesto.store_name || "questo studio") : (contesto.product_name || "questo servizio");
-            const entityType = isProfile ? (contesto.myTypeStore || "salone di bellezza") : "cura della persona";
-            const baseInfo = `Attività: "${entityName}" (${entityType}).`;
-            const currentText = (contesto.currentFieldValue || "").trim();
+                let messages = [];
 
-            if (campo === "short_description_profile") {
-                userPromptContent = `${baseInfo}\nCrea un breve slogan ad effetto (massimo 120 caratteri) che catturi l'attenzione. Rispondi solo con lo slogan.`;
-            } else if (campo === "description_profile") {
-                userPromptContent = `${baseInfo}\nScrivi una descrizione accogliente ed elegante per i clienti di ESATTAMENTE 2 brevi paragrafi (circa 500-650 caratteri in totale). Non superare i 750 caratteri totali.`;
-            } else if (campo === "tags_profile") {
-                userPromptContent = `${baseInfo}\nGenera 7-10 parole chiave (tags) separate ESCLUSIVAMENTE da virgola, senza numeri e senza punti elenco. Esempio: bellezza, relax, cura viso, benessere, trattamenti`;
-            } else if (campo === "specializations_profile") {
-                userPromptContent = `${baseInfo}\nGenera 5-7 specializzazioni chiave separate ESCLUSIVAMENTE da virgola, senza numeri e senza punti elenco. Esempio: Taglio personalizzato, Trattamenti bio, Colore naturale, Modellatura barba`;
-            } else {
-                userPromptContent = `${baseInfo}\nGenera il contenuto per "${campo}". Testo base: "${currentText}"`;
+                // 📸 GESTIONE SPECIALE VISION: IMPORTAZIONE VISIVA AGENDA DA FOTO
+                if (isVisionTask) {
+                    systemPrompt = `Sei un assistente esperto di OCR e riconoscimento visivo di agende cartacee e calendari per saloni di bellezza e barbieri.
+        Analizza con estrema cura l'immagine fornita ed estrai TUTTI gli appuntamenti leggibili.
+        Rispondi ESCLUSIVAMENTE con un oggetto JSON valido contenente la chiave "prenotazioni", strutturato esattamente così:
+        {
+          "prenotazioni": [
+            {
+              "data": "YYYY-MM-DD",
+              "ora": "HH:MM",
+              "cliente": "Nome del cliente",
+              "telefono": "Numero di telefono se presente, altrimenti stringa vuota",
+              "servizio": "Nome del servizio se presente, altrimenti Taglio o Trattamento",
+              "note": "Eventuali note aggiuntive o dettagli se presenti, altrimenti stringa vuota"
             }
-        } else if (currentSector === "veterinario") {
-            const currentText = (contesto.currentFieldValue || "").trim();
-            if (campo === "short_description_profile_vet") {
-                userPromptContent = `Clinica: "${contesto.store_name}". Crea uno slogan accattivante (max 120 caratteri).`;
-            } else if (campo === "description_profile_vet") {
-                userPromptContent = `Clinica: "${contesto.store_name}". Scrivi una descrizione di 2 brevi paragrafi (max 650 caratteri).`;
-            } else if (campo === "tags_profile_vet" || campo === "specializations_profile_vet") {
-                userPromptContent = `Clinica: "${contesto.store_name}". Genera 6-8 voci separate da virgola, senza elenchi numerati.`;
-            } else {
-                userPromptContent = `Genera il contenuto per "${campo}".`;
-            }
-        } else if (campo === "storia_azienda") {
-            userPromptContent = `Riscrivi questa filosofia aziendale per un vivaio: "${(contesto.testo || '').trim()}".`;
-        } else if (task === "estimate_shipping_attributes") {
-            systemPrompt = `Rispondi ESCLUSIVAMENTE con un JSON valido: {"weight": 3.5, "length": 25, "width": 25, "height": 60}`;
-            userPromptContent = `Estima peso e dimensioni per: "${contesto.productName || contesto.nome}".`;
-        } else {
-            userPromptContent = `Genera un contenuto conciso per "${task}" relativo a "${contesto.nome || contesto.productName}".`;
-        }
+          ]
+        }`;
 
-        let messages = [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPromptContent }
-        ];
+                    messages = [
+                        { role: "system", content: systemPrompt },
+                        {
+                            role: "user",
+                            content: [
+                                {
+                                    type: "text",
+                                    text: "Estrai tutti gli appuntamenti presenti in questa foto dell'agenda e restituiscili rigorosamente in formato JSON."
+                                },
+                                {
+                                    type: "image_url",
+                                    image_url: {
+                                        url: rawImageUrl
+                                    }
+                                }
+                            ]
+                        }
+                    ];
+                } else if (currentSector === "cura_persona") {
+                    const isProfile = campo.endsWith("_profile");
+                    const entityName = isProfile ? (contesto.store_name || "questo studio") : (contesto.product_name || "questo servizio");
+                    const entityType = isProfile ? (contesto.myTypeStore || "salone di bellezza") : "cura della persona";
+                    const baseInfo = `Attività: "${entityName}" (${entityType}).`;
+                    const currentText = (contesto.currentFieldValue || "").trim();
 
-        let responseFormat = null;
-        if (task === "estimate_shipping_attributes") {
-            responseFormat = { "type": "json_object" };
-        }
+                    if (campo === "short_description_profile") {
+                        userPromptContent = `${baseInfo}\nCrea un breve slogan ad effetto (massimo 120 caratteri) che catturi l'attenzione. Rispondi solo con lo slogan.`;
+                    } else if (campo === "description_profile") {
+                        userPromptContent = `${baseInfo}\nScrivi una descrizione accogliente ed elegante per i clienti di ESATTAMENTE 2 brevi paragrafi (circa 500-650 caratteri in totale). Non superare i 750 caratteri totali.`;
+                    } else if (campo === "tags_profile") {
+                        userPromptContent = `${baseInfo}\nGenera 7-10 parole chiave (tags) separate ESCLUSIVAMENTE da virgola, senza numeri e senza punti elenco. Esempio: bellezza, relax, cura viso, benessere, trattamenti`;
+                    } else if (campo === "specializations_profile") {
+                        userPromptContent = `${baseInfo}\nGenera 5-7 specializzazioni chiave separate ESCLUSIVAMENTE da virgola, senza numeri e senza punti elenco. Esempio: Taglio personalizzato, Trattamenti bio, Colore naturale, Modellatura barba`;
+                    } else {
+                        userPromptContent = `${baseInfo}\nGenera il contenuto per "${campo}". Testo base: "${currentText}"`;
+                    }
 
-        // Qwen con modalità non-ragionamento (istantanea e pulita al 100%)
-        const candidateModels = [
-            "qwen/qwen3.6-27b",
-            "openai/gpt-oss-20b",
-            "openai/gpt-oss-120b"
-        ];
+                    messages = [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userPromptContent }
+                    ];
+                } else if (currentSector === "veterinario") {
+                    const currentText = (contesto.currentFieldValue || "").trim();
+                    if (campo === "short_description_profile_vet") {
+                        userPromptContent = `Clinica: "${contesto.store_name}". Crea uno slogan accattivante (max 120 caratteri).`;
+                    } else if (campo === "description_profile_vet") {
+                        userPromptContent = `Clinica: "${contesto.store_name}". Scrivi una descrizione di 2 brevi paragrafi (max 650 caratteri).`;
+                    } else if (campo === "tags_profile_vet" || campo === "specializations_profile_vet") {
+                        userPromptContent = `Clinica: "${contesto.store_name}". Genera 6-8 voci separate da virgola, senza elenchi numerati.`;
+                    } else {
+                        userPromptContent = `Genera il contenuto per "${campo}".`;
+                    }
+
+                    messages = [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userPromptContent }
+                    ];
+                } else if (campo === "storia_azienda") {
+                    userPromptContent = `Riscrivi questa filosofia aziendale per un vivaio: "${(contesto.testo || '').trim()}".`;
+                    messages = [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userPromptContent }
+                    ];
+                } else if (task === "estimate_shipping_attributes") {
+                    systemPrompt = `Rispondi ESCLUSIVAMENTE con un JSON valido: {"weight": 3.5, "length": 25, "width": 25, "height": 60}`;
+                    userPromptContent = `Estima peso e dimensioni per: "${contesto.productName || contesto.nome}".`;
+                    messages = [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userPromptContent }
+                    ];
+                } else {
+                    userPromptContent = `Genera un contenuto conciso per "${task}" relativo a "${contesto.nome || contesto.productName}".`;
+                    messages = [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userPromptContent }
+                    ];
+                }
+
+                let responseFormat = null;
+                if (task === "estimate_shipping_attributes" || isVisionTask) {
+                    responseFormat = { "type": "json_object" };
+                }
+
+                // Modelli dedicati: per la visione usiamo modelli multimodali Groq
+                const candidateModels = isVisionTask
+                    ? [
+                        "qwen/qwen3.6-27b",
+                        "meta-llama/llama-4-scout-17b-16e-instruct"
+                      ]
+                    : [
+                        "qwen/qwen3.6-27b",
+                        "openai/gpt-oss-20b",
+                        "openai/gpt-oss-120b"
+                      ];
 
         let testoGenerato = null;
         let lastError = null;
@@ -168,23 +230,23 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
         testoGenerato = testoGenerato.replace(/^\s*\d+\.\s+\*\*[^*]+\*\*[\s\S]*?\n\n/gim, "").trim();
         testoGenerato = testoGenerato.replace(/^["']+|["']+$/g, "").trim();
 
-        // 1. Spedizione JSON
-        if (task === "estimate_shipping_attributes") {
-            try {
-                const start = testoGenerato.indexOf('{');
-                const end = testoGenerato.lastIndexOf('}');
-                if (start !== -1 && end !== -1) {
-                    testoGenerato = testoGenerato.substring(start, end + 1);
+        // 1. Risposte JSON strutturate (Spedizioni e Visione Agenda)
+                if (task === "estimate_shipping_attributes" || isVisionTask) {
+                    try {
+                        const start = testoGenerato.indexOf('{');
+                        const end = testoGenerato.lastIndexOf('}');
+                        if (start !== -1 && end !== -1) {
+                            testoGenerato = testoGenerato.substring(start, end + 1);
+                        }
+                        JSON.parse(testoGenerato);
+                        return res.status(200).json({ risultato: testoGenerato });
+                    } catch (e) {
+                        return res.status(200).json({ risultato: testoGenerato });
+                    }
                 }
-                JSON.parse(testoGenerato);
+        
+                // 2. Risultato finale per testi e descrizioni
                 return res.status(200).json({ risultato: testoGenerato });
-            } catch (e) {
-                return res.status(200).json({ risultato: testoGenerato });
-            }
-        }
-
-        // 2. Risultato finale
-        return res.status(200).json({ risultato: testoGenerato });
 
     } catch (error) {
         console.error("[api/magia.js] Errore:", error);
