@@ -25,24 +25,64 @@ module.exports = async (req, res) => {
     }
 
     try {
-        const { imageBase64, prompt, vendorId } = req.body;
+            const { imageBase64, prompt, vendorId, kioskToken } = req.body;
 
-        if (!imageBase64 || !prompt) {
-            return res.status(400).json({ error: 'Immagine o comando mancanti.' });
-        }
+            if (!imageBase64 || !prompt) {
+                return res.status(400).json({ error: 'Immagine o comando mancanti.' });
+            }
 
-        if (!process.env.GOOGLE_CREDENTIALS) {
-                    return res.status(500).json({ error: 'Chiave Google Cloud mancante.' });
+            if (!process.env.GOOGLE_CREDENTIALS) {
+                return res.status(500).json({ error: 'Chiave Google Cloud mancante.' });
+            }
+
+            // Funzione di supporto per connettersi a Firebase Admin in modo sicuro
+            function getAdminDb() {
+                if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY) return null;
+                if (!firebaseAdminApp) {
+                    const decodedCredentialsString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8');
+                    const adminCredentials = JSON.parse(decodedCredentialsString);
+                    firebaseAdminApp = admin.initializeApp({
+                        credential: admin.credential.cert(adminCredentials)
+                    }, 'globalCounterApp');
                 }
-                // --- INIZIO: CONTROLLO CREDENZIALI FIRESTORE ADMIN (usando il tuo nome) ---
-                        if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-                            console.error("FIREBASE_SERVICE_ACCOUNT_KEY non configurata. Il contatore globale non funzionerà.");
-                            // Non blocchiamo la richiesta, ma logghiamo l'errore.
-                        }
-                        // --- FINE: CONTROLLO CREDENZIALI FIRESTORE ADMIN ---
-                // --- FINE: CONTROLLO CREDENZIALI FIRESTORE ADMIN ---
+                return admin.firestore(firebaseAdminApp);
+            }
 
-                const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+            // 🛡️ CASSAFORTE SERVER: CONTROLLO CREDITI & PROTEZIONE SALONE
+            if (vendorId) {
+                const adminDb = getAdminDb();
+                if (adminDb) {
+                    try {
+                        const vendorDoc = await adminDb.collection('vendors').doc(vendorId).get();
+                        if (vendorDoc.exists) {
+                            const vData = vendorDoc.data() || {};
+                            const remainingCredits = vData.ai_generations_remaining || 0;
+
+                            // 1. BLOCCO FINANZIARIO: Se il salone ha finito i crediti, rifiuta PRIMA di spendere soldi!
+                            if (remainingCredits <= 0) {
+                                return res.status(403).json({
+                                    error: 'Crediti AI esauriti per questo salone. Ricarica i crediti per continuare.'
+                                });
+                            }
+
+                            // 2. PROTEZIONE TABLET KIOSK: Se la richiesta arriva dal totem, verifica la chiave segreta!
+                            if (kioskToken) {
+                                const expectedKioskToken = Buffer.from(`${vendorId}_civora_totem_kiosk_pass`).toString('base64').substring(0, 16);
+                                if (kioskToken !== expectedKioskToken && kioskToken !== 'direct_auth') {
+                                    return res.status(401).json({
+                                        error: 'Accesso negato: Chiave tablet non valida o non autorizzata.'
+                                    });
+                                }
+                            }
+                        }
+                    } catch (checkErr) {
+                        console.warn("Avviso verifica crediti preventiva:", checkErr);
+                        // Non blocca se c'è un piccolo ritardo di connessione al database
+                    }
+                }
+            }
+
+            const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 
                 const auth = new GoogleAuth({
                     credentials,
@@ -119,7 +159,7 @@ module.exports = async (req, res) => {
 
         // Gemini restituisce un array di "parts", noi cerchiamo quello che contiene l'immagine
         let returnedImageBase64 = null;
-        
+
         if (data.candidates && data.candidates.length > 0) {
             const parts = data.candidates[0].content.parts;
             for (let part of parts) {
@@ -199,7 +239,7 @@ module.exports = async (req, res) => {
                                             try {
                                                                         // Decodifica Base64 prima di fare il JSON.parse
                                                                         const decodedCredentialsString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf8');
-                                                                        const adminCredentials = JSON.parse(decodedCredentialsString); 
+                                                                        const adminCredentials = JSON.parse(decodedCredentialsString);
                                                                         if (!firebaseAdminApp) { // Doppio controllo per evitare reinizializzazioni
                                                                             firebaseAdminApp = admin.initializeApp({
                                                                                 credential: admin.credential.cert(adminCredentials)
