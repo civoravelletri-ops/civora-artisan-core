@@ -41,31 +41,52 @@ STRICT RULES:
 {"en":"...","es":"...","fr":"...","de":"...","pt":"...","ru":"...","ar":"...","ro":"...","zh":"...","sq":"...","hi":"...","tr":"..."}`;
 
         const userPrompt = `Context: ${contesto}\nItalian text to translate:\n"""${testo_italiano}"""`;
-
-        // Calcolo dinamico per garantire spazio sufficiente anche per descrizioni lunghe
+        
                 const tokenBudget = Math.min(Math.max(Math.ceil(testo_italiano.length * 3.5), 600), 2200);
         
-                // Modelli ufficiali, attivi e ultra-veloci di Groq
-                        const candidateModels = [
-                            "llama-3.3-70b-versatile",
-                            "llama-3.1-8b-instant"
-                        ];
-                
-                        let finalTranslations = null;
-                        let lastError = null;
-                
-                        for (const modelCandidate of candidateModels) {
-                            try {
-                                const bodyRequest = {
-                                    model: modelCandidate,
-                                    messages: [
-                                        { role: "system", content: systemPrompt },
-                                        { role: "user", content: userPrompt }
-                                    ],
-                                    response_format: { type: "json_object" },
-                                    temperature: 0.2,
-                                    max_tokens: tokenBudget
-                                };
+                // Modelli gratuiti e attivi su Groq
+                let candidateModels = [
+                    "openai/gpt-oss-20b",
+                    "openai/gpt-oss-120b",
+                    "qwen/qwen3.8-27b",
+                    "groq/compound"
+                ];
+        
+                // Rileva in tempo reale i modelli attivi sulla tua chiave Groq
+                try {
+                    const listRes = await fetch("https://api.groq.com/openai/v1/models", {
+                        headers: { "Authorization": `Bearer ${GROQ_API_KEY.trim()}` }
+                    });
+                    if (listRes.ok) {
+                        const listData = await listRes.json();
+                        const available = (listData.data || [])
+                            .map(m => m.id)
+                            .filter(id => !id.includes("whisper") && !id.includes("guard") && !id.includes("tts"));
+                        console.log("[magia-traduttore] Modelli disponibili sulla tua chiave:", available);
+                        if (available.length > 0) {
+                            candidateModels = Array.from(new Set([...candidateModels.filter(m => available.includes(m)), ...available]));
+                        }
+                    } else {
+                        console.warn("[magia-traduttore] Controllo modelli Groq fallito, uso lista predefinita (HTTP " + listRes.status + ")");
+                    }
+                } catch (e) {
+                    console.warn("[magia-traduttore] Errore verifica modelli:", e.message);
+                }
+        
+                let finalTranslations = null;
+                let lastError = null;
+        
+                for (const modelCandidate of candidateModels) {
+                    try {
+                        const bodyRequest = {
+                            model: modelCandidate,
+                            messages: [
+                                { role: "system", content: systemPrompt },
+                                { role: "user", content: userPrompt }
+                            ],
+                            temperature: 0.2,
+                            max_tokens: tokenBudget
+                        };
         
                         let response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                             method: "POST",
