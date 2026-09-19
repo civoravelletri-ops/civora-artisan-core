@@ -45,31 +45,27 @@ STRICT RULES:
         // Calcolo dinamico per garantire spazio sufficiente anche per descrizioni lunghe
                 const tokenBudget = Math.min(Math.max(Math.ceil(testo_italiano.length * 3.5), 600), 2200);
         
-                // Modelli Qwen e GPT ultra-veloci per il multilingua
-                const candidateModels = [
-                    "qwen/qwen3.6-27b",
-                    "openai/gpt-oss-20b",
-                    "openai/gpt-oss-120b"
-                ];
-        
-                let finalTranslations = null;
-                let lastError = null;
-        
-                for (const modelCandidate of candidateModels) {
-                    try {
-                        const bodyRequest = {
-                            model: modelCandidate,
-                            messages: [
-                                { role: "system", content: systemPrompt },
-                                { role: "user", content: userPrompt }
-                            ],
-                            temperature: 0.2,
-                            max_tokens: tokenBudget
-                        };
-        
-                        if (modelCandidate.includes("qwen")) {
-                            bodyRequest.reasoning_effort = "none";
-                        }
+                // Modelli ufficiali, attivi e ultra-veloci di Groq
+                        const candidateModels = [
+                            "llama-3.3-70b-versatile",
+                            "llama-3.1-8b-instant"
+                        ];
+                
+                        let finalTranslations = null;
+                        let lastError = null;
+                
+                        for (const modelCandidate of candidateModels) {
+                            try {
+                                const bodyRequest = {
+                                    model: modelCandidate,
+                                    messages: [
+                                        { role: "system", content: systemPrompt },
+                                        { role: "user", content: userPrompt }
+                                    ],
+                                    response_format: { type: "json_object" },
+                                    temperature: 0.2,
+                                    max_tokens: tokenBudget
+                                };
         
                         let response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                             method: "POST",
