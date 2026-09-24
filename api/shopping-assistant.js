@@ -461,7 +461,69 @@ async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
 }
 
 // ==================================================================
-// 9. HANDLER PRINCIPALE (ESPOSTO A VERCEL)
+// 9. LOGICA CONSULENTE AI - CURA DELLA PERSONA (Salone / Barbiere / Estetica)
+// ==================================================================
+async function handleCuraPersonaConsultant(req, res, groqApiKey) {
+    const { contesto } = req.body;
+    if (!contesto) return res.status(400).json({ error: "Contesto mancante" });
+
+    const storeName = contesto.storeName || "il nostro salone";
+    const lang = contesto.lang || "it";
+    const product = contesto.product || {};
+    const query = contesto.query || contesto.richiestaUtente || "Ciao! Vorrei sapere se questo prodotto è adatto a me.";
+
+    // Estrae i dettagli del prodotto in modo leggero e pulito
+    const prodDetails = {
+        nome: product.productName || product.nome || "",
+        marca: product.brand || product.marca || "",
+        prezzo: product.price || product.prezzo || "",
+        benefici: product.productAttributes || product.benefici || [],
+        modo_uso: product.productUsage || product.modo_uso || "",
+        ingredienti: product.productIngredients || product.ingredienti || "",
+        descrizione: product.productDescription || product.descrizione || product.shortDescription || "",
+        formato: product.productNetQuantity || product.formato || "",
+        pao: product.productPao || product.pao || ""
+    };
+
+    const systemPrompt = `Sei il Consulente Esperto di Bellezza e Cura della Persona del salone "${storeName}".
+Parla con calore, professionalità e competenza, come un fidato hair stylist o professionista della cura della persona che sta consigliando un cliente seduto in salone.
+
+REGOLE FONDAMENTALI:
+1. PARLA COME UN VERO PROFESSIONISTA:
+   - Sii amichevole, chiaro, rassicurante e autorevole.
+   - Non presentarti MAI come un'intelligenza artificiale, bot o macchina.
+   - Dai consigli personalizzati in base al tipo di capello, pelle o barba menzionati dal cliente.
+2. CONOSCI PERFETTAMENTE IL PRODOTTO:
+   - Dati del prodotto su cui ti sta chiedendo il cliente:
+     ${JSON.stringify(prodDetails)}
+   - Spiega con parole semplici perché gli ingredienti o la formula sono efficaci per le sue esigenze.
+   - Se il cliente chiede come usarlo, fornisci una routine pratica passo-passo basata sul modo d'uso.
+   - Se il cliente chiede se è adatto a una specifica esigenza (es. cute sensibile, capelli ricci, barba dura), rispondi con trasparenza ed onestà basandoti sui benefici e ingredienti.
+3. REQUISITO RIGOROSO DI LINGUA:
+   - Rispondi ESCLUSIVAMENTE nella lingua del cliente: "${lang}".
+4. FORMATO RISPOSTA:
+   - Rispondi ESCLUSIVAMENTE con un JSON valido strutturato così:
+   {
+     "message": "La tua risposta da esperto, calorosa e dettagliata, senza muri di testo ma ben leggibile a paragrafi brevi.",
+     "suggestedQuestions": ["Domanda rapida 1 che il cliente potrebbe voler fare", "Domanda rapida 2"]
+   }`;
+
+    const userPrompt = `Domanda del cliente: "${query}". Cronologia precedente: "${contesto.history || 'Nessuna'}".`;
+    const aiResponse = await callGroqAPI(systemPrompt, userPrompt, groqApiKey, 0.4, true);
+
+    try {
+        return res.status(200).json(JSON.parse(aiResponse));
+    } catch(e) {
+        console.error("Errore parsing JSON consulente cura persona:", e, "Risposta grezza:", aiResponse);
+        return res.status(200).json({
+            message: "Questo prodotto è una formula professionale selezionata con cura per garantire i massimi risultati. Per cosa vorresti utilizzarlo nello specifico?",
+            suggestedQuestions: ["Come si applica?", "Va bene per il mio tipo di capello?"]
+        });
+    }
+}
+
+// ==================================================================
+// 10. HANDLER PRINCIPALE (ESPOSTO A VERCEL)
 // ==================================================================
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Credentials', true);
@@ -483,6 +545,7 @@ export default async function handler(req, res) {
             case 'propose_discount_offer': return await handleProposeDiscountOffer(req, res, GROQ_API_KEY);
             case 'escalate_to_owner': return await handleEscalateToOwner(req, res, GROQ_API_KEY);
             case 'personal_shopper_carrelli': return await handlePersonalShopperCarrelli(req, res, GROQ_API_KEY);
+            case 'cura_persona_consultant': return await handleCuraPersonaConsultant(req, res, GROQ_API_KEY);
             default: return res.status(400).json({ error: 'Azione sconosciuta: ' + action });
         }
     } catch (error) {
