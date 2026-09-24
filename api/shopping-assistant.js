@@ -23,14 +23,58 @@ if (!admin.apps.length) {
 }
 
 // ==================================================================
-// 2. FUNZIONE CORE API (Groq)
+// 2. FUNZIONE CORE API (Groq con Rilevamento Automatico Modello Attivo)
 // ==================================================================
+let cachedGroqModel = null;
+let lastModelCheckTime = 0;
+
+async function getActiveGroqModel(groqApiKey) {
+    const now = Date.now();
+    // Riutilizza il modello per 1 ora per essere istantaneo senza rifare la richiesta ogni secondo
+    if (cachedGroqModel && (now - lastModelCheckTime < 1000 * 60 * 60)) {
+        return cachedGroqModel;
+    }
+
+    try {
+        const res = await fetch("https://api.groq.com/openai/v1/models", {
+            method: "GET",
+            headers: { "Authorization": `Bearer ${groqApiKey}` }
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            if (data && Array.isArray(data.data) && data.data.length > 0) {
+                // Esclude modelli vocali o di protezione per prendere solo modelli di testo/chat attivi
+                const chatModels = data.data
+                    .map(m => m.id)
+                    .filter(id => !id.includes("whisper") && !id.includes("guard") && !id.includes("embed"));
+
+                if (chatModels.length > 0) {
+                    // Cerca preferibilmente modelli veloci e attivi (come gpt-oss o altri), altrimenti prende il primo disponibile
+                    const chosen = chatModels.find(id => id.includes("20b") || id.includes("8b") || id.includes("oss")) || chatModels[0];
+                    cachedGroqModel = chosen;
+                    lastModelCheckTime = now;
+                    console.log("[Groq Auto-Detect] Modello attivo rilevato e impostato:", cachedGroqModel);
+                    return cachedGroqModel;
+                }
+            }
+        }
+    } catch (err) {
+        console.warn("[Groq Auto-Detect] Errore richiesta modelli, uso fallback:", err);
+    }
+
+    // Fallback di riserva
+    return "openai/gpt-oss-20b";
+}
+
 async function callGroqAPI(systemPrompt, userPromptText, groqApiKey, temperature = 0.1, isJson = false) {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    let modelToUse = await getActiveGroqModel(groqApiKey);
+
+    let response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-            model: "llama-3.1-8b-instant",
+            model: modelToUse,
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userPromptText }
@@ -39,6 +83,27 @@ async function callGroqAPI(systemPrompt, userPromptText, groqApiKey, temperature
             response_format: isJson ? { type: "json_object" } : { type: "text" }
         })
     });
+
+    // Se il modello restituisce errore di accesso o scadenza, resetta la cache e riprova al volo con un altro modello attivo
+    if (!response.ok) {
+        cachedGroqModel = null;
+        const retryModel = await getActiveGroqModel(groqApiKey);
+        if (retryModel !== modelToUse) {
+            response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    model: retryModel,
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userPromptText }
+                    ],
+                    temperature: temperature,
+                    response_format: isJson ? { type: "json_object" } : { type: "text" }
+                })
+            });
+        }
+    }
 
     if (!response.ok) {
         const err = await response.json();
