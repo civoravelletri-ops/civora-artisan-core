@@ -413,38 +413,45 @@ async function handleSyncInventory(req, res, groqApiKey) {
 // ==================================================================
 async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
     const { contesto } = req.body;
-    const systemPrompt = `Sei un Personal Shopper intelligente ed amichevole di alimentari per il negozio "${contesto.store_name}".
+
+    // Filtra e alleggerisce i prodotti: invia all'AI solo ID, nome e prezzo senza link di immagini o descrizioni pesanti
+    const prodottiLeggeri = (contesto.prodotti || []).map(p => ({
+        id: p.id || p.productId,
+        nome: p.name || p.productName || p.title,
+        prezzo: p.price,
+        categoria: p.category || p.productCategory || ''
+    })).slice(0, 35); // Limita a 35 prodotti per stare sempre sotto il limite di memoria
+
+    const systemPrompt = `Sei un Personal Shopper intelligente ed amichevole per il negozio "${contesto.store_name}".
     Il tuo obiettivo è consigliare il cliente e guidarlo nella spesa.
 
     ANALIZZA LA RICHIESTA DELL'UTENTE:
-    - Se l'utente scrive solo un saluto generico (es. "ciao", "salve", "buongiorno", "chi sei?") o un testo troppo corto/incomprensibile per creare dei carrelli, devi solo rispondergli in modo caloroso ed amichevole presentandoti e guidandolo su cosa può chiederti (es. chiedigli amichevolmente per quante persone è la cena, se preferiscono carne/pesce/veggie o se hanno intolleranze). In questo caso, lascia l'array "carrelli" completamente VUOTO [].
-    - Se l'utente esprime un'esigenza reale di spesa (es. "cena per due", "voglio del pesce", "siamo vegetariani"), crea esattamente 3 diverse proposte di carrelli della spesa basandoti sui prodotti realmente disponibili nel negozio.
+    - Se l'utente scrive solo un saluto generico (es. "ciao", "salve", "buongiorno") lascia l'array "carrelli" completamente VUOTO [].
+    - Se l'utente esprime un'esigenza reale di spesa (es. "cena per due", "carne per stasera"), crea esattamente 3 diverse proposte di carrelli basandoti sui prodotti disponibili.
 
     REQUISITI DI RISPOSTA:
-    Devi rispondere ESCLUSIVAMENTE con un oggetto JSON valido. Non aggiungere alcuna spiegazione, introduzione o testo aggiuntivo fuori dal JSON.
-
-    STRUTTURA JSON RICHIESTA (RISPETTA RIGOROSAMENTE QUESTE ETICHETTE CHIAVE):
+    Rispondi SOLO ed ESCLUSIVAMENTE con un JSON valido con questa struttura:
     {
-      "messaggioConversazione": "Un testo discorsivo amichevole in italiano dove saluti il cliente presentandoti (se scrive solo 'ciao'), oppure una breve introduzione calorosa in cui spieghi i 3 carrelli proposti.",
+      "messaggioConversazione": "Testo caloroso e amichevole dove spieghi i carrelli o saluti se non ci sono richieste specifiche.",
       "carrelli": [
-        // Compila questo array con ESATTAMENTE 3 carrelli SOLO se c'è una richiesta di spesa reale.
-        // Se l'utente ha solo salutato o fatto domande generiche, lascia questo array completamente vuoto []
         {
-          "nome": "Nome accattivante della proposta in italiano (es. Grigliata Rustica, Spesa Energetica)",
-          "descrizione": "Una breve e invitante spiegazione in italiano del perché hai consigliato questo carrello",
+          "nome": "Nome proposta (es. Cena Rustica)",
+          "descrizione": "Breve spiegazione del perché consigli questi prodotti",
           "prodotti": [
             {
-              "productId": "ID esatto del prodotto preso dal catalogo",
-              "productName": "Nome esatto del prodotto preso dal catalogo",
+              "productId": "ID del prodotto",
+              "productName": "Nome del prodotto",
               "qty": 1,
-              "price": 3.50,
-              "variantId": "ID esatto della variante se presente, altrimenti lascialo vuoto o omettilo"
+              "price": 3.50
             }
           ]
         }
       ]
     }`;
-    const aiResponse = await callGroqAPI(systemPrompt, `Richiesta Utente: "${contesto.richiestaUtente}". Prodotti del Negozio: ${JSON.stringify(contesto.prodotti)}`, groqApiKey, 0.5, true);
+
+    const promptUtente = `Richiesta Utente: "${contesto.richiestaUtente}". Prodotti Negozio: ${JSON.stringify(prodottiLeggeri)}`;
+    const aiResponse = await callGroqAPI(systemPrompt, promptUtente, groqApiKey, 0.4, true);
+
     try {
         return res.status(200).json(JSON.parse(aiResponse));
     } catch(e) {
