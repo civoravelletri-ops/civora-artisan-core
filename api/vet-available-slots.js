@@ -855,17 +855,42 @@ module.exports = async (req, res) => {
                 const potentialEndTimeUTC = new Date(currentSlotTimeUTC.getTime() + totalOccupiedTimeMinutes * 60000);
                 if (potentialEndTimeUTC.getTime() > currentWorkSlotEndUTC.getTime()) break;
 
-                if (serviceData.hasCustomBookingHours && serviceData.customBookingHours && serviceData.customBookingHours.from && serviceData.customBookingHours.to) {
-                    const displaySlotTime = new Date(currentSlotTimeUTC.getTime() - vendorTimezoneOffsetMinutes * 60 * 1000);
-                    const slotStartHM = String(displaySlotTime.getHours()).padStart(2, '0') + ':' + String(displaySlotTime.getMinutes()).padStart(2, '0');
-                    const displayEndTime = new Date(potentialEndTimeUTC.getTime() - vendorTimezoneOffsetMinutes * 60 * 1000);
-                    const slotEndHM = String(displayEndTime.getHours()).padStart(2, '0') + ':' + String(displayEndTime.getMinutes()).padStart(2, '0');
+                // 🕒 Filtro Turno del Servizio (Diurno / Notturno / Fascia)
+                                const displaySlotTimeCheck = new Date(currentSlotTimeUTC.getTime() - vendorTimezoneOffsetMinutes * 60 * 1000);
+                                const slotHourNum = displaySlotTimeCheck.getHours();
+                                const slotStartHM = String(slotHourNum).padStart(2, '0') + ':' + String(displaySlotTimeCheck.getMinutes()).padStart(2, '0');
+                                const displayEndTimeCheck = new Date(potentialEndTimeUTC.getTime() - vendorTimezoneOffsetMinutes * 60 * 1000);
+                                const slotEndHM = String(displayEndTimeCheck.getHours()).padStart(2, '0') + ':' + String(displayEndTimeCheck.getMinutes()).padStart(2, '0');
 
-                    if (slotStartHM < serviceData.customBookingHours.from || slotEndHM > serviceData.customBookingHours.to) {
-                        currentSlotTimeUTC.setUTCMinutes(currentSlotTimeUTC.getUTCMinutes() + slotIncrement);
-                        continue;
-                    }
-                }
+                                // 1. Se impostato "Solo Turno Diurno", scarta le ore notturne (dalle 20:00 alle 06:59)
+                                if (serviceData.bookingShiftMode === 'day' && (slotHourNum < 7 || slotHourNum >= 20)) {
+                                    currentSlotTimeUTC.setUTCMinutes(currentSlotTimeUTC.getUTCMinutes() + slotIncrement);
+                                    continue;
+                                }
+
+                                // 2. Se impostato "Solo Notturno / Urgenze", scarta le ore diurne (dalle 07:00 alle 19:59)
+                                if (serviceData.bookingShiftMode === 'night' && (slotHourNum >= 7 && slotHourNum < 20)) {
+                                    currentSlotTimeUTC.setUTCMinutes(currentSlotTimeUTC.getUTCMinutes() + slotIncrement);
+                                    continue;
+                                }
+
+                                // 3. Se impostata fascia oraria specifica (es. solo 09:00 - 13:00)
+                                if (serviceData.hasCustomBookingHours && serviceData.customBookingHours && serviceData.customBookingHours.from && serviceData.customBookingHours.to) {
+                                    const fromHM = serviceData.customBookingHours.from;
+                                    const toHM = serviceData.customBookingHours.to;
+                                    let isInside = false;
+                
+                                    if (fromHM <= toHM) {
+                                        isInside = (slotStartHM >= fromHM && slotEndHM <= toHM);
+                                    } else {
+                                        isInside = (slotStartHM >= fromHM || slotEndHM <= toHM);
+                                    }
+
+                                    if (!isInside) {
+                                        currentSlotTimeUTC.setUTCMinutes(currentSlotTimeUTC.getUTCMinutes() + slotIncrement);
+                                        continue;
+                                    }
+                                }
 
                 let isSlotAvailableForThisTime = false;
 
