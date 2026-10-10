@@ -2285,56 +2285,37 @@ module.exports = async (req, res) => {
         - Note a mano libera del medico: "${freeText || 'Disponibili per urgenze generali e visite'}"`;
 
                 try {
-                    const aiModel = 'meta-llama/llama-4-scout-17b-16e-instruct';
-                    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                        method: "POST",
-                        headers: {
-                            "Authorization": `Bearer ${GROQ_API_KEY}`,
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({
-                            model: aiModel,
-                            messages: [
-                                { role: "system", content: systemPrompt },
-                                { role: "user", content: userPrompt }
-                            ],
-                            temperature: 0.2
-                        })
-                    });
-
-                    if (!groqRes.ok) {
-                        // Fallback su modello alternativo se scout è occupato
-                        const fallbackRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                            method: "POST",
-                            headers: {
-                                "Authorization": `Bearer ${GROQ_API_KEY}`,
-                                "Content-Type": "application/json"
-                            },
-                            body: JSON.stringify({
-                                model: "llama-3.3-70b-versatile",
-                                messages: [
-                                    { role: "system", content: systemPrompt },
-                                    { role: "user", content: userPrompt }
-                                ],
-                                temperature: 0.2
-                            })
-                        });
-                        if (!fallbackRes.ok) {
-                            throw new Error("Errore chiamata API Groq.");
-                        }
-                        const dataFallback = await fallbackRes.json();
-                        const summary = dataFallback.choices[0]?.message?.content?.trim() || "";
-                        return res.status(200).json({ summary });
-                    }
-
-                    const data = await groqRes.json();
-                    const summary = data.choices[0]?.message?.content?.trim() || "";
-                    return res.status(200).json({ summary });
-
-                } catch (groqErr) {
-                    console.error("[Vet AI] Errore Groq:", groqErr);
-                    return res.status(500).json({ error: "Errore durante l'elaborazione della sintesi con Groq." });
-                }
+                                    const aiModel = 'llama-3.3-70b-versatile';
+                                    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                                        method: "POST",
+                                        headers: {
+                                            "Authorization": `Bearer ${GROQ_API_KEY}`,
+                                            "Content-Type": "application/json"
+                                        },
+                                        body: JSON.stringify({
+                                            model: aiModel,
+                                            messages: [
+                                                { role: "system", content: systemPrompt },
+                                                { role: "user", content: userPrompt }
+                                            ],
+                                            temperature: 0.2
+                                        })
+                                    });
+                
+                                    if (!groqRes.ok) {
+                                        const errData = await groqRes.json().catch(() => ({}));
+                                        console.error("[Groq Error]", groqRes.status, errData);
+                                        throw new Error(errData.error?.message || "Errore API Groq");
+                                    }
+                
+                                    const data = await groqRes.json();
+                                    const summary = data.choices[0]?.message?.content?.trim() || "";
+                                    return res.status(200).json({ summary });
+                
+                                } catch (groqErr) {
+                                    console.error("[Vet AI] Errore Groq:", groqErr);
+                                    return res.status(500).json({ error: "Errore durante l'elaborazione della sintesi con Groq: " + groqErr.message });
+                                }
             }
 
             return res.status(400).json({ error: `Azione non riconosciuta: ${action}.` });
