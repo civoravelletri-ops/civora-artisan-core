@@ -2245,20 +2245,101 @@ module.exports = async (req, res) => {
         }
 
         try {
-            await db.collection('vendors').doc(vendorId).update({
-                lastKioskOrderPulse: admin.firestore.FieldValue.serverTimestamp()
-            });
-        } catch(pErr) {}
+                    await db.collection('vendors').doc(vendorId).update({
+                        lastKioskOrderPulse: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                } catch(pErr) {}
 
-        return res.status(200).json({
-            success: true,
-            message: 'Ordine preparato.'
-        });
-    }
+                return res.status(200).json({
+                    success: true,
+                    message: 'Ordine preparato.'
+                });
+            }
 
-    return res.status(400).json({ error: `Azione non riconosciuta: ${action}.` });
+            // ============================================================
+            // 17. SINTESI AI PRONTO SOCCORSO VETERINARIO (GROQ VELOCISSIMO)
+            // ============================================================
+            else if (action === 'generate_vet_emergency_summary') {
+                const { storeName, checkedServices, freeText } = req.body;
+                const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-  } catch (error) {
+                if (!GROQ_API_KEY) {
+                    return res.status(500).json({ error: "GROQ_API_KEY non configurata." });
+                }
+
+                const systemPrompt = `Sei un medico veterinario esperto e direttore sanitario per il pronto soccorso di "${storeName || 'Clinica Veterinaria'}".
+        Il tuo compito è sintetizzare le prestazioni selezionate e le note a mano del medico in un "Documento Unico di Reperibilità d'Urgenza" chiaro, professionale e senza fronzoli.
+
+        REGOLE RIGIDE:
+        1. Scrivi in modo sintetico, rassicurante e autorevole.
+        2. Evidenzia chiaramente:
+           - Specie coperte per il turno (Cani, Gatti, Esotici...) ricavate dai servizi o dalle note.
+           - Prestazioni e urgenze coperte (Chirurgia d'urgenza, Cesarei, Traumi, Lavanda gastrica/Avvelenamenti, Ossigeno, Radiologia, ecc.).
+           - Limitazioni dichiarate (es. se il medico dice "no esotici" o "no interventi complessi stanotte").
+           - Istruzioni per il proprietario (es. "Contattare prima telefonicamente la clinica per pre-allertare l'equipe").
+        3. Rispondi con un testo pulito e ben formattato a punti elenco chiari. Non inventare servizi che non sono stati indicati.`;
+
+                const userPrompt = `Dati del medico:
+        - Clinica: ${storeName || 'Ambulatorio Veterinario'}
+        - Servizi d'urgenza selezionati: ${checkedServices && checkedServices.length > 0 ? checkedServices.join(', ') : 'Urgenze generali'}
+        - Note a mano libera del medico: "${freeText || 'Disponibili per urgenze generali e visite'}"`;
+
+                try {
+                    const aiModel = 'meta-llama/llama-4-scout-17b-16e-instruct';
+                    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${GROQ_API_KEY}`,
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            model: aiModel,
+                            messages: [
+                                { role: "system", content: systemPrompt },
+                                { role: "user", content: userPrompt }
+                            ],
+                            temperature: 0.2
+                        })
+                    });
+
+                    if (!groqRes.ok) {
+                        // Fallback su modello alternativo se scout è occupato
+                        const fallbackRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                            method: "POST",
+                            headers: {
+                                "Authorization": `Bearer ${GROQ_API_KEY}`,
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                                model: "llama-3.3-70b-versatile",
+                                messages: [
+                                    { role: "system", content: systemPrompt },
+                                    { role: "user", content: userPrompt }
+                                ],
+                                temperature: 0.2
+                            })
+                        });
+                        if (!fallbackRes.ok) {
+                            throw new Error("Errore chiamata API Groq.");
+                        }
+                        const dataFallback = await fallbackRes.json();
+                        const summary = dataFallback.choices[0]?.message?.content?.trim() || "";
+                        return res.status(200).json({ summary });
+                    }
+
+                    const data = await groqRes.json();
+                    const summary = data.choices[0]?.message?.content?.trim() || "";
+                    return res.status(200).json({ summary });
+
+                } catch (groqErr) {
+                    console.error("[Vet AI] Errore Groq:", groqErr);
+                    return res.status(500).json({ error: "Errore durante l'elaborazione della sintesi con Groq." });
+                }
+            }
+
+            return res.status(400).json({ error: `Azione non riconosciuta: ${action}.` });
+
+          } catch (error) {
     console.error('SERVER ERROR (Vet API):', error);
     res.status(500).json({ error: 'Errore interno del server.', details: process.env.NODE_ENV === 'development' ? error.message : undefined });
   }
