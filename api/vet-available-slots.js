@@ -3,11 +3,21 @@ const crypto = require('crypto');
 
 if (!admin.apps.length) {
   try {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
-    console.log('[Vercel Init - Vet] Firebase Admin SDK inizializzato con successo.');
+    let rawKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+    if (rawKey) {
+      rawKey = rawKey.trim();
+      // Se è codificata in Base64 (inizia per "ewog..."), la decodifica al volo
+      if (!rawKey.startsWith('{')) {
+        rawKey = Buffer.from(rawKey, 'base64').toString('utf8');
+      }
+      const serviceAccount = JSON.parse(rawKey);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+      console.log('[Vercel Init - Vet] Firebase Admin SDK inizializzato con successo.');
+    } else {
+      console.error('CRITICAL ERROR: FIREBASE_SERVICE_ACCOUNT_KEY non trovata nelle variabili d\'ambiente.');
+    }
   } catch (error) {
     console.error('CRITICAL ERROR: Firebase Admin SDK initialization failed.', error);
   }
@@ -427,17 +437,18 @@ module.exports = async (req, res) => {
             isGuestBooking: isGuestBooking,
 
             notes: payload.notes || null,
-            bookedServiceItems: payload.bookedServiceItems || null,
-            selectedServiceVariant: payload.selectedServiceVariant || null,
-            selectedOptionalExtras: payload.selectedOptionalExtras || [],
-            noShowCountAtBooking: payload.noShowCountAtBooking || 0,
-            isNewGuest: payload.isNewGuest || false,
+                        bookedServiceItems: payload.bookedServiceItems || null,
+                        selectedServiceVariant: payload.selectedServiceVariant || null,
+                        selectedOptionalExtras: payload.selectedOptionalExtras || [],
+                        noShowCountAtBooking: payload.noShowCountAtBooking || 0,
+                        isNewGuest: payload.isNewGuest || false,
+                        selectedImageDetails: payload.selectedImageDetails || null,
 
-            collaboratorId: collaboratorId,
-            collaboratorName: collaboratorName,
-            bookedForResourceId: bookedForResourceId,
-            cancellationToken: cancellationToken
-        };
+                        collaboratorId: collaboratorId,
+                        collaboratorName: collaboratorName,
+                        bookedForResourceId: bookedForResourceId,
+                        cancellationToken: cancellationToken
+                    };
 
         // TRANSAZIONE ANTI-OVERBOOKING FIRESTORE
         let createdBookingId;
@@ -1724,24 +1735,50 @@ module.exports = async (req, res) => {
         });
 
         if (bookingData.customerPhone) {
-            try {
-                let numeroPulito = bookingData.customerPhone.replace(/\s+/g, '');
-                if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
+                    try {
+                        let numeroPulito = bookingData.customerPhone.replace(/\s+/g, '');
+                        if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
 
-                const vendorDoc = await db.collection('vendors').doc(bookingData.vendorId).get();
-                const nomeNegozioSms = vendorDoc.exists ? (vendorDoc.data().store_name || 'La clinica') : 'La clinica';
-                const vendorPhoneNumber = vendorDoc.exists ? (vendorDoc.data().phone || '') : '';
-                const nomeBreve = bookingData.customerName.split(' ')[0];
-                const petText = bookingData.petName ? ` per ${bookingData.petName}` : '';
+                        const vendorDoc = await db.collection('vendors').doc(bookingData.vendorId).get();
+                        const nomeNegozioSms = vendorDoc.exists ? (vendorDoc.data().store_name || 'La clinica') : 'La clinica';
+                        const vendorPhoneNumber = vendorDoc.exists ? (vendorDoc.data().phone || '') : '';
+                        const nomeBreve = bookingData.customerName.split(' ')[0];
+                        const petText = bookingData.petName ? ` per ${bookingData.petName}` : '';
 
-                let testoMessaggio = `Ciao ${nomeBreve}, ti confermiamo che l'appuntamento${petText} per "${bookingData.bookedServiceName}" da ${nomeNegozioSms} e' stato ANNULLATO. Per info: ${vendorPhoneNumber}.`;
-                const macrodroidUrl = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(testoMessaggio)}`;
-                await safeFetch(macrodroidUrl, {}, 2500);
-            } catch (e) {}
-        }
+                        let testoMessaggio = `Ciao ${nomeBreve}, ti confermiamo che l'appuntamento${petText} per "${bookingData.bookedServiceName}" da ${nomeNegozioSms} e' stato ANNULLATO. Per info: ${vendorPhoneNumber}.`;
+                        const macrodroidUrl = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(testoMessaggio)}`;
+                        await safeFetch(macrodroidUrl, {}, 2500);
+                    } catch (e) {}
+                }
 
-        return res.status(200).json({ success: true, message: 'Prenotazione disdetta.' });
-    }
+                if (bookingData.customerEmail && bookingData.appointmentCode && bookingData.appointmentCode.startsWith('WEB_')) {
+                    try {
+                        const vendorDoc = await db.collection('vendors').doc(bookingData.vendorId).get();
+                        const merchantEmail = vendorDoc.exists ? vendorDoc.data().email : null;
+
+                        await safeFetch(ORDER_EMAIL_NOTIFICATION_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                notificationType: 'appointment_booking',
+                                vendorId: bookingData.vendorId,
+                                bookingDetails: {
+                                    ...bookingData,
+                                    id: bookingId
+                                },
+                                recipients: {
+                                    customer: bookingData.customerEmail,
+                                    merchant: merchantEmail
+                                }
+                            })
+                        }, 3500);
+                    } catch (emailErr) {
+                        console.error("[Vet] Errore invio email disdetta:", emailErr);
+                    }
+                }
+
+                return res.status(200).json({ success: true, message: 'Prenotazione disdetta.' });
+            }
 
     // ============================================================
     // 11. RIPROGRAMMAZIONE SICURA VIA TOKEN
@@ -1814,24 +1851,51 @@ module.exports = async (req, res) => {
         });
 
         if (bookingData.customerPhone) {
-            try {
-                let numeroPulito = bookingData.customerPhone.replace(/\s+/g, '');
-                if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
+                    try {
+                        let numeroPulito = bookingData.customerPhone.replace(/\s+/g, '');
+                        if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
 
-                const nomeNegozioSms = vendorData.store_name || 'La clinica';
-                const nomeBreve = bookingData.customerName.split(' ')[0];
-                const dataFormatted = newStartUTC.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' });
-                const oraFormatted = newStartUTC.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
-                const petText = bookingData.petName ? ` per ${bookingData.petName}` : '';
+                        const nomeNegozioSms = vendorData.store_name || 'La clinica';
+                        const nomeBreve = bookingData.customerName.split(' ')[0];
+                        const dataFormatted = newStartUTC.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' });
+                        const oraFormatted = newStartUTC.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+                        const petText = bookingData.petName ? ` per ${bookingData.petName}` : '';
 
-                let messageText = `Ciao ${nomeBreve}, l'app.to${petText} da ${nomeNegozioSms} e' stato SPOSTATO al ${dataFormatted} alle ore ${oraFormatted}. A presto!`;
-                const macrodroidUrl = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(messageText)}`;
-                await safeFetch(macrodroidUrl, {}, 2500);
-            } catch (e) {}
-        }
+                        let messageText = `Ciao ${nomeBreve}, l'app.to${petText} da ${nomeNegozioSms} e' stato SPOSTATO al ${dataFormatted} alle ore ${oraFormatted}. A presto!`;
+                        const macrodroidUrl = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(messageText)}`;
+                        await safeFetch(macrodroidUrl, {}, 2500);
+                    } catch (e) {}
+                }
 
-        return res.status(200).json({ success: true, message: 'Prenotazione riprogrammata.' });
-    }
+                if (bookingData.customerEmail && bookingData.appointmentCode && bookingData.appointmentCode.startsWith('WEB_')) {
+                    try {
+                        const merchantEmail = vendorData.email || null;
+
+                        await safeFetch(ORDER_EMAIL_NOTIFICATION_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                notificationType: 'appointment_booking',
+                                vendorId: bookingData.vendorId,
+                                bookingDetails: {
+                                    ...bookingData,
+                                    id: bookingId,
+                                    startDateTime: admin.firestore.Timestamp.fromDate(newStartUTC),
+                                    endDateTime: admin.firestore.Timestamp.fromDate(newEndUTC)
+                                },
+                                recipients: {
+                                    customer: bookingData.customerEmail,
+                                    merchant: merchantEmail
+                                }
+                            })
+                        }, 3500);
+                    } catch (emailErr) {
+                        console.error("[Vet] Errore invio email spostamento:", emailErr);
+                    }
+                }
+
+                return res.status(200).json({ success: true, message: 'Prenotazione riprogrammata.' });
+            }
 
     // ============================================================
     // 12. COMPLETAMENTO PRENOTAZIONE DA TABLET OPERATORE
@@ -1907,15 +1971,23 @@ module.exports = async (req, res) => {
             .get();
 
         const todayBookings = bookingsSnap.docs.map(doc => {
-            const b = doc.data();
-            return {
-                id: doc.id,
-                resourceId: b.bookedForResourceId || vendorId,
-                customerName: b.customerName || 'Cliente',
-                start: b.startDateTime.toDate().toISOString(),
-                end: b.endDateTime.toDate().toISOString()
-            };
-        });
+                    const b = doc.data();
+                    return {
+                        id: doc.id,
+                        resourceId: b.bookedForResourceId || vendorId,
+                        customerName: b.customerName || 'Cliente',
+                        customerPhone: b.customerPhone || '',
+                        petName: b.petName || '',
+                        petType: b.petType || 'Cane',
+                        petBreed: b.petBreed || '',
+                        petSize: b.petSize || '',
+                        bookedServiceName: b.bookedServiceName || 'Prestazione',
+                        status: b.status || 'confirmed',
+                        paymentStatus: b.paymentStatus || 'pending',
+                        start: b.startDateTime.toDate().toISOString(),
+                        end: b.endDateTime.toDate().toISOString()
+                    };
+                });
 
         const serviceSnap = await db.collection('artisan_services')
             .where('vendorId', '==', vendorId)
