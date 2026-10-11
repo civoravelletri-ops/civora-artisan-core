@@ -1639,98 +1639,152 @@ module.exports = async (req, res) => {
     }
 
     // ============================================================
-    // 9. PROMEMORIA AUTOMATICI MACRODROID
-    // ============================================================
-    else if (action === 'invia_promemoria_automatici') {
-        const now = new Date();
-        const nowRomeHour = parseInt(new Date().toLocaleTimeString('it-IT', { hour: '2-digit', hour12: false, timeZone: 'Europe/Rome' }), 10);
-        if (nowRomeHour >= 22 || nowRomeHour < 7) {
-            return res.status(200).json({ message: "Orario notturno: invio SMS sospeso per rispetto del cliente." });
-        }
-
-        const snap1 = await db.collection('bookings')
-            .where('reminder1_sent', '==', false)
-            .limit(30)
-            .get();
-
-        const snap2 = await db.collection('bookings')
-            .where('reminder2_sent', '==', false)
-            .limit(30)
-            .get();
-
-        let totalSent = 0;
-
-        for (const docSnap of snap1.docs) {
-            const booking = docSnap.data();
-            if (!booking.reminder1_time) continue;
-            const remTime = booking.reminder1_time.toDate();
-            if (remTime > now) continue;
-
-            const validStatuses = ['confirmed', 'paid', 'rescheduled', 'pending', 'pending-cash'];
-            if (!validStatuses.includes(booking.status)) continue;
-
-            if (booking.customerPhone) {
-                let numeroPulito = booking.customerPhone.replace(/\s+/g, '');
-                if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
-
-                const vendorDoc = await db.collection('vendors').doc(booking.vendorId).get();
-                const storeName = vendorDoc.exists ? (vendorDoc.data().store_name || 'La clinica') : 'La clinica';
-                const nomeBreve = (booking.customerName || 'Cliente').split(' ')[0];
-
-                const dataApp = booking.startDateTime.toDate();
-                const oraFormattata = dataApp.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
-                const dataFormattata = dataApp.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Rome' });
-
-                const petText = booking.petName ? ` per ${booking.petName}` : '';
-                const testo = `Promemoria: Ciao ${nomeBreve}, ti ricordiamo l'app.to${petText} da ${storeName} per "${booking.bookedServiceName}" del ${dataFormattata} alle ore ${oraFormattata}. A presto!`;
-                const macrodroidUrl = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(testo)}`;
-
-                await safeFetch(macrodroidUrl, {}, 2500);
+        // 9. PROMEMORIA AUTOMATICI MACRODROID & RICHIAMI VACCINI
+        // ============================================================
+        else if (action === 'invia_promemoria_automatici') {
+            const now = new Date();
+            const nowRomeHour = parseInt(new Date().toLocaleTimeString('it-IT', { hour: '2-digit', hour12: false, timeZone: 'Europe/Rome' }), 10);
+            if (nowRomeHour >= 22 || nowRomeHour < 7) {
+                return res.status(200).json({ message: "Orario notturno: invio SMS sospeso per rispetto del cliente." });
             }
 
-            await docSnap.ref.update({
-                reminder1_sent: true,
-                reminder1_sent_at: admin.firestore.FieldValue.serverTimestamp()
-            });
-            totalSent++;
-        }
+            const snap1 = await db.collection('bookings')
+                .where('reminder1_sent', '==', false)
+                .limit(30)
+                .get();
 
-        for (const docSnap of snap2.docs) {
-            const booking = docSnap.data();
-            if (!booking.reminder2_time) continue;
-            const remTime = booking.reminder2_time.toDate();
-            if (remTime > now) continue;
+            const snap2 = await db.collection('bookings')
+                .where('reminder2_sent', '==', false)
+                .limit(30)
+                .get();
 
-            const validStatuses = ['confirmed', 'paid', 'rescheduled', 'pending', 'pending-cash'];
-            if (!validStatuses.includes(booking.status)) continue;
+            let totalSent = 0;
 
-            if (booking.customerPhone) {
-                let numeroPulito = booking.customerPhone.replace(/\s+/g, '');
-                if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
+            for (const docSnap of snap1.docs) {
+                const booking = docSnap.data();
+                if (!booking.reminder1_time) continue;
+                const remTime = booking.reminder1_time.toDate();
+                if (remTime > now) continue;
 
-                const vendorDoc = await db.collection('vendors').doc(booking.vendorId).get();
-                const storeName = vendorDoc.exists ? (vendorDoc.data().store_name || 'La clinica') : 'La clinica';
-                const nomeBreve = (booking.customerName || 'Cliente').split(' ')[0];
+                const validStatuses = ['confirmed', 'paid', 'rescheduled', 'pending', 'pending-cash'];
+                if (!validStatuses.includes(booking.status)) continue;
 
-                const dataApp = booking.startDateTime.toDate();
-                const oraFormattata = dataApp.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+                if (booking.customerPhone) {
+                    let numeroPulito = booking.customerPhone.replace(/\s+/g, '');
+                    if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
 
-                const petText = booking.petName ? ` per ${booking.petName}` : '';
-                const testo = `Promemoria finale: Ciao ${nomeBreve}, l'appuntamento${petText} da ${storeName} inizia tra poco (ore ${oraFormattata}). Vi aspettiamo!`;
-                const macrodroidUrl = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(testo)}`;
+                    const vendorDoc = await db.collection('vendors').doc(booking.vendorId).get();
+                    const storeName = vendorDoc.exists ? (vendorDoc.data().store_name || 'La clinica') : 'La clinica';
+                    const nomeBreve = (booking.customerName || 'Cliente').split(' ')[0];
 
-                await safeFetch(macrodroidUrl, {}, 2500);
+                    const dataApp = booking.startDateTime.toDate();
+                    const oraFormattata = dataApp.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+                    const dataFormattata = dataApp.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Rome' });
+
+                    const petText = booking.petName ? ` per ${booking.petName}` : '';
+                    const testo = `Promemoria: Ciao ${nomeBreve}, ti ricordiamo l'app.to${petText} da ${storeName} per "${booking.bookedServiceName}" del ${dataFormattata} alle ore ${oraFormattata}. A presto!`;
+                    const macrodroidUrl = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(testo)}`;
+
+                    await safeFetch(macrodroidUrl, {}, 2500);
+                }
+
+                await docSnap.ref.update({
+                    reminder1_sent: true,
+                    reminder1_sent_at: admin.firestore.FieldValue.serverTimestamp()
+                });
+                totalSent++;
             }
 
-            await docSnap.ref.update({
-                reminder2_sent: true,
-                reminder2_sent_at: admin.firestore.FieldValue.serverTimestamp()
-            });
-            totalSent++;
-        }
+            for (const docSnap of snap2.docs) {
+                const booking = docSnap.data();
+                if (!booking.reminder2_time) continue;
+                const remTime = booking.reminder2_time.toDate();
+                if (remTime > now) continue;
 
-        return res.status(200).json({ success: true, processed: totalSent });
-    }
+                const validStatuses = ['confirmed', 'paid', 'rescheduled', 'pending', 'pending-cash'];
+                if (!validStatuses.includes(booking.status)) continue;
+
+                if (booking.customerPhone) {
+                    let numeroPulito = booking.customerPhone.replace(/\s+/g, '');
+                    if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
+
+                    const vendorDoc = await db.collection('vendors').doc(booking.vendorId).get();
+                    const storeName = vendorDoc.exists ? (vendorDoc.data().store_name || 'La clinica') : 'La clinica';
+                    const nomeBreve = (booking.customerName || 'Cliente').split(' ')[0];
+
+                    const dataApp = booking.startDateTime.toDate();
+                    const oraFormattata = dataApp.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+
+                    const petText = booking.petName ? ` per ${booking.petName}` : '';
+                    const testo = `Promemoria finale: Ciao ${nomeBreve}, l'appuntamento${petText} da ${storeName} inizia tra poco (ore ${oraFormattata}). Vi aspettiamo!`;
+                    const macrodroidUrl = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(testo)}`;
+
+                    await safeFetch(macrodroidUrl, {}, 2500);
+                }
+
+                await docSnap.ref.update({
+                    reminder2_sent: true,
+                    reminder2_sent_at: admin.firestore.FieldValue.serverTimestamp()
+                });
+                totalSent++;
+            }
+
+            // 💉 3. INVIO AUTOMATICO RICHIAMI VACCINI & PREVENZIONE (A SCADENZA DI 1 ANNO / 6 MESI / 1 MESE)
+            try {
+                const recallsSnap = await db.collectionGroup('reminders')
+                    .where('type', '==', 'vaccine_recall')
+                    .where('status', '==', 'active')
+                    .limit(30)
+                    .get();
+
+                for (const recallDoc of recallsSnap.docs) {
+                    const recall = recallDoc.data();
+                    if (recall.recall_sms_sent === true) continue;
+                    if (!recall.dueDate) continue;
+
+                    const dueDateObj = recall.dueDate.toDate();
+                    if (dueDateObj > now) continue; // Non ancora scaduto
+
+                    const phoneToUse = recall.ownerPhone || recall.customerPhone;
+                    if (phoneToUse) {
+                        let numeroPulito = phoneToUse.replace(/[^\d+]/g, '');
+                        if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
+
+                        let storeName = 'La Clinica';
+                        let storePhone = '';
+                        if (recall.vendorId) {
+                            const vDoc = await db.collection('vendors').doc(recall.vendorId).get();
+                            if (vDoc.exists) {
+                                storeName = vDoc.data().store_name || storeName;
+                                storePhone = vDoc.data().phone || vDoc.data().whatsapp_phone || '';
+                            }
+                        }
+
+                        const clientName = (recall.ownerName || recall.customerName || 'Cliente').split(' ')[0];
+                        const petLabel = recall.petName ? ` per ${recall.petName}` : '';
+                        const contactInfo = storePhone ? ` Tel: ${storePhone}` : '';
+
+                        let testoSms = `Promemoria: Gentile ${clientName}, e' il momento del richiamo vaccinale/preventivo${petLabel} da ${storeName}.${contactInfo}`;
+                        if (testoSms.length > 155) {
+                            testoSms = testoSms.substring(0, 152) + '...';
+                        }
+
+                        const macrodroidUrl = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(testoSms)}`;
+                        await safeFetch(macrodroidUrl, {}, 2500);
+                    }
+
+                    await recallDoc.ref.update({
+                        recall_sms_sent: true,
+                        recall_sent_at: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                    totalSent++;
+                }
+            } catch (recallErr) {
+                console.error("[Recall Engine] Errore invio richiami vaccini:", recallErr);
+            }
+
+            return res.status(200).json({ success: true, processed: totalSent });
+        }
 
     // ============================================================
     // 10. CANCELLAZIONE SICURA VIA TOKEN
