@@ -2337,8 +2337,7 @@ module.exports = async (req, res) => {
         - Clinica: ${storeName || 'Ambulatorio Veterinario'}
         - Servizi d'urgenza selezionati: ${checkedServices && checkedServices.length > 0 ? checkedServices.join(', ') : 'Urgenze generali'}
         - Note a mano libera del medico: "${freeText || 'Disponibili per urgenze generali e visite'}"`;
-
-                try {
+              
                                     try {
                                                         const aiModel = 'llama-3.1-8b-instant';
                                                         const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
