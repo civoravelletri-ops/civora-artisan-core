@@ -2365,17 +2365,152 @@ module.exports = async (req, res) => {
                                                         const data = await groqRes.json();
                                                         const summary = data.choices[0]?.message?.content?.trim() || "";
                                                         return res.status(200).json({ summary });
-                                    
-                                                    } catch (groqErr) {
-                                                        console.error("[Vet AI] Errore Groq:", groqErr);
-                                                        return res.status(500).json({ error: "Errore durante l'elaborazione della sintesi con Groq: " + groqErr.message });
-                                                    }
-            }
 
-            return res.status(400).json({ error: `Azione non riconosciuta: ${action}.` });
+                                                                                                            } catch (groqErr) {
+                                                                                                                console.error("[Vet AI] Errore Groq:", groqErr);
+                                                                                                                return res.status(500).json({ error: "Errore durante l'elaborazione della sintesi con Groq: " + groqErr.message });
+                                                                                                            }
+                                                                    }
 
-          } catch (error) {
-    console.error('SERVER ERROR (Vet API):', error);
-    res.status(500).json({ error: 'Errore interno del server.', details: process.env.NODE_ENV === 'development' ? error.message : undefined });
-  }
-};
+                                                                    // ============================================================
+                                                                    // 18. EMISSIONE RICETTA ELETTRONICA VETERINARIA (REV / VETINFO)
+                                                                    // ============================================================
+                                                                    else if (action === 'generate_vet_prescription_rev') {
+                                                                        const { bookingId, drugName, posology, packs, treatmentDays, ownerPhone, ownerName, petName } = req.body;
+
+                                                                        if (!bookingId || !drugName || !posology) {
+                                                                            return res.status(400).json({ error: "Dati mancanti per l'emissione della ricetta REV." });
+                                                                        }
+
+                                                                        try {
+                                                                            // SIMULAZIONE CHIAMATA API SERVER MINISTERO DELLA SALUTE (VETINFO)
+                                                                            // Nella realtà qui si inserisce un fetch('https://www.vetinfo.it/api/...') con i certificati dello Stato
+
+                                                                            // Creiamo il Numero Ricetta Ufficiale e il PIN a 4 cifre sul server (al sicuro)
+                                                                            const yearSuffix = new Date().getFullYear().toString().slice(-2);
+                                                                            const randomRecipeDigits = Math.floor(100000 + Math.random() * 900000);
+                                                                            const recipeNumber = `${yearSuffix}IT${randomRecipeDigits}`;
+                                                                            const pinCode = Math.floor(1000 + Math.random() * 9000).toString();
+
+                                                                            const revData = {
+                                                                                recipeNumber: recipeNumber,
+                                                                                pinCode: pinCode,
+                                                                                drugName: drugName,
+                                                                                posology: posology,
+                                                                                packs: packs || 1,
+                                                                                treatmentDays: treatmentDays || 7,
+                                                                                issuedAt: admin.firestore.FieldValue.serverTimestamp()
+                                                                            };
+
+                                                                            // Salviamo in modo sicuro la ricetta nella cartella del paziente nel database
+                                                                            await db.collection('bookings').doc(bookingId).update({
+                                                                                revData: revData,
+                                                                                hasRevPrescription: true,
+                                                                                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                                                                            });
+
+                                                                            // INVIO AUTOMATICO DELL'SMS TRAMITE MACRODROID DIRETTAMENTE DAL SERVER!
+                                                                            if (ownerPhone) {
+                                                                                let numeroPulito = ownerPhone.replace(/\s+/g, '');
+                                                                                if (!numeroPulito.startsWith('+')) numeroPulito = '+39' + numeroPulito;
+
+                                                                                const nomeBreve = (ownerName || 'Cliente').split(' ')[0];
+                                                                                const nomePet = petName || 'il tuo animale';
+
+                                                                                let msg = `Ciao ${nomeBreve}, ecco la Ricetta (REV) per ${nomePet}. N.Ricetta: ${recipeNumber} - PIN: ${pinCode} - Farmaco: ${drugName}`;
+
+                                                                                const macrodroidUrl = `https://trigger.macrodroid.com/51db87e2-5593-48a5-9df5-a59f5dc9cf07/bazar_sms?phone=${encodeURIComponent(numeroPulito)}&message=${encodeURIComponent(msg)}`;
+                                                                                await safeFetch(macrodroidUrl, {}, 2500);
+                                                                            }
+
+                                                                            return res.status(200).json({
+                                                                                success: true,
+                                                                                revData: revData,
+                                                                                message: "Ricetta REV emessa e inviata via SMS."
+                                                                            });
+
+                                                                        } catch (err) {
+                                                                            console.error("[VetInfo REV Error]", err);
+                                                                            return res.status(500).json({ error: "Errore durante la comunicazione con i server ministeriali." });
+                                                                        }
+                                                                    }
+
+                                                                    // ============================================================
+                                                                    // 19. GENERAZIONE FLUSSO SISTEMA TESSERA SANITARIA (XML 730 FISCO)
+                                                                    // ============================================================
+                                                                    else if (action === 'generate_sts_xml') {
+                                                                        const { startDate, endDate } = req.body;
+
+                                                                        if (!vendorId || !startDate || !endDate) {
+                                                                            return res.status(400).json({ error: "Dati mancanti per la generazione STS." });
+                                                                        }
+
+                                                                        try {
+                                                                            // Recuperiamo la P.IVA segreta della clinica senza mostrarla sul browser
+                                                                            const vendorDoc = await db.collection('vendors').doc(vendorId).get();
+                                                                            const pIva = vendorDoc.exists ? (vendorDoc.data().vat_number || vendorDoc.data().piva || '00000000000') : '00000000000';
+
+                                                                            // Estrapoliamo tutte le visite pagate nel mese scelto
+                                                                            const startUTC = new Date(startDate);
+                                                                            const endUTC = new Date(endDate);
+                                                                            endUTC.setHours(23, 59, 59, 999);
+
+                                                                            const snap = await db.collection('bookings')
+                                                                                .where('vendorId', '==', vendorId)
+                                                                                .where('startDateTime', '>=', admin.firestore.Timestamp.fromDate(startUTC))
+                                                                                .where('startDateTime', '<=', admin.firestore.Timestamp.fromDate(endUTC))
+                                                                                .where('status', 'in', ['paid', 'completed'])
+                                                                                .get();
+
+                                                                            // Costruiamo l'XML formattato esattamente come richiesto dall'Agenzia delle Entrate (Tracciato FV - Spese Veterinarie)
+                                                                            let xmlString = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+                                                                            xmlString += `<precompilata xmlns="http://www.agenziaentrate.gov.it/2023/SpeseSanitarie">\n`;
+                                                                            xmlString += `  <proprietario>\n    <cfProprietario>${pIva}</cfProprietario>\n  </proprietario>\n`;
+
+                                                                            let count = 0;
+                                                                            snap.docs.forEach((doc, index) => {
+                                                                                const b = doc.data();
+                                                                                const cfCliente = (b.fiscalCode || b.customerFiscalCode || '').toUpperCase().trim();
+                                                                                const prezzo = b.bookedServicePrice || b.price || 0;
+
+                                                                                // Se il cliente ha dato il codice fiscale valido e ha pagato, lo inseriamo nel flusso delle tasse
+                                                                                if (cfCliente && cfCliente.length === 16 && prezzo > 0) {
+                                                                                    const dataEmissione = b.startDateTime.toDate().toISOString().split('T')[0].replace(/-/g, '');
+                                                                                    const numDoc = b.appointmentCode || `FATT${index+1}`;
+                                                                                    const isTracciato = (b.isPaidOnline || b.paymentMethod === 'pos') ? 'SI' : 'NO';
+
+                                                                                    xmlString += `  <documentoSpesa>\n`;
+                                                                                    xmlString += `    <idSpesa>\n      <pIva>${pIva}</pIva>\n      <dataEmissione>${dataEmissione}</dataEmissione>\n      <numDocumentoFiscale>\n        <dispositivo>1</dispositivo>\n        <numDocumento>${numDoc}</numDocumento>\n      </numDocumentoFiscale>\n    </idSpesa>\n`;
+                                                                                    xmlString += `    <cfCittadino>${cfCliente}</cfCittadino>\n`;
+                                                                                    xmlString += `    <voceSpesa>\n      <tipoSpesa>FV</tipoSpesa>\n      <importo>${prezzo.toFixed(2)}</importo>\n    </voceSpesa>\n`;
+                                                                                    xmlString += `    <pagamentoTracciato>${isTracciato}</pagamentoTracciato>\n`;
+                                                                                    xmlString += `  </documentoSpesa>\n`;
+                                                                                    count++;
+                                                                                }
+                                                                            });
+
+                                                                            xmlString += `</precompilata>`;
+
+                                                                            // Convertiamo in Base64 così il file scende pulito sul computer del veterinario
+                                                                            const xmlBase64 = Buffer.from(xmlString).toString('base64');
+
+                                                                            return res.status(200).json({
+                                                                                success: true,
+                                                                                count: count,
+                                                                                xmlBase64: xmlBase64,
+                                                                                message: "Flusso XML STS generato con successo."
+                                                                            });
+
+                                                                        } catch (err) {
+                                                                            console.error("[STS XML Error]", err);
+                                                                            return res.status(500).json({ error: "Errore durante la generazione del flusso Fiscale STS." });
+                                                                        }
+                                                                    }
+
+                                                                    return res.status(400).json({ error: `Azione non riconosciuta: ${action}.` });
+
+                                                                  } catch (error) {
+                                                            console.error('SERVER ERROR (Vet API):', error);
+                                                            res.status(500).json({ error: 'Errore interno del server.', details: process.env.NODE_ENV === 'development' ? error.message : undefined });
+                                                          }
+                                                        };
