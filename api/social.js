@@ -20,50 +20,38 @@ module.exports = async function handler(req, res) {
         }
 
         // =========================================================================
-                // 🤖 PILOTA AUTOMATICO WHATSAPP 24/7 (RICEZIONE, VERIFICA E PRENOTAZIONE REALE)
+                // 🤖 PILOTA AUTOMATICO WHATSAPP 24/7 (RICEZIONE, VERIFICA E RISPOSTA DIRETTA)
                 // =========================================================================
                 if (body.isWhatsAppAutoPilot && body.vendorId && body.senderPhone) {
                     const vendorId = body.vendorId;
                     const senderPhone = body.senderPhone;
                     const messageText = (body.messageText || "").trim();
-        
+
                     if (!messageText) {
                         return res.status(200).json({ status: "skipped", reason: "Messaggio vuoto" });
                     }
-        
-                    console.log(`[AutoPilot] 🚀 Analisi messaggio da ${senderPhone} (Salone: ${vendorId}): "${messageText}"`);
-        
+
+                    console.log(`[AutoPilot] 🚀 Elaborazione per ${senderPhone} (Salone: ${vendorId}): "${messageText}"`);
+
                     const todayFormatted = new Date().toLocaleDateString('it-IT', {
                         weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
                     });
-        
-                    // 1. L'IA analizza il messaggio: capisce l'intenzione, i dettagli e se il cliente sta confermando
-                    const autoPilotSystemPrompt = `Sei l'assistente virtuale WhatsApp del salone. Oggi è ${todayFormatted}.
-                    Devi analizzare cosa dice il cliente ed estrarre i dati.
-                    
+
+                    // Prompt cordiale e professionale dell'IA
+                    const autoPilotSystemPrompt = `Sei l'assistente virtuale del salone su WhatsApp.
+                    Oggi è ${todayFormatted}.
+                    Il tuo compito è rispondere ai clienti che scrivono al salone in modo cordiale, solare ed educato.
+
                     REGOLE:
-                    1. intent:
-                       - "confirm_booking" se il cliente sta dicendo di sì/confermando un orario (es: "sì", "va bene", "ok per le 16", "prendi pure", "confermo").
-                       - "booking_request" se sta chiedendo orari o disponibilità (es: "hai posto oggi?", "vorrei tagliare i capelli domani alle 15").
-                       - "general_question" se fa saluti o domande generiche.
-                    2. customerName: estrai il nome se lo menziona, altrimenti "".
-                    3. date: formato YYYY-MM-DD relativo a oggi. Se non specificato, usa la data di oggi.
-                    4. time: formato HH:MM se richiesto o concordato, altrimenti "".
-                    5. serviceName: nome generico del servizio richiesto (es: "Taglio", "Barba", "Piega", "Colore"), default "Servizio".
-                    6. replyText: risposta calda, educata, massima di 2-3 frasi per WhatsApp.
-        
-                    Rispondi ESCLUSIVAMENTE con un JSON valido (senza markdown):
-                    {
-                       "intent": "confirm_booking | booking_request | general_question",
-                       "customerName": "",
-                       "date": "YYYY-MM-DD",
-                       "time": "HH:MM",
-                       "serviceName": "Taglio",
-                       "replyText": "testo risposta WhatsApp"
-                    }`;
-        
-                    let extracted = { intent: "general_question", customerName: "", date: "", time: "", serviceName: "Servizio", replyText: "Ciao! Come posso aiutarti oggi?" };
-        
+                    1. Rispondi con massimo 2 o 3 frasi, usando le emoji in modo naturale (✂️, ✨, 👋).
+                    2. Se ti salutano (es: "ciao", "buongiorno"), rispondi calorosamente dando il benvenuto e chiedendo come puoi aiutarli.
+                    3. Se chiedono informazioni su servizi o orari, rispondi con entusiasmo confermando che siamo aperti e chiedendo che trattamento desiderano fare o quale orario preferiscono.
+                    4. Se chiedono di prenotare (es: "vorrei fare un taglio oggi alle 16"), conferma con entusiasmo la richiesta chiedendo se desiderano fissare l'appuntamento e chiedendo cortesemente il loro Nome e Cognome se non lo hanno specificato.
+
+                    Rispondi ESCLUSIVAMENTE con il testo del messaggio da inviare su WhatsApp, senza spiegazioni, senza virgolette e senza codice.`;
+
+                    let finalReply = "Ciao! 👋 Grazie per averci scritto. Come possiamo prenderci cura di te oggi? ✨";
+
                     try {
                         const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                             method: "POST",
@@ -75,77 +63,28 @@ module.exports = async function handler(req, res) {
                                 model: "llama-3.3-70b-versatile",
                                 messages: [
                                     { role: "system", content: autoPilotSystemPrompt },
-                                    { role: "user", content: `Messaggio cliente (${senderPhone}): "${messageText}"` }
+                                    { role: "user", content: `Messaggio cliente: "${messageText}"` }
                                 ],
-                                temperature: 0.1,
-                                max_tokens: 350
+                                temperature: 0.3,
+                                max_tokens: 300
                             })
                         });
-        
+
                         if (groqRes.ok) {
                             const groqData = await groqRes.json();
-                            let rawContent = groqData.choices?.[0]?.message?.content || "";
-                            rawContent = rawContent.replace(/```json/g, "").replace(/```/g, "").trim();
-                            extracted = JSON.parse(rawContent);
+                            const aiGenerated = groqData.choices?.[0]?.message?.content?.trim();
+                            if (aiGenerated) {
+                                finalReply = aiGenerated.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```/g, "").trim();
+                            }
                         }
                     } catch (pErr) {
-                        console.warn("[AutoPilot] Errore parsing Groq:", pErr.message);
+                        console.warn("[AutoPilot] Errore Groq, uso risposta fallback:", pErr.message);
                     }
-        
-                    let finalReply = extracted.replyText;
-        
-                    // 2. SE IL CLIENTE CONFERMA -> PRENOTIAMO FISICAMENTE A DATABASE!
-                    if (extracted.intent === "confirm_booking" && extracted.date && extracted.time) {
-                        try {
-                            const clientName = extracted.customerName || `Cliente WhatsApp (${senderPhone.slice(-4)})`;
-                            const startDateTime = new Date(`${extracted.date}T${extracted.time}:00`);
-                            const endDateTime = new Date(startDateTime.getTime() + 30 * 60000); // 30 min default
-        
-                            console.log(`[AutoPilot] 💾 REGISTRAZIONE EFFETTIVA per ${clientName} alle ${extracted.time} del ${extracted.date}...`);
-        
-                            const bookPayload = {
-                                action: 'save_service_booking',
-                                vendorId: vendorId,
-                                customerName: clientName,
-                                customerPhone: senderPhone,
-                                serviceId: 'whatsapp_ai_slot',
-                                bookedServiceName: extracted.serviceName || 'Servizio',
-                                bookedServicePrice: 0,
-                                bookedServiceDuration: 30,
-                                bookedTotalOccupiedTime: 30,
-                                startDateTime: startDateTime.toISOString(),
-                                endDateTime: endDateTime.toISOString(),
-                                status: 'confirmed',
-                                source: 'whatsapp_ai_autopilot',
-                                appointmentCode: 'WA_' + Date.now().toString().slice(-4),
-                                type: 'cura_persona'
-                            };
-        
-                            const saveRes = await fetch('https://localmente-api.vercel.app/api/get-available-slots', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(bookPayload)
-                            });
-        
-                            if (saveRes.ok) {
-                                const dateParts = extracted.date.split('-');
-                                const dateReadable = `${dateParts[2]}/${dateParts[1]}`;
-                                finalReply = `🎉 Perfetto ${extracted.customerName || ''}! Ti confermo l'appuntamento per ${extracted.serviceName} il ${dateReadable} alle ore ${extracted.time}. Ti abbiamo inserito in agenda, a presto! ✂️`;
-                                console.log(`[AutoPilot] ✅ APPUNTAMENTO REGISTRATO IN AGENDA CON SUCCESSO!`);
-                            } else {
-                                const errBody = await saveRes.json();
-                                finalReply = `Ci dispiace, ma lo slot delle ${extracted.time} è stato appena occupato da un altro cliente! Vuoi che controlliamo un altro orario?`;
-                            }
-                        } catch (bookErr) {
-                            console.error("[AutoPilot] Errore salvataggio agenda:", bookErr);
-                            finalReply = `Abbiamo preso la tua richiesta per le ${extracted.time}, ti confermiamo l'orario a brevissimo!`;
-                        }
-                    }
-        
-                    // 3. Invio della risposta tramite il Gateway Baileys
+
+                    // Invio della risposta al cliente su WhatsApp tramite il Gateway Baileys
                     try {
                         const gatewayUrl = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
-                        await fetch(`${gatewayUrl}/send-message`, {
+                        const sendRes = await fetch(`${gatewayUrl}/send-message`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -154,12 +93,13 @@ module.exports = async function handler(req, res) {
                                 message: finalReply
                             })
                         });
-                        console.log(`[AutoPilot] 📤 Risposta inviata al cliente: "${finalReply}"`);
+                        const sendJson = await sendRes.json();
+                        console.log(`[AutoPilot] 📤 Esito invio Gateway a ${senderPhone}:`, JSON.stringify(sendJson));
                     } catch (sendErr) {
                         console.error("[AutoPilot] ⚠️ Errore invio Gateway:", sendErr.message);
                     }
-        
-                    return res.status(200).json({ success: true, processed: true, intent: extracted.intent, reply: finalReply });
+
+                    return res.status(200).json({ success: true, processed: true, reply: finalReply });
                 }
                 // =========================================================================
 
