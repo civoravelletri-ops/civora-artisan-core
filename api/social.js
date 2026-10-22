@@ -31,7 +31,7 @@ module.exports = async function handler(req, res) {
                        return res.status(200).json({ status: "skipped", reason: "Messaggio vuoto" });
                    }
 
-                   console.log(`[AutoPilot] 🚀 Nuovo messaggio da ${senderPhone} (Salone: ${vendorId}): "${messageText}"`);
+                   console.log(`[AutoPilot] 🚀 Nuovo messaggio da ${senderPhone}: "${messageText}"`);
 
                    const API_BASE_URL = 'https://localmente-api.vercel.app/api/get-available-slots';
                    const GATEWAY_BASE_URL = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
@@ -58,10 +58,13 @@ module.exports = async function handler(req, res) {
                            const fetchedCtx = await ctxRes.json();
                            if (fetchedCtx.success) {
                                contextData = fetchedCtx;
+                               console.log(`[AutoPilot] 🧠 Contesto caricato! Cliente: ${contextData.client?.name || 'Sconosciuto'}, Servizi trovati: ${contextData.services.length}`);
                            }
+                       } else {
+                           console.error("[AutoPilot] ⚠️ Errore recupero contesto:", await ctxRes.text());
                        }
                    } catch (ctxErr) {
-                       console.warn("[AutoPilot] Avviso recupero contesto:", ctxErr.message);
+                       console.error("[AutoPilot] ⚠️ Eccezione recupero contesto:", ctxErr.message);
                    }
 
                    const todayRome = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
@@ -78,7 +81,7 @@ module.exports = async function handler(req, res) {
                        ? contextData.services.map(s => `- ${s.name} (ID: "${s.id}", Prezzo: ${s.price}€, Durata: ${s.duration} min)`).join('\n')
                        : '- Servizio Standard (ID: "default", Prezzo: 0€, Durata: 30 min)';
 
-                   // 2. ISTRUZIONI INTELLIGENZA ARTIFICIALE CON RISPOSTE DIRETTE A INDIRIZZO E PREZZI
+                   // 2. ISTRUZIONI INTELLIGENZA ARTIFICIALE
                    const autoPilotSystemPrompt = `Sei l'assistente virtuale WhatsApp del salone "${salonName}".
        Oggi è ${todayReadable} (${todayRome}).
 
@@ -86,7 +89,7 @@ module.exports = async function handler(req, res) {
        - Nome Salone: ${salonName}
        - Indirizzo esatto: ${salonAddress || 'in salone'}
        - Telefono: ${salonPhone || ''}
-       ${recognizedClientName ? `- Nome Cliente già noto: "${recognizedClientName}". Salutalo per nome!` : '- Nome Cliente: Non noto. Se si presenta, memorizzalo.'}
+       ${recognizedClientName ? `- Nome Cliente già noto: "${recognizedClientName}". Salutalo per nome!` : '- Nome Cliente: Non noto. Sii cordiale.'}
 
        LISTINO SERVIZI:
        ${servicesListText}
@@ -102,7 +105,7 @@ module.exports = async function handler(req, res) {
           - "general_greeting": se saluta e basta.
        5. In "replyText" scrivi SEMPRE la risposta completa pronta per il cliente in base alla sua domanda.
 
-       Rispondi con un oggetto JSON valido in questo formato esatto:
+       Rispondi ESCLUSIVAMENTE con un JSON valido in questo formato esatto:
        {
          "intent": "info_question",
          "customerName": "${recognizedClientName}",
@@ -110,14 +113,14 @@ module.exports = async function handler(req, res) {
          "time": "",
          "serviceId": "",
          "serviceName": "",
-         "replyText": "risposta dettagliata per WhatsApp"
+         "replyText": "risposta dettagliata e cordiale per WhatsApp"
        }`;
 
                    const groqMessages = [
                        { role: "system", content: autoPilotSystemPrompt }
                    ];
 
-                   if (contextData.chatHistory && Array.isArray(contextData.chatHistory) && contextData.chatHistory.length > 0) {
+                   if (contextData.chatHistory && Array.isArray(contextData.chatHistory)) {
                        contextData.chatHistory.forEach(msg => {
                            if (msg.role && msg.content) {
                                groqMessages.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: msg.content });
@@ -137,8 +140,8 @@ module.exports = async function handler(req, res) {
                        replyText: ""
                    };
 
-                   // MODELLI DI RISERVA AUTOMATICI (Se uno è carico prova l'altro in 0.2s)
                    const GROQ_CANDIDATES = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+                   let aiSuccess = false;
 
                    for (const modelId of GROQ_CANDIDATES) {
                        try {
@@ -152,7 +155,7 @@ module.exports = async function handler(req, res) {
                                    model: modelId,
                                    messages: groqMessages,
                                    temperature: 0.2,
-                                   max_tokens: 800
+                                   max_tokens: 1000
                                })
                            });
 
@@ -160,7 +163,6 @@ module.exports = async function handler(req, res) {
                                const groqData = await groqRes.json();
                                let rawContent = groqData.choices?.[0]?.message?.content || "{}";
 
-                               // Pulizia antiproiettile del JSON
                                let cleanJson = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
                                cleanJson = cleanJson.replace(/```json/gi, "").replace(/```/g, "").trim();
                                const firstBrace = cleanJson.indexOf('{');
@@ -171,21 +173,28 @@ module.exports = async function handler(req, res) {
 
                                const parsed = JSON.parse(cleanJson);
                                extracted = { ...extracted, ...parsed };
-                               console.log(`[AutoPilot] ✅ Risposta generata con successo (${modelId}):`, extracted.replyText);
+                               console.log(`[AutoPilot] ✅ Risposta generata (${modelId}): ${extracted.replyText}`);
+                               aiSuccess = true;
                                break;
                            } else {
-                               const errBody = await groqRes.text();
-                               console.warn(`[AutoPilot] Modello ${modelId} ha dato errore (${groqRes.status}):`, errBody);
+                               console.warn(`[AutoPilot] ⚠️ Modello ${modelId} ha fallito (${groqRes.status}).`);
                            }
                        } catch (pErr) {
-                           console.warn(`[AutoPilot] Errore su ${modelId}:`, pErr.message);
+                           console.warn(`[AutoPilot] ⚠️ Eccezione su ${modelId}:`, pErr.message);
                        }
                    }
 
                    let finalReply = extracted.replyText;
-                   const displayName = extracted.customerName || recognizedClientName || '';
 
-                   // Ricerca del servizio corrispondente per nome o id
+                   // Se l'AI fallisce del tutto, mostriamo un messaggio di cortesia
+                   if (!aiSuccess || !finalReply) {
+                       finalReply = recognizedClientName
+                           ? `Ciao ${recognizedClientName}, in questo momento i nostri sistemi sono in aggiornamento. Ti risponderemo a brevissimo! ✨`
+                           : `Ciao! Grazie per averci scritto da ${salonName}. I nostri sistemi sono un attimo in aggiornamento, ti risponderemo a breve! ✨`;
+                       extracted.intent = "api_error";
+                   }
+
+                   const displayName = extracted.customerName || recognizedClientName || '';
                    const matchedService = contextData.services.find(s => s.id === extracted.serviceId)
                        || contextData.services.find(s => s.name.toLowerCase().includes((extracted.serviceName || '').toLowerCase()))
                        || contextData.services[0]
@@ -197,6 +206,7 @@ module.exports = async function handler(req, res) {
                    if ((extracted.intent === "ask_availability" || extracted.intent === "confirm_booking") && targetDate) {
                        let availableSlots = [];
                        try {
+                           console.log(`[AutoPilot] 📅 Controllo slot per ${targetDate} - Servizio: ${matchedService.id}`);
                            const slotsRes = await fetch(API_BASE_URL, {
                                method: 'POST',
                                headers: { 'Content-Type': 'application/json' },
@@ -210,25 +220,29 @@ module.exports = async function handler(req, res) {
                            if (slotsRes.ok) {
                                const slotsJson = await slotsRes.json();
                                availableSlots = slotsJson.slots || [];
+                           } else {
+                               console.error("[AutoPilot] ⚠️ Errore API Slots:", await slotsRes.text());
                            }
                        } catch (sErr) {
-                           console.warn("[AutoPilot] Errore controllo slot:", sErr.message);
+                           console.error("[AutoPilot] ⚠️ Eccezione controllo slot:", sErr.message);
                        }
 
                        const dateParts = targetDate.split('-');
-                       const dateReadable = `${dateParts[2]}/${dateParts[1]}`;
+                       const dateReadable = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}` : targetDate;
 
-                       // SE IL CLIENTE CONFERMA -> PRENOTIAMO A DATABASE!
+                       // CASO A: IL CLIENTE CONFERMA -> PRENOTIAMO A DATABASE!
                        if (extracted.intent === "confirm_booking" && extracted.time) {
                            try {
                                const startDateTime = new Date(`${targetDate}T${extracted.time}:00`);
                                const durationMins = matchedService.duration || 30;
                                const endDateTime = new Date(startDateTime.getTime() + durationMins * 60000);
 
+                               console.log(`[AutoPilot] 💾 Tentativo salvataggio per le ${extracted.time}...`);
+
                                const bookPayload = {
                                    action: 'save_service_booking',
                                    vendorId: vendorId,
-                                   customerName: displayName || `Cliente WhatsApp (${senderPhone.slice(-4)})`,
+                                   customerName: displayName || ("Cliente WhatsApp (" + senderPhone.slice(-4) + ")"),
                                    customerPhone: senderPhone,
                                    serviceId: matchedService.id,
                                    bookedServiceName: matchedService.name,
@@ -251,20 +265,23 @@ module.exports = async function handler(req, res) {
 
                                if (saveRes.ok) {
                                    finalReply = `🎉 Perfetto ${displayName}! Ti confermo l'appuntamento per *${matchedService.name}* il *${dateReadable}* alle ore *${extracted.time}*. Ti abbiamo inserito in agenda, a presto! ✂️✨`;
-                                   console.log(`[AutoPilot] ✅ APPUNTAMENTO REGISTRATO A CALENDARIO!`);
+                                   console.log(`[AutoPilot] ✅ APPUNTAMENTO REGISTRATO A CALENDARIO CON SUCCESSO!`);
                                } else {
+                                   const errJson = await saveRes.json();
+                                   console.warn("[AutoPilot] ⚠️ Errore salvataggio:", errJson.error);
                                    finalReply = `Ci dispiace ${displayName}, ma lo slot delle ${extracted.time} non è più disponibile. Vuoi che controlliamo un altro orario?`;
                                }
                            } catch (bErr) {
-                               finalReply = `Abbiamo preso nota della tua richiesta per le ${extracted.time}, ti confermeremo l'orario a brevissimo!`;
+                               console.error("[AutoPilot] ⚠️ Eccezione salvataggio:", bErr);
+                               finalReply = `Abbiamo preso nota della tua richiesta per le ${extracted.time}, ma ho avuto un piccolo problema di linea. Ti confermo tutto a brevissimo!`;
                            }
                        }
-                       // SE IL CLIENTE CHIEDE DISPONIBILITÀ ORARIA
+                       // CASO B: IL CLIENTE CHIEDE DISPONIBILITÀ ORARIA
                        else if (extracted.intent === "ask_availability") {
                            if (extracted.time) {
                                const isTimeFree = availableSlots.includes(extracted.time);
                                if (isTimeFree) {
-                                   finalReply = `Sì ${displayName}! Alle *${extracted.time}* del ${dateReadable} siamo liberi per *${matchedService.name}*. Vuoi che ti blocchi il posto? ✂️`;
+                                   finalReply = `Sì ${displayName}! Alle *${extracted.time}* del ${dateReadable} siamo liberi per *${matchedService.name}*. Ti blocco il posto in agenda? ✂️`;
                                } else {
                                    if (availableSlots.length > 0) {
                                        const alternatives = availableSlots.slice(0, 3).join(', ');
@@ -284,29 +301,24 @@ module.exports = async function handler(req, res) {
                        }
                    }
 
-                   // RISPOSTA DI SICUREZZA SE PROPRIO NIENTE È STATO GENERATO
-                   if (!finalReply) {
-                       finalReply = displayName
-                           ? `Ciao ${displayName}! 👋 Come possiamo aiutarti oggi da ${salonName}? ✨`
-                           : `Ciao! 👋 Grazie per averci scritto da ${salonName}. Come possiamo aiutarti oggi? ✨`;
-                   }
-
                    // 4. SALVA LA MEMORIA DELLA CONVERSAZIONE
-                   try {
-                       await fetch(API_BASE_URL, {
-                           method: 'POST',
-                           headers: { 'Content-Type': 'application/json' },
-                           body: JSON.stringify({
-                               action: 'save_autopilot_message',
-                               vendorId: vendorId,
-                               customerPhone: senderPhone,
-                               userMessage: messageText,
-                               aiReply: finalReply,
-                               customerName: displayName
-                           })
-                       });
-                   } catch (saveMemErr) {
-                       console.warn("[AutoPilot] Errore salvataggio memoria:", saveMemErr.message);
+                   if (extracted.intent !== "api_error") {
+                       try {
+                           await fetch(API_BASE_URL, {
+                               method: 'POST',
+                               headers: { 'Content-Type': 'application/json' },
+                               body: JSON.stringify({
+                                   action: 'save_autopilot_message',
+                                   vendorId: vendorId,
+                                   customerPhone: senderPhone,
+                                   userMessage: messageText,
+                                   aiReply: finalReply,
+                                   customerName: displayName
+                               })
+                           });
+                       } catch (saveMemErr) {
+                           console.warn("[AutoPilot] Errore salvataggio memoria:", saveMemErr.message);
+                       }
                    }
 
                    // 5. INVIA LA RISPOSTA SU WHATSAPP TRAMITE IL GATEWAY
