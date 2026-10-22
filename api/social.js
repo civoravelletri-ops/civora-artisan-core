@@ -62,9 +62,8 @@ module.exports = async function handler(req, res) {
                        "replyText": "testo risposta WhatsApp"
                     }`;
         
-                    // Niente frase fissa di default qui, la mettiamo alla fine come sicurezza
-                                let extracted = { intent: "general_question", customerName: "", date: "", time: "", serviceName: "Servizio", replyText: "" };
-                    
+                    let extracted = { intent: "general_question", customerName: "", date: "", time: "", serviceName: "Servizio", replyText: "" };
+
                                 try {
                                     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                                         method: "POST",
@@ -74,7 +73,7 @@ module.exports = async function handler(req, res) {
                                         },
                                         body: JSON.stringify({
                                             model: "llama-3.3-70b-versatile",
-                                            // Tolto response_format perché a volte fa confondere il modello LLaMA
+                                            response_format: { type: "json_object" }, // FORZATURA ASSOLUTA: DEVE RESTITUIRE JSON PURO
                                             messages: [
                                                 { role: "system", content: autoPilotSystemPrompt },
                                                 { role: "user", content: `Messaggio cliente (${senderPhone}): "${messageText}"` }
@@ -83,29 +82,27 @@ module.exports = async function handler(req, res) {
                                             max_tokens: 350
                                         })
                                     });
-                    
+
                                     if (groqRes.ok) {
                                         const groqData = await groqRes.json();
-                                        let rawContent = groqData.choices?.[0]?.message?.content || "";
-                                        
-                                        // PULIZIA ESTREMA: Cerchiamo e prendiamo solo quello che c'è tra le parentesi graffe { }
-                                        const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
-                                        if (jsonMatch) {
-                                            const parsed = JSON.parse(jsonMatch[0]);
-                                            // Uniamo i dati trovati dall'IA
+                                        let rawContent = groqData.choices?.[0]?.message?.content || "{}";
+
+                                        console.log(`[AutoPilot] Risposta cruda da Groq:`, rawContent);
+
+                                        try {
+                                            const parsed = JSON.parse(rawContent);
                                             extracted = { ...extracted, ...parsed };
-                                        } else {
-                                            console.warn("[AutoPilot] Nessun JSON trovato in:", rawContent);
+                                        } catch (parseErr) {
+                                            console.error("[AutoPilot] Groq ha restituito un JSON rotto. Dettagli:", rawContent);
                                         }
                                     } else {
                                         const errData = await groqRes.text();
                                         console.error("[AutoPilot] Errore API Groq:", errData);
                                     }
                                 } catch (pErr) {
-                                    console.warn("[AutoPilot] Errore parsing Groq:", pErr.message);
+                                    console.warn("[AutoPilot] Errore chiamata a Groq:", pErr.message);
                                 }
-                    
-                                // Fallback intelligente: se l'IA non ha scritto nulla o si è rotta, usiamo la frase di emergenza
+
                                 let finalReply = extracted.replyText || "Ciao! 👋 Grazie per averci scritto. Come possiamo prenderci cura di te oggi? ✨";
         
                     // 2. SE IL CLIENTE CONFERMA -> PRENOTIAMO FISICAMENTE A DATABASE!
