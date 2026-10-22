@@ -139,57 +139,56 @@ module.exports = async function handler(req, res) {
                                };
 
                                // MODELLI IMMORTALI (Se uno fallisce passa istantaneamente all'altro)
-                               const GROQ_CANDIDATES = [
-                                   "llama3-8b-8192",
-                                   "llama3-70b-8192",
-                                   "llama-3.1-8b-instant",
-                                   "llama-3.1-70b-versatile",
-                                   "llama-3.3-70b-versatile"
-                               ];
-                               let aiSuccess = false;
-
-                               for (const modelId of GROQ_CANDIDATES) {
-                                   try {
-                                       const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                                           method: "POST",
-                                           headers: {
-                                               "Authorization": `Bearer ${GROQ_API_KEY}`,
-                                               "Content-Type": "application/json"
-                                           },
-                                           body: JSON.stringify({
-                                               model: modelId,
-                                               messages: groqMessages,
-                                               response_format: { type: "json_object" },
-                                               temperature: 0.2,
-                                               max_tokens: 800
-                                           })
-                                       });
-
-                                       if (groqRes.ok) {
-                                           const groqData = await groqRes.json();
-                                           let rawContent = groqData.choices?.[0]?.message?.content || "{}";
-
-                                           // Pulizia antiproiettile del JSON
-                                           let cleanJson = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-                                           cleanJson = cleanJson.replace(/```json/gi, "").replace(/```/g, "").trim();
-                                           const firstBrace = cleanJson.indexOf('{');
-                                           const lastBrace = cleanJson.lastIndexOf('}');
-                                           if (firstBrace !== -1 && lastBrace !== -1) {
-                                               cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
+                                           const GROQ_CANDIDATES = [
+                                               "llama3-70b-8192",
+                                               "llama3-8b-8192",
+                                               "mixtral-8x7b-32768",
+                                               "llama-3.1-8b-instant"
+                                           ];
+                                           let aiSuccess = false;
+                               
+                                           for (const modelId of GROQ_CANDIDATES) {
+                                               try {
+                                                   const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                                                       method: "POST",
+                                                       headers: {
+                                                           "Authorization": `Bearer ${GROQ_API_KEY}`,
+                                                           "Content-Type": "application/json"
+                                                       },
+                                                       body: JSON.stringify({
+                                                           model: modelId,
+                                                           messages: groqMessages,
+                                                           // 🚀 RIMOSSO response_format per evitare l'errore 404! 
+                                                           temperature: 0.1, // Più basso è, più è matematico e preciso
+                                                           max_tokens: 800
+                                                       })
+                                                   });
+                               
+                                                   if (groqRes.ok) {
+                                                       const groqData = await groqRes.json();
+                                                       let rawContent = groqData.choices?.[0]?.message?.content || "{}";
+                               
+                                                       // Pulizia antiproiettile del JSON (estrae il JSON anche se il modello ci scrive altro intorno)
+                                                       let cleanJson = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+                                                       cleanJson = cleanJson.replace(/```json/gi, "").replace(/```/g, "").trim();
+                                                       const firstBrace = cleanJson.indexOf('{');
+                                                       const lastBrace = cleanJson.lastIndexOf('}');
+                                                       if (firstBrace !== -1 && lastBrace !== -1) {
+                                                           cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
+                                                       }
+                               
+                                                       const parsed = JSON.parse(cleanJson);
+                                                       extracted = { ...extracted, ...parsed };
+                                                       console.log(`[AutoPilot] ✅ Risposta generata con successo (${modelId}):`, extracted.replyText);
+                                                       aiSuccess = true;
+                                                       break;
+                                                   } else {
+                                                       console.warn(`[AutoPilot] ⚠️ Modello ${modelId} ha fallito (${groqRes.status}). Passo al successivo...`);
+                                                   }
+                                               } catch (pErr) {
+                                                   console.warn(`[AutoPilot] ⚠️ Eccezione su ${modelId}:`, pErr.message);
+                                               }
                                            }
-
-                                           const parsed = JSON.parse(cleanJson);
-                                           extracted = { ...extracted, ...parsed };
-                                           console.log(`[AutoPilot] ✅ Risposta generata con successo (${modelId}):`, extracted.replyText);
-                                           aiSuccess = true;
-                                           break;
-                                       } else {
-                                           console.warn(`[AutoPilot] ⚠️ Modello ${modelId} ha fallito (${groqRes.status}). Passo al successivo...`);
-                                       }
-                                   } catch (pErr) {
-                                       console.warn(`[AutoPilot] ⚠️ Eccezione su ${modelId}:`, pErr.message);
-                                   }
-                               }
 
                    let finalReply = extracted.replyText;
 
