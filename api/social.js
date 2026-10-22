@@ -205,7 +205,7 @@ module.exports = async function handler(req, res) {
 
                   // 💡 RECUPERO INTELLIGENTE DI SERVIZIO, DATA E ORA DAL MESSAGGIO PRECEDENTE DEL SALONE
                              if (extracted.intent === "confirm_booking" && lastAssistantMsg) {
-                                 // 1. Recupera la data esatta (es. "del 23/10" -> "2026-10-23")
+                                 // 1. Data
                                  const dateMatch = lastAssistantMsg.match(/\b(\d{1,2})\/(\d{1,2})\b/);
                                  if (dateMatch) {
                                      const currentYear = new Date().getFullYear();
@@ -215,7 +215,7 @@ module.exports = async function handler(req, res) {
                                      console.log(`[AutoPilot] 💡 Data recuperata dallo storico: ${extracted.date}`);
                                  }
                   
-                                 // 2. Recupera l'orario (es. "alle 11:00")
+                                 // 2. Orario
                                  if (!extracted.time) {
                                      const timeMatch = lastAssistantMsg.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
                                      if (timeMatch) {
@@ -224,7 +224,7 @@ module.exports = async function handler(req, res) {
                                      }
                                  }
                   
-                                 // 3. Recupera il servizio effettivo concordato tra gli asterischi (es. "*Taglio e Styling*")
+                                 // 3. Servizio
                                  const serviceNameMatch = lastAssistantMsg.match(/\*([^*\n]+)\*/);
                                  if (serviceNameMatch && serviceNameMatch[1]) {
                                      const prevServiceName = serviceNameMatch[1].trim().toLowerCase();
@@ -247,6 +247,88 @@ module.exports = async function handler(req, res) {
                              }
                   
                              const displayName = extracted.customerName || recognizedClientName || '';
+                             const cleanClientPhone = senderPhone.replace(/@.*$/, '');
+                  
+                             // =========================================================================
+                             // 🛍️ RICONOSCIMENTO AUTOMATICO: CONFERMA ACQUISTO PRODOTTO A DOMICILIO
+                             // =========================================================================
+                             const isProductOrderConfirmation = (
+                                 (extracted.intent === "confirm_booking" || extracted.intent === "info_question") &&
+                                 !extracted.time &&
+                                 (messageText.toLowerCase().includes("conferma") || messageText.toLowerCase().includes("tutto ok") || messageText.toLowerCase().includes("consegnare") || messageText.toLowerCase().includes("contanti")) &&
+                                 lastAssistantMsg.toLowerCase().includes("consegn")
+                             );
+                  
+                             if (isProductOrderConfirmation) {
+                                 try {
+                                     console.log(`[AutoPilot] 📦 Rilevata conferma ordine prodotto da ${cleanClientPhone}! Estrazione dati in corso...`);
+                  
+                                     // Estrazione dati prodotto e totale dallo storico della conversazione
+                                     let orderedProductName = "Prodotto da Asporto";
+                                     let orderedProductPrice = 18;
+                                     let shippingCost = 5;
+                  
+                                     // Cerca il prodotto ordinato nel catalogo reale
+                                     if (contextData.products && contextData.products.length > 0) {
+                                         const foundProd = contextData.products.find(p => lastAssistantMsg.toLowerCase().includes(p.name.toLowerCase()));
+                                         if (foundProd) {
+                                             orderedProductName = foundProd.name;
+                                             orderedProductPrice = parseFloat(foundProd.price) || 18;
+                                         }
+                                     }
+                  
+                                     // Estrazione totale (es. "Totale: 23 €")
+                                     const totalMatch = lastAssistantMsg.match(/\*\*(\d+)\s*€\*\*/i) || lastAssistantMsg.match(/(\d+)\s*€/);
+                                     const finalTotal = totalMatch ? parseFloat(totalMatch[1]) : (orderedProductPrice + shippingCost);
+                  
+                                     // Estrazione indirizzo (cerca "a: Indirizzo" o "consegnare a...")
+                                     let deliveryAddress = "Viale dei Cappuccini 5";
+                                     let deliveryZip = "00049";
+                                     let deliveryCity = "Velletri";
+                  
+                                     const addrMatch = lastAssistantMsg.match(/(?:consegnare a|consegneremo a|destinato a)\s*:?\s*\*?([^*\n.]+)/i);
+                                     if (addrMatch && addrMatch[1]) {
+                                         deliveryAddress = addrMatch[1].trim();
+                                     }
+                  
+                                     const zipMatch = deliveryAddress.match(/\b(00\d{3}|\d{5})\b/);
+                                     if (zipMatch) deliveryZip = zipMatch[1];
+                  
+                                     const orderPayload = {
+                                         action: 'save_whatsapp_product_order',
+                                         vendorId: vendorId,
+                                         customerName: displayName || "Cliente WhatsApp",
+                                         customerPhone: cleanClientPhone,
+                                         deliveryAddress: deliveryAddress,
+                                         deliveryZip: deliveryZip,
+                                         deliveryCity: deliveryCity,
+                                         orderNotes: 'Ordinato tramite WhatsApp AI - Pagamento in contanti alla consegna',
+                                         totalPrice: finalTotal,
+                                         shippingCost: shippingCost,
+                                         items: [{
+                                             productName: orderedProductName,
+                                             quantity: 1,
+                                             price: orderedProductPrice
+                                         }]
+                                     };
+                  
+                                     const orderRes = await fetch(API_BASE_URL, {
+                                         method: 'POST',
+                                         headers: { 'Content-Type': 'application/json' },
+                                         body: JSON.stringify(orderPayload)
+                                     });
+                  
+                                     if (orderRes.ok) {
+                                         const orderJson = await orderRes.json();
+                                         console.log(`[AutoPilot] 🔔 ORDINE PRODOTTO REGISTRATO SULLA DASHBOARD! ID: ${orderJson.orderId}`);
+                                         finalReply = `Ciao ${displayName || 'Marco'}! ✅ Il tuo ordine per **1 unità di ${orderedProductName}** è confermato ed è stato inviato al salone!\n\n📍 Consegna a: *${deliveryAddress}*\n💶 **Totale da pagare al Rider:** ${finalTotal} € (contanti alla consegna).\n\nGrazie mille e a presto! ✂️🚚`;
+                                     }
+                                 } catch (ordErr) {
+                                     console.error("[AutoPilot] ⚠️ Errore creazione ordine prodotto:", ordErr);
+                                 }
+                             }
+                  
+                             // 3. GESTIONE APPUNTAMENTO (SE NON È UN ORDINE PRODOTTO)
                              const matchedService = contextData.services.find(s => s.id === extracted.serviceId)
                                  || contextData.services.find(s => s.name.toLowerCase().includes((extracted.serviceName || '').toLowerCase()))
                                  || contextData.services[0]
@@ -256,8 +338,7 @@ module.exports = async function handler(req, res) {
                              const dateParts = targetDate.split('-');
                              const dateReadable = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}` : targetDate;
                   
-                             // 3. SE CHIEDE DISPONIBILITÀ O CONFERMA -> VERIFICA / SALVA L'AGENDA
-                             if ((extracted.intent === "ask_availability" || extracted.intent === "confirm_booking") && targetDate) {
+                             if (!isProductOrderConfirmation && (extracted.intent === "ask_availability" || extracted.intent === "confirm_booking") && targetDate) {
                                  let availableSlots = [];
                                  try {
                                      console.log(`[AutoPilot] 📅 Controllo slot per ${targetDate} - Servizio: ${matchedService.id}`);
@@ -279,10 +360,9 @@ module.exports = async function handler(req, res) {
                                      console.error("[AutoPilot] ⚠️ Eccezione controllo slot:", sErr.message);
                                  }
                   
-                                 // CASO A: IL CLIENTE CONFERMA -> PRENOTIAMO A DATABASE CON FUSO ORARIO ITALIANO CORRETTO!
+                                 // CASO A: IL CLIENTE CONFERMA -> PRENOTIAMO A DATABASE!
                                  if (extracted.intent === "confirm_booking" && extracted.time) {
                                      try {
-                                         // Correzione Fuso Orario: calcola l'orario esatto di Roma senza farlo slittare di 2 ore
                                          const durationMins = matchedService.duration || 30;
                                          const dummyDate = new Date(`${targetDate}T12:00:00Z`);
                                          const romeLoc = dummyDate.toLocaleString("en-US", { timeZone: "Europe/Rome" });
@@ -292,9 +372,6 @@ module.exports = async function handler(req, res) {
                                          const startMs = new Date(`${targetDate}T${extracted.time}:00Z`).getTime() + (offsetMins * 60000);
                                          const startDateTime = new Date(startMs);
                                          const endDateTime = new Date(startMs + durationMins * 60000);
-                  
-                                         // Pulizia numero da codici @lid per il database
-                                         const cleanClientPhone = senderPhone.replace(/@.*$/, '');
                   
                                          console.log(`[AutoPilot] 💾 Salvataggio appuntamento per ${targetDate} alle ${extracted.time} (Servizio: ${matchedService.name})...`);
                   
@@ -335,30 +412,30 @@ module.exports = async function handler(req, res) {
                                          finalReply = `Abbiamo preso nota della tua richiesta per le ${extracted.time}, ti confermo tutto a brevissimo!`;
                                      }
                                  }
-                      // CASO B: IL CLIENTE CHIEDE DISPONIBILITÀ
-                      else if (extracted.intent === "ask_availability") {
-                          if (extracted.time) {
-                              const isTimeFree = availableSlots.includes(extracted.time);
-                              if (isTimeFree) {
-                                  finalReply = `Sì ${displayName}! Alle *${extracted.time}* del ${dateReadable} siamo liberi per *${matchedService.name}*. Ti blocco il posto in agenda? ✂️`;
-                              } else {
-                                  if (availableSlots.length > 0) {
-                                      const alternatives = availableSlots.slice(0, 3).join(', ');
-                                      finalReply = `Purtroppo alle ${extracted.time} siamo al completo! Però per *${matchedService.name}* ho liberi questi orari: *${alternatives}*. Ti andrebbe bene uno di questi?`;
-                                  } else {
-                                      finalReply = `Purtroppo per il ${dateReadable} siamo al completo per *${matchedService.name}*. Vuoi che controlliamo per un altro giorno?`;
-                                  }
-                              }
-                          } else {
-                              if (availableSlots.length > 0) {
-                                  const alternatives = availableSlots.slice(0, 3).join(', ');
-                                  finalReply = `Certo ${displayName}! Per *${matchedService.name}* (${dateReadable}) ho liberi questi orari: *${alternatives}*. A che ora preferisci? ✂️`;
-                              } else {
-                                  finalReply = `Ciao ${displayName}! Purtroppo per il ${dateReadable} non ci sono orari disponibili. Ti controllo un'altra data?`;
-                              }
-                          }
-                      }
-                  }
+                                 // CASO B: IL CLIENTE CHIEDE DISPONIBILITÀ
+                                 else if (extracted.intent === "ask_availability") {
+                                     if (extracted.time) {
+                                         const isTimeFree = availableSlots.includes(extracted.time);
+                                         if (isTimeFree) {
+                                             finalReply = `Sì ${displayName}! Alle *${extracted.time}* del ${dateReadable} siamo liberi per *${matchedService.name}*. Ti blocco il posto in agenda? ✂️`;
+                                         } else {
+                                             if (availableSlots.length > 0) {
+                                                 const alternatives = availableSlots.slice(0, 3).join(', ');
+                                                 finalReply = `Purtroppo alle ${extracted.time} siamo al completo! Però per *${matchedService.name}* ho liberi questi orari: *${alternatives}*. Ti andrebbe bene uno di questi?`;
+                                             } else {
+                                                 finalReply = `Purtroppo per il ${dateReadable} siamo al completo per *${matchedService.name}*. Vuoi che controlliamo per un altro giorno?`;
+                                             }
+                                         }
+                                     } else {
+                                         if (availableSlots.length > 0) {
+                                             const alternatives = availableSlots.slice(0, 3).join(', ');
+                                             finalReply = `Certo ${displayName}! Per *${matchedService.name}* (${dateReadable}) ho liberi questi orari: *${alternatives}*. A che ora preferisci? ✂️`;
+                                         } else {
+                                             finalReply = `Ciao ${displayName}! Purtroppo per il ${dateReadable} non ci sono orari disponibili. Ti controllo un'altra data?`;
+                                         }
+                                     }
+                                 }
+                             }
 
                   // 4. SALVA LA MEMORIA DELLA CONVERSAZIONE
                   if (extracted.intent !== "api_error") {
