@@ -142,8 +142,7 @@ module.exports = async function handler(req, res) {
                                            const GROQ_CANDIDATES = [
                                                "llama3-70b-8192",
                                                "llama3-8b-8192",
-                                               "mixtral-8x7b-32768",
-                                               "llama-3.1-8b-instant"
+                                               "mixtral-8x7b-32768"
                                            ];
                                            let aiSuccess = false;
                                
@@ -158,8 +157,7 @@ module.exports = async function handler(req, res) {
                                                        body: JSON.stringify({
                                                            model: modelId,
                                                            messages: groqMessages,
-                                                           // 🚀 RIMOSSO response_format per evitare l'errore 404! 
-                                                           temperature: 0.1, // Più basso è, più è matematico e preciso
+                                                           temperature: 0.1, // Teniamo la temperatura bassissima per non farlo divagare
                                                            max_tokens: 800
                                                        })
                                                    });
@@ -168,7 +166,7 @@ module.exports = async function handler(req, res) {
                                                        const groqData = await groqRes.json();
                                                        let rawContent = groqData.choices?.[0]?.message?.content || "{}";
                                
-                                                       // Pulizia antiproiettile del JSON (estrae il JSON anche se il modello ci scrive altro intorno)
+                                                       // Pulizia antiproiettile del JSON: se l'AI ci scrive testo attorno, noi estraiamo solo l'oggetto
                                                        let cleanJson = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
                                                        cleanJson = cleanJson.replace(/```json/gi, "").replace(/```/g, "").trim();
                                                        const firstBrace = cleanJson.indexOf('{');
@@ -183,7 +181,8 @@ module.exports = async function handler(req, res) {
                                                        aiSuccess = true;
                                                        break;
                                                    } else {
-                                                       console.warn(`[AutoPilot] ⚠️ Modello ${modelId} ha fallito (${groqRes.status}). Passo al successivo...`);
+                                                       const errBody = await groqRes.text();
+                                                       console.warn(`[AutoPilot] ⚠️ Modello ${modelId} ha fallito (${groqRes.status}):`, errBody);
                                                    }
                                                } catch (pErr) {
                                                    console.warn(`[AutoPilot] ⚠️ Eccezione su ${modelId}:`, pErr.message);
