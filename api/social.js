@@ -81,26 +81,26 @@ module.exports = async function handler(req, res) {
                        ? contextData.services.map(s => `- ${s.name} (ID: "${s.id}", Prezzo: ${s.price}€, Durata: ${s.duration} min)`).join('\n')
                        : '- Servizio Standard (ID: "default", Prezzo: 0€, Durata: 30 min)';
 
-                   // 2. ISTRUZIONI INTELLIGENZA ARTIFICIALE E STORICO CHAT (BLINDATO)
+                   // 2. ISTRUZIONI INTELLIGENZA ARTIFICIALE E STORICO CHAT
                                let historyText = "";
                                if (contextData.chatHistory && Array.isArray(contextData.chatHistory) && contextData.chatHistory.length > 0) {
-                                   historyText = "\nSTORICO CHAT RECENTE CON QUESTO CLIENTE:\n" +
+                                   historyText = "\nSTORICO CHAT RECENTE CON QUESTO CLIENTE:\n" + 
                                        contextData.chatHistory.map(m => m.role === 'assistant' ? `Tu (Salone): ${m.content}` : `Cliente: ${m.content}`).join('\n') + "\n";
                                }
-
+                   
                                const autoPilotSystemPrompt = `Sei l'assistente virtuale WhatsApp del salone "${salonName}".
                    Oggi è ${todayReadable} (${todayRome}).
-
+                   
                    DATI ATTIVITÀ:
                    - Nome Salone: ${salonName}
                    - Indirizzo esatto: ${salonAddress || 'in salone'}
                    - Telefono: ${salonPhone || ''}
                    ${recognizedClientName ? `- Nome Cliente già noto: "${recognizedClientName}". Salutalo per nome!` : '- Nome Cliente: Non noto. Sii cordiale e chiedi come si chiama se serve.'}
-
+                   
                    LISTINO SERVIZI:
                    ${servicesListText}
                    ${historyText}
-
+                   
                    LINEE GUIDA PER LE RISPOSTE:
                    1. Parla in modo naturale, caldo e amichevole (usa emoji). Tieni conto dello storico chat se presente.
                    2. Se chiedono "dove siete?" o l'indirizzo, rispondi con l'indirizzo esatto ("Ci troviamo in ${salonAddress || 'salone'}") e chiedi subito se vogliono fissare un appuntamento!
@@ -111,7 +111,7 @@ module.exports = async function handler(req, res) {
                       - "info_question": se chiede dove siete, prezzi, durata o info generali.
                       - "general_greeting": se saluta e basta.
                    5. In "replyText" scrivi SEMPRE la risposta completa pronta per il cliente.
-
+                   
                    Rispondi ESCLUSIVAMENTE con un JSON valido in questo formato esatto:
                    {
                      "intent": "info_question",
@@ -122,12 +122,12 @@ module.exports = async function handler(req, res) {
                      "serviceName": "",
                      "replyText": "risposta dettagliata per WhatsApp"
                    }`;
-
+                   
                                const groqMessages = [
                                    { role: "system", content: autoPilotSystemPrompt },
                                    { role: "user", content: messageText }
                                ];
-
+                   
                                let extracted = {
                                    intent: "general_greeting",
                                    customerName: recognizedClientName,
@@ -137,58 +137,56 @@ module.exports = async function handler(req, res) {
                                    serviceName: contextData.services[0]?.name || "Servizio",
                                    replyText: ""
                                };
-
-                               // MODELLI IMMORTALI (Se uno fallisce passa istantaneamente all'altro)
-                                           const GROQ_CANDIDATES = [
-                                               "llama-3.1-8b-instant",
-                                               "llama-3.3-70b-versatile",
-                                               "whisper-large-v3-turbo"
-                                           ];
-                                           let aiSuccess = false;
-
-                                           for (const modelId of GROQ_CANDIDATES) {
-                                               try {
-                                                   const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                                                       method: "POST",
-                                                       headers: {
-                                                           "Authorization": `Bearer ${GROQ_API_KEY}`,
-                                                           "Content-Type": "application/json"
-                                                       },
-                                                       body: JSON.stringify({
-                                                           model: modelId,
-                                                           messages: groqMessages,
-                                                           temperature: 0.1, // Teniamo la temperatura bassissima per non farlo divagare
-                                                           max_tokens: 800
-                                                       })
-                                                   });
-
-                                                   if (groqRes.ok) {
-                                                       const groqData = await groqRes.json();
-                                                       let rawContent = groqData.choices?.[0]?.message?.content || "{}";
-
-                                                       // Pulizia antiproiettile del JSON: se l'AI ci scrive testo attorno, noi estraiamo solo l'oggetto
-                                                       let cleanJson = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-                                                       cleanJson = cleanJson.replace(/```json/gi, "").replace(/```/g, "").trim();
-                                                       const firstBrace = cleanJson.indexOf('{');
-                                                       const lastBrace = cleanJson.lastIndexOf('}');
-                                                       if (firstBrace !== -1 && lastBrace !== -1) {
-                                                           cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
-                                                       }
-
-                                                       const parsed = JSON.parse(cleanJson);
-                                                       extracted = { ...extracted, ...parsed };
-                                                       console.log(`[AutoPilot] ✅ Risposta generata con successo (${modelId}):`, extracted.replyText);
-                                                       aiSuccess = true;
-                                                       break;
-                                                   } else {
-                                                       const errBody = await groqRes.text();
-                                                       console.warn(`[AutoPilot] ⚠️ Modello ${modelId} ha fallito (${groqRes.status}):`, errBody);
-                                                   }
-                                               } catch (pErr) {
-                                                   console.warn(`[AutoPilot] ⚠️ Eccezione su ${modelId}:`, pErr.message);
-                                               }
+                   
+                               // MODELLI REALI E ATTUALI (Presi esattamente dalla tua console Groq)
+                               const GROQ_CANDIDATES = [
+                                   "llama-3.3-70b-versatile",
+                                   "llama-3.1-8b-instant",
+                                   "openai/gpt-oss-120b"
+                               ];
+                               let aiSuccess = false;
+                   
+                               for (const modelId of GROQ_CANDIDATES) {
+                                   try {
+                                       const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                                           method: "POST",
+                                           headers: {
+                                               "Authorization": `Bearer ${GROQ_API_KEY}`,
+                                               "Content-Type": "application/json"
+                                           },
+                                           body: JSON.stringify({
+                                               model: modelId,
+                                               messages: groqMessages,
+                                               temperature: 0.1, 
+                                               max_tokens: 800
+                                           }) // Niente forzatura JSON qui per evitare il 404!
+                                       });
+                   
+                                       if (groqRes.ok) {
+                                           const groqData = await groqRes.json();
+                                           let rawContent = groqData.choices?.[0]?.message?.content || "{}";
+                   
+                                           // Pulizia antiproiettile del JSON
+                                           let cleanJson = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+                                           cleanJson = cleanJson.replace(/```json/gi, "").replace(/```/g, "").trim();
+                                           const firstBrace = cleanJson.indexOf('{');
+                                           const lastBrace = cleanJson.lastIndexOf('}');
+                                           if (firstBrace !== -1 && lastBrace !== -1) {
+                                               cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
                                            }
-
+                   
+                                           const parsed = JSON.parse(cleanJson);
+                                           extracted = { ...extracted, ...parsed };
+                                           console.log(`[AutoPilot] ✅ Risposta generata con successo (${modelId}):`, extracted.replyText);
+                                           aiSuccess = true;
+                                           break;
+                                       } else {
+                                           console.warn(`[AutoPilot] ⚠️ Modello ${modelId} ha fallito (${groqRes.status}). Passo al successivo...`);
+                                       }
+                                   } catch (pErr) {
+                                       console.warn(`[AutoPilot] ⚠️ Eccezione su ${modelId}:`, pErr.message);
+                                   }
+                               }
                    let finalReply = extracted.replyText;
 
                    // Se l'AI fallisce del tutto, mostriamo un messaggio di cortesia
