@@ -11,9 +11,118 @@ module.exports = async function handler(req, res) {
     }
 
     try {
-        const { contesto } = req.body || {};
+        const body = req.body || {};
         const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
+        // FASE 0: VERIFICA PRESENZA CHIAVE API
+        if (!GROQ_API_KEY) {
+            return res.status(500).json({ errore: "Manca la chiave d'accesso GROQ_API_KEY nelle variabili d'ambiente di Vercel." });
+        }
+
+        // =========================================================================
+        // 🤖 PILOTA AUTOMATICO WHATSAPP 24/7 (RICEZIONE E RISPOSTA DIRETTA)
+        // =========================================================================
+        if (body.isWhatsAppAutoPilot && body.vendorId && body.senderPhone) {
+            const vendorId = body.vendorId;
+            const senderPhone = body.senderPhone;
+            const messageText = (body.messageText || "").trim();
+
+            if (!messageText) {
+                return res.status(200).json({ status: "skipped", reason: "Messaggio vuoto o non supportato" });
+            }
+
+            console.log(`[AutoPilot] 🚀 Elaborazione per ${senderPhone} (Salone: ${vendorId}): "${messageText}"`);
+
+            // 1. Recupero servizi e dati del salone da get-available-slots
+            let servicesList = [];
+            let storeName = "il nostro salone";
+            try {
+                const liveDataRes = await fetch("https://localmente-api.vercel.app/api/get-available-slots", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "get_operator_live_data", vendorId: vendorId, token: "admin" })
+                });
+                if (liveDataRes.ok) {
+                    const liveData = await liveDataRes.json();
+                    storeName = liveData.vendorData?.store_name || "il nostro salone";
+                }
+            } catch (e) {
+                console.warn("[AutoPilot] Recupero info salone parziale:", e.message);
+            }
+
+            const todayFormatted = new Date().toLocaleDateString('it-IT', {
+                weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+            });
+
+            // 2. Prompt per interpretare il messaggio del cliente e formulare la risposta
+            const autoPilotSystemPrompt = `Sei l'assistente virtuale del salone "${storeName}". Un cliente ti sta scrivendo su WhatsApp per chiedere info o prenotare.
+            Oggi è ${todayFormatted}.
+            REGOLE:
+            - Sii accogliente, solare, breve ed educato (massimo 2-3 frasi).
+            - Se il cliente chiede appuntamento (es. "hai posto oggi alle 16 per taglio?"), sii disponibile e chiedi conferma amichevolmente.
+            - Rispondi ESCLUSIVAMENTE con un JSON valido (senza markdown):
+            {
+               "replyText": "testo del messaggio da inviare su WhatsApp al cliente",
+               "intent": "booking_request | question | greeting"
+            }`;
+
+            const autoPilotUserPrompt = `Messaggio ricevuto dal cliente (${senderPhone}): "${messageText}"`;
+
+            // 3. Generazione risposta con Groq
+            let aiReplyText = `Ciao! Grazie per aver scritto a ${storeName}. Abbiamo preso in carico la tua richiesta e ti ricontattiamo subito! ✨`;
+            try {
+                const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${GROQ_API_KEY}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        model: "llama-3.3-70b-versatile",
+                        messages: [
+                            { role: "system", content: autoPilotSystemPrompt },
+                            { role: "user", content: autoPilotUserPrompt }
+                        ],
+                        temperature: 0.3,
+                        max_tokens: 300
+                    })
+                });
+
+                if (groqRes.ok) {
+                    const groqData = await groqRes.json();
+                    let rawContent = groqData.choices?.[0]?.message?.content || "";
+                    rawContent = rawContent.replace(/```json/g, "").replace(/```/g, "").trim();
+                    const parsed = JSON.parse(rawContent);
+                    if (parsed.replyText) {
+                        aiReplyText = parsed.replyText;
+                    }
+                }
+            } catch (aiErr) {
+                console.warn("[AutoPilot] Errore Groq, uso risposta fallback:", aiErr.message);
+            }
+
+            // 4. Invio automatico della risposta al cliente tramite il Gateway Baileys
+            try {
+                const gatewayUrl = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
+                await fetch(`${gatewayUrl}/send-message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        vendorId: vendorId,
+                        phone: senderPhone,
+                        message: aiReplyText
+                    })
+                });
+                console.log(`[AutoPilot] ✅ Risposta inviata con successo a ${senderPhone}: "${aiReplyText}"`);
+            } catch (sendErr) {
+                console.error("[AutoPilot] ⚠️ Errore invio al gateway:", sendErr.message);
+            }
+
+            return res.status(200).json({ success: true, replied: true, message: aiReplyText });
+        }
+        // =========================================================================
+
+        const contesto = body.contesto;
         if (!contesto) {
             return res.status(400).json({ errore: "Dati di contesto mancanti nella richiesta." });
         }
