@@ -62,7 +62,8 @@ module.exports = async function handler(req, res) {
                        "replyText": "testo risposta WhatsApp"
                     }`;
         
-                    let extracted = { intent: "general_question", customerName: "", date: "", time: "", serviceName: "Servizio", replyText: "Ciao! Come posso aiutarti oggi? ✨" };
+                    // Niente frase fissa di default qui, la mettiamo alla fine come sicurezza
+                                let extracted = { intent: "general_question", customerName: "", date: "", time: "", serviceName: "Servizio", replyText: "" };
                     
                                 try {
                                     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -73,7 +74,7 @@ module.exports = async function handler(req, res) {
                                         },
                                         body: JSON.stringify({
                                             model: "llama-3.3-70b-versatile",
-                                            response_format: { type: "json_object" }, // FORZA GROQ A RISPONDERE IN JSON NATIVO SENZA ERRORI
+                                            // Tolto response_format perché a volte fa confondere il modello LLaMA
                                             messages: [
                                                 { role: "system", content: autoPilotSystemPrompt },
                                                 { role: "user", content: `Messaggio cliente (${senderPhone}): "${messageText}"` }
@@ -85,8 +86,17 @@ module.exports = async function handler(req, res) {
                     
                                     if (groqRes.ok) {
                                         const groqData = await groqRes.json();
-                                        let rawContent = groqData.choices?.[0]?.message?.content || "{}";
-                                        extracted = JSON.parse(rawContent);
+                                        let rawContent = groqData.choices?.[0]?.message?.content || "";
+                                        
+                                        // PULIZIA ESTREMA: Cerchiamo e prendiamo solo quello che c'è tra le parentesi graffe { }
+                                        const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+                                        if (jsonMatch) {
+                                            const parsed = JSON.parse(jsonMatch[0]);
+                                            // Uniamo i dati trovati dall'IA
+                                            extracted = { ...extracted, ...parsed };
+                                        } else {
+                                            console.warn("[AutoPilot] Nessun JSON trovato in:", rawContent);
+                                        }
                                     } else {
                                         const errData = await groqRes.text();
                                         console.error("[AutoPilot] Errore API Groq:", errData);
@@ -94,8 +104,9 @@ module.exports = async function handler(req, res) {
                                 } catch (pErr) {
                                     console.warn("[AutoPilot] Errore parsing Groq:", pErr.message);
                                 }
-        
-                    let finalReply = extracted.replyText;
+                    
+                                // Fallback intelligente: se l'IA non ha scritto nulla o si è rotta, usiamo la frase di emergenza
+                                let finalReply = extracted.replyText || "Ciao! 👋 Grazie per averci scritto. Come possiamo prenderci cura di te oggi? ✨";
         
                     // 2. SE IL CLIENTE CONFERMA -> PRENOTIAMO FISICAMENTE A DATABASE!
                     if (extracted.intent === "confirm_booking" && extracted.date && extracted.time) {
