@@ -63,40 +63,37 @@ module.exports = async function handler(req, res) {
                     }`;
         
                     let extracted = { intent: "general_question", customerName: "", date: "", time: "", serviceName: "Servizio", replyText: "Ciao! Come posso aiutarti oggi? ✨" };
-        
-                    try {
-                        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                            method: "POST",
-                            headers: {
-                                "Authorization": `Bearer ${GROQ_API_KEY}`,
-                                "Content-Type": "application/json"
-                            },
-                            body: JSON.stringify({
-                                model: "llama-3.3-70b-versatile",
-                                messages: [
-                                    { role: "system", content: autoPilotSystemPrompt },
-                                    { role: "user", content: `Messaggio cliente (${senderPhone}): "${messageText}"` }
-                                ],
-                                temperature: 0.1,
-                                max_tokens: 350
-                            })
-                        });
-        
-                        if (groqRes.ok) {
-                            const groqData = await groqRes.json();
-                            let rawContent = groqData.choices?.[0]?.message?.content || "";
-                            
-                            // Estrazione sicura del JSON
-                            const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
-                            if (jsonMatch) {
-                                extracted = JSON.parse(jsonMatch[0]);
-                            } else {
-                                console.warn("[AutoPilot] Nessun JSON trovato:", rawContent);
-                            }
-                        }
-                    } catch (pErr) {
-                        console.warn("[AutoPilot] Errore parsing Groq:", pErr.message);
-                    }
+                    
+                                try {
+                                    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                                        method: "POST",
+                                        headers: {
+                                            "Authorization": `Bearer ${GROQ_API_KEY}`,
+                                            "Content-Type": "application/json"
+                                        },
+                                        body: JSON.stringify({
+                                            model: "llama-3.3-70b-versatile",
+                                            response_format: { type: "json_object" }, // FORZA GROQ A RISPONDERE IN JSON NATIVO SENZA ERRORI
+                                            messages: [
+                                                { role: "system", content: autoPilotSystemPrompt },
+                                                { role: "user", content: `Messaggio cliente (${senderPhone}): "${messageText}"` }
+                                            ],
+                                            temperature: 0.1,
+                                            max_tokens: 350
+                                        })
+                                    });
+                    
+                                    if (groqRes.ok) {
+                                        const groqData = await groqRes.json();
+                                        let rawContent = groqData.choices?.[0]?.message?.content || "{}";
+                                        extracted = JSON.parse(rawContent);
+                                    } else {
+                                        const errData = await groqRes.text();
+                                        console.error("[AutoPilot] Errore API Groq:", errData);
+                                    }
+                                } catch (pErr) {
+                                    console.warn("[AutoPilot] Errore parsing Groq:", pErr.message);
+                                }
         
                     let finalReply = extracted.replyText;
         
