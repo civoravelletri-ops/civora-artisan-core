@@ -140,12 +140,12 @@ module.exports = async function handler(req, res) {
 
                                // MODELLI IMMORTALI (Se uno fallisce passa istantaneamente all'altro)
                                            const GROQ_CANDIDATES = [
-                                               "llama3-70b-8192",
-                                               "llama3-8b-8192",
-                                               "mixtral-8x7b-32768"
+                                               "llama-3.1-8b-instant",
+                                               "llama-3.3-70b-versatile",
+                                               "whisper-large-v3-turbo"
                                            ];
                                            let aiSuccess = false;
-                               
+
                                            for (const modelId of GROQ_CANDIDATES) {
                                                try {
                                                    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -161,11 +161,11 @@ module.exports = async function handler(req, res) {
                                                            max_tokens: 800
                                                        })
                                                    });
-                               
+
                                                    if (groqRes.ok) {
                                                        const groqData = await groqRes.json();
                                                        let rawContent = groqData.choices?.[0]?.message?.content || "{}";
-                               
+
                                                        // Pulizia antiproiettile del JSON: se l'AI ci scrive testo attorno, noi estraiamo solo l'oggetto
                                                        let cleanJson = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
                                                        cleanJson = cleanJson.replace(/```json/gi, "").replace(/```/g, "").trim();
@@ -174,7 +174,7 @@ module.exports = async function handler(req, res) {
                                                        if (firstBrace !== -1 && lastBrace !== -1) {
                                                            cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
                                                        }
-                               
+
                                                        const parsed = JSON.parse(cleanJson);
                                                        extracted = { ...extracted, ...parsed };
                                                        console.log(`[AutoPilot] ✅ Risposta generata con successo (${modelId}):`, extracted.replyText);
