@@ -214,7 +214,7 @@ module.exports = async function handler(req, res) {
                                      extracted.date = `${currentYear}-${monthPart}-${dayPart}`;
                                      console.log(`[AutoPilot] 💡 Data recuperata dallo storico: ${extracted.date}`);
                                  }
-                  
+
                                  // 2. Orario
                                  if (!extracted.time) {
                                      const timeMatch = lastAssistantMsg.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
@@ -223,7 +223,7 @@ module.exports = async function handler(req, res) {
                                          console.log(`[AutoPilot] 💡 Orario recuperato dallo storico: ${extracted.time}`);
                                      }
                                  }
-                  
+
                                  // 3. Servizio
                                  const serviceNameMatch = lastAssistantMsg.match(/\*([^*\n]+)\*/);
                                  if (serviceNameMatch && serviceNameMatch[1]) {
@@ -236,19 +236,19 @@ module.exports = async function handler(req, res) {
                                      }
                                  }
                              }
-                  
+
                              let finalReply = extracted.replyText;
-                  
+
                              if (!aiSuccess || !finalReply) {
                                  finalReply = recognizedClientName
                                      ? `Ciao ${recognizedClientName}, ti risponderemo a brevissimo con tutti i dettagli! ✨`
                                      : `Ciao! Grazie per averci scritto da ${salonName}. Ti risponderemo a breve! ✨`;
                                  extracted.intent = "api_error";
                              }
-                  
+
                              const displayName = extracted.customerName || recognizedClientName || '';
                              const cleanClientPhone = senderPhone.replace(/@.*$/, '');
-                  
+
                              // =========================================================================
                              // 🛍️ RICONOSCIMENTO AUTOMATICO: CONFERMA ACQUISTO PRODOTTO A DOMICILIO
                              // =========================================================================
@@ -258,42 +258,45 @@ module.exports = async function handler(req, res) {
                                  (messageText.toLowerCase().includes("conferma") || messageText.toLowerCase().includes("tutto ok") || messageText.toLowerCase().includes("consegnare") || messageText.toLowerCase().includes("contanti")) &&
                                  lastAssistantMsg.toLowerCase().includes("consegn")
                              );
-                  
+
                              if (isProductOrderConfirmation) {
                                  try {
                                      console.log(`[AutoPilot] 📦 Rilevata conferma ordine prodotto da ${cleanClientPhone}! Estrazione dati in corso...`);
-                  
-                                     // Estrazione dati prodotto e totale dallo storico della conversazione
-                                     let orderedProductName = "Prodotto da Asporto";
-                                     let orderedProductPrice = 18;
-                                     let shippingCost = 5;
-                  
-                                     // Cerca il prodotto ordinato nel catalogo reale
-                                     if (contextData.products && contextData.products.length > 0) {
-                                         const foundProd = contextData.products.find(p => lastAssistantMsg.toLowerCase().includes(p.name.toLowerCase()));
-                                         if (foundProd) {
-                                             orderedProductName = foundProd.name;
-                                             orderedProductPrice = parseFloat(foundProd.price) || 18;
-                                         }
-                                     }
-                  
-                                     // Estrazione totale (es. "Totale: 23 €")
-                                     const totalMatch = lastAssistantMsg.match(/\*\*(\d+)\s*€\*\*/i) || lastAssistantMsg.match(/(\d+)\s*€/);
-                                     const finalTotal = totalMatch ? parseFloat(totalMatch[1]) : (orderedProductPrice + shippingCost);
-                  
+
+                                     // 1. Estrazione Quantità (es. "3 pezzi", "2 confezioni")
+                                                        const qtyMatch = messageText.match(/(\d+)\s*(unità|pezzi|confezioni|pz)/i) || messageText.match(/(\d+)\s*x/i);
+                                                        const orderedQty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
+                                     
+                                                        let orderedProductName = "Prodotto da Asporto";
+                                                        let orderedProductPrice = 18;
+                                                        let shippingCost = 5;
+                                     
+                                                        // Cerca il prodotto ordinato nel catalogo reale
+                                                        if (contextData.products && contextData.products.length > 0) {
+                                                            const foundProd = contextData.products.find(p => messageText.toLowerCase().includes(p.name.toLowerCase()));
+                                                            if (foundProd) {
+                                                                orderedProductName = foundProd.name;
+                                                                orderedProductPrice = parseFloat(foundProd.price) || 18;
+                                                            }
+                                                        }
+                                     
+                                                        // CALCOLO MATEMATICO CORRETTO: Prodotto * Quantità + Consegna
+                                                        const subtotal = orderedProductPrice * orderedQty;
+                                                        const finalTotal = subtotal + shippingCost;
+
                                      // Estrazione indirizzo (cerca "a: Indirizzo" o "consegnare a...")
                                      let deliveryAddress = "Viale dei Cappuccini 5";
                                      let deliveryZip = "00049";
                                      let deliveryCity = "Velletri";
-                  
+
                                      const addrMatch = lastAssistantMsg.match(/(?:consegnare a|consegneremo a|destinato a)\s*:?\s*\*?([^*\n.]+)/i);
                                      if (addrMatch && addrMatch[1]) {
                                          deliveryAddress = addrMatch[1].trim();
                                      }
-                  
+
                                      const zipMatch = deliveryAddress.match(/\b(00\d{3}|\d{5})\b/);
                                      if (zipMatch) deliveryZip = zipMatch[1];
-                  
+
                                      const orderPayload = {
                                          action: 'save_whatsapp_product_order',
                                          vendorId: vendorId,
@@ -311,13 +314,13 @@ module.exports = async function handler(req, res) {
                                              price: orderedProductPrice
                                          }]
                                      };
-                  
+
                                      const orderRes = await fetch(API_BASE_URL, {
                                          method: 'POST',
                                          headers: { 'Content-Type': 'application/json' },
                                          body: JSON.stringify(orderPayload)
                                      });
-                  
+
                                      if (orderRes.ok) {
                                          const orderJson = await orderRes.json();
                                          console.log(`[AutoPilot] 🔔 ORDINE PRODOTTO REGISTRATO SULLA DASHBOARD! ID: ${orderJson.orderId}`);
@@ -327,17 +330,17 @@ module.exports = async function handler(req, res) {
                                      console.error("[AutoPilot] ⚠️ Errore creazione ordine prodotto:", ordErr);
                                  }
                              }
-                  
+
                              // 3. GESTIONE APPUNTAMENTO (SE NON È UN ORDINE PRODOTTO)
                              const matchedService = contextData.services.find(s => s.id === extracted.serviceId)
                                  || contextData.services.find(s => s.name.toLowerCase().includes((extracted.serviceName || '').toLowerCase()))
                                  || contextData.services[0]
                                  || { id: 'default', name: 'Servizio', duration: 30 };
-                  
+
                              const targetDate = extracted.date || todayRome;
                              const dateParts = targetDate.split('-');
                              const dateReadable = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}` : targetDate;
-                  
+
                              if (!isProductOrderConfirmation && (extracted.intent === "ask_availability" || extracted.intent === "confirm_booking") && targetDate) {
                                  let availableSlots = [];
                                  try {
@@ -359,7 +362,7 @@ module.exports = async function handler(req, res) {
                                  } catch (sErr) {
                                      console.error("[AutoPilot] ⚠️ Eccezione controllo slot:", sErr.message);
                                  }
-                  
+
                                  // CASO A: IL CLIENTE CONFERMA -> PRENOTIAMO A DATABASE!
                                  if (extracted.intent === "confirm_booking" && extracted.time) {
                                      try {
@@ -368,13 +371,13 @@ module.exports = async function handler(req, res) {
                                          const romeLoc = dummyDate.toLocaleString("en-US", { timeZone: "Europe/Rome" });
                                          const utcLoc = dummyDate.toLocaleString("en-US", { timeZone: "UTC" });
                                          const offsetMins = (new Date(utcLoc) - new Date(romeLoc)) / 60000;
-                  
+
                                          const startMs = new Date(`${targetDate}T${extracted.time}:00Z`).getTime() + (offsetMins * 60000);
                                          const startDateTime = new Date(startMs);
                                          const endDateTime = new Date(startMs + durationMins * 60000);
-                  
+
                                          console.log(`[AutoPilot] 💾 Salvataggio appuntamento per ${targetDate} alle ${extracted.time} (Servizio: ${matchedService.name})...`);
-                  
+
                                          const bookPayload = {
                                              action: 'save_service_booking',
                                              vendorId: vendorId,
@@ -392,13 +395,13 @@ module.exports = async function handler(req, res) {
                                              appointmentCode: 'WA_' + Date.now().toString().slice(-4),
                                              type: 'cura_persona'
                                          };
-                  
+
                                          const saveRes = await fetch(API_BASE_URL, {
                                              method: 'POST',
                                              headers: { 'Content-Type': 'application/json' },
                                              body: JSON.stringify(bookPayload)
                                          });
-                  
+
                                          if (saveRes.ok) {
                                              finalReply = `🎉 Perfetto ${displayName}! Ti confermo l'appuntamento per *${matchedService.name}* in data *${dateReadable}* alle ore *${extracted.time}*.\nTi abbiamo inserito in agenda, a presto! ✂️✨`;
                                              console.log(`[AutoPilot] ✅ APPUNTAMENTO REGISTRATO A CALENDARIO CON SUCCESSO!`);
