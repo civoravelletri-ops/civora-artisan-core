@@ -250,86 +250,112 @@ module.exports = async function handler(req, res) {
                              const cleanClientPhone = senderPhone.replace(/@.*$/, '');
 
                              // =========================================================================
-                             // 🛍️ RICONOSCIMENTO AUTOMATICO: CONFERMA ACQUISTO PRODOTTO A DOMICILIO
-                             // =========================================================================
-                             const isProductOrderConfirmation = (
-                                 (extracted.intent === "confirm_booking" || extracted.intent === "info_question") &&
-                                 !extracted.time &&
-                                 (messageText.toLowerCase().includes("conferma") || messageText.toLowerCase().includes("tutto ok") || messageText.toLowerCase().includes("consegnare") || messageText.toLowerCase().includes("contanti")) &&
-                                 lastAssistantMsg.toLowerCase().includes("consegn")
-                             );
-
-                             if (isProductOrderConfirmation) {
-                                 try {
-                                     console.log(`[AutoPilot] 📦 Rilevata conferma ordine prodotto da ${cleanClientPhone}! Estrazione dati in corso...`);
-
-                                     // 1. Estrazione Quantità (es. "3 pezzi", "2 confezioni")
-                                                        const qtyMatch = messageText.match(/(\d+)\s*(unità|pezzi|confezioni|pz)/i) || messageText.match(/(\d+)\s*x/i);
-                                                        const orderedQty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
-                                     
-                                                        let orderedProductName = "Prodotto da Asporto";
-                                                        let orderedProductPrice = 18;
-                                                        let shippingCost = 5;
-                                     
-                                                        // Cerca il prodotto ordinato nel catalogo reale
-                                                        if (contextData.products && contextData.products.length > 0) {
-                                                            const foundProd = contextData.products.find(p => messageText.toLowerCase().includes(p.name.toLowerCase()));
-                                                            if (foundProd) {
-                                                                orderedProductName = foundProd.name;
-                                                                orderedProductPrice = parseFloat(foundProd.price) || 18;
+                                        // 🛍️ RICONOSCIMENTO AUTOMATICO: CONFERMA ACQUISTO PRODOTTI MULTIPLI A DOMICILIO
+                                        // =========================================================================
+                                        const isProductOrderConfirmation = (
+                                            (extracted.intent === "confirm_booking" || extracted.intent === "info_question") &&
+                                            !extracted.time &&
+                                            (messageText.toLowerCase().includes("conferma") || messageText.toLowerCase().includes("tutto ok") || messageText.toLowerCase().includes("consegnare") || messageText.toLowerCase().includes("contanti") || messageText.toLowerCase().includes("puoi confermare")) &&
+                                            lastAssistantMsg.toLowerCase().includes("consegn")
+                                        );
+                             
+                                        if (isProductOrderConfirmation) {
+                                            try {
+                                                console.log(`[AutoPilot] 📦 Rilevata conferma ordine prodotti da ${cleanClientPhone}! Analisi carrello...`);
+                             
+                                                // 1. Esamina tutta la conversazione per trovare TUTTI i prodotti scelti
+                                                const fullConversationText = (historyText + " " + messageText).toLowerCase();
+                                                let orderItemsList = [];
+                                                let subtotal = 0;
+                                                const shippingCost = 5;
+                             
+                                                if (contextData.products && contextData.products.length > 0) {
+                                                    contextData.products.forEach(prod => {
+                                                        const prodNameLower = prod.name.toLowerCase();
+                                                        // Cerca se il prodotto è stato nominato
+                                                        const cleanName = prodNameLower.split('(')[0].trim();
+                                                        if (fullConversationText.includes(prodNameLower) || (cleanName.length > 3 && fullConversationText.includes(cleanName))) {
+                                                            // Cerca la quantità per questo prodotto (es. "2 unità", "3 pezzi", "1 confezione")
+                                                            let itemQty = 1;
+                                                            const qtyMatch = fullConversationText.match(/(\d+)\s*(?:unità|pezzi|confezioni|pz|x|boccette)/i);
+                                                            if (qtyMatch && qtyMatch[1]) {
+                                                                itemQty = parseInt(qtyMatch[1], 10) || 1;
                                                             }
+                             
+                                                            const itemPrice = parseFloat(prod.price) || 0;
+                                                            orderItemsList.push({
+                                                                productName: prod.name,
+                                                                quantity: itemQty,
+                                                                price: itemPrice
+                                                            });
+                                                            subtotal += (itemPrice * itemQty);
                                                         }
-                                     
-                                                        // CALCOLO MATEMATICO CORRETTO: Prodotto * Quantità + Consegna
-                                                        const subtotal = orderedProductPrice * orderedQty;
-                                                        const finalTotal = subtotal + shippingCost;
-
-                                     // Estrazione indirizzo (cerca "a: Indirizzo" o "consegnare a...")
-                                     let deliveryAddress = "Viale dei Cappuccini 5";
-                                     let deliveryZip = "00049";
-                                     let deliveryCity = "Velletri";
-
-                                     const addrMatch = lastAssistantMsg.match(/(?:consegnare a|consegneremo a|destinato a)\s*:?\s*\*?([^*\n.]+)/i);
-                                     if (addrMatch && addrMatch[1]) {
-                                         deliveryAddress = addrMatch[1].trim();
-                                     }
-
-                                     const zipMatch = deliveryAddress.match(/\b(00\d{3}|\d{5})\b/);
-                                     if (zipMatch) deliveryZip = zipMatch[1];
-
-                                     const orderPayload = {
-                                         action: 'save_whatsapp_product_order',
-                                         vendorId: vendorId,
-                                         customerName: displayName || "Cliente WhatsApp",
-                                         customerPhone: cleanClientPhone,
-                                         deliveryAddress: deliveryAddress,
-                                         deliveryZip: deliveryZip,
-                                         deliveryCity: deliveryCity,
-                                         orderNotes: 'Ordinato tramite WhatsApp AI - Pagamento in contanti alla consegna',
-                                         totalPrice: finalTotal,
-                                         shippingCost: shippingCost,
-                                         items: [{
-                                             productName: orderedProductName,
-                                             quantity: 1,
-                                             price: orderedProductPrice
-                                         }]
-                                     };
-
-                                     const orderRes = await fetch(API_BASE_URL, {
-                                         method: 'POST',
-                                         headers: { 'Content-Type': 'application/json' },
-                                         body: JSON.stringify(orderPayload)
-                                     });
-
-                                     if (orderRes.ok) {
-                                         const orderJson = await orderRes.json();
-                                         console.log(`[AutoPilot] 🔔 ORDINE PRODOTTO REGISTRATO SULLA DASHBOARD! ID: ${orderJson.orderId}`);
-                                         finalReply = `Ciao ${displayName || 'Marco'}! ✅ Il tuo ordine per **1 unità di ${orderedProductName}** è confermato ed è stato inviato al salone!\n\n📍 Consegna a: *${deliveryAddress}*\n💶 **Totale da pagare al Rider:** ${finalTotal} € (contanti alla consegna).\n\nGrazie mille e a presto! ✂️🚚`;
-                                     }
-                                 } catch (ordErr) {
-                                     console.error("[AutoPilot] ⚠️ Errore creazione ordine prodotto:", ordErr);
-                                 }
-                             }
+                                                    });
+                                                }
+                             
+                                                // Se non trova corrispondenze esatte, usa il primo prodotto citato nel messaggio del salone
+                                                if (orderItemsList.length === 0) {
+                                                    let fallbackName = "Prodotto Salone";
+                                                    let fallbackPrice = 18;
+                                                    if (contextData.products && contextData.products.length > 0) {
+                                                        fallbackName = contextData.products[0].name;
+                                                        fallbackPrice = parseFloat(contextData.products[0].price) || 18;
+                                                    }
+                                                    orderItemsList.push({
+                                                        productName: fallbackName,
+                                                        quantity: 1,
+                                                        price: fallbackPrice
+                                                    });
+                                                    subtotal = fallbackPrice;
+                                                }
+                             
+                                                const finalTotal = subtotal + shippingCost;
+                             
+                                                // 2. Estrazione Indirizzo di Consegna dallo storico
+                                                let deliveryAddress = "Viale dei Cappuccini 5, 00049 Velletri";
+                                                let deliveryZip = "00049";
+                                                let deliveryCity = "Velletri";
+                             
+                                                const addrMatch = lastAssistantMsg.match(/(?:consegnare a|consegneremo a|destinato a)\s*:?\s*\*?([^*\n.]+)/i);
+                                                if (addrMatch && addrMatch[1]) {
+                                                    deliveryAddress = addrMatch[1].trim();
+                                                }
+                             
+                                                const zipMatch = deliveryAddress.match(/\b(00\d{3}|\d{5})\b/);
+                                                if (zipMatch) deliveryZip = zipMatch[1];
+                             
+                                                const orderPayload = {
+                                                    action: 'save_whatsapp_product_order',
+                                                    vendorId: vendorId,
+                                                    customerName: displayName || "Cliente WhatsApp",
+                                                    customerPhone: cleanClientPhone,
+                                                    deliveryAddress: deliveryAddress,
+                                                    deliveryZip: deliveryZip,
+                                                    deliveryCity: deliveryCity,
+                                                    orderNotes: 'Ordinato tramite WhatsApp AI - Pagamento in contanti alla consegna',
+                                                    totalPrice: finalTotal,
+                                                    shippingCost: shippingCost,
+                                                    items: orderItemsList
+                                                };
+                             
+                                                const orderRes = await fetch(API_BASE_URL, {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify(orderPayload)
+                                                });
+                             
+                                                if (orderRes.ok) {
+                                                    const orderJson = await orderRes.json();
+                                                    console.log(`[AutoPilot] 🔔 ORDINE MULTI-PRODOTTO REGISTRATO SULLA DASHBOARD! ID: ${orderJson.orderId}`);
+                             
+                                                    const itemsListText = orderItemsList.map(it => `• **${it.quantity}x ${it.productName}** (${(it.price * it.quantity).toFixed(2)} €)`).join('\n');
+                             
+                                                    finalReply = `Ciao ${displayName || 'Marco'}! ✅ Il tuo ordine è confermato ed è stato registrato in salone!\n\n📦 **Articoli:**\n${itemsListText}\n\n📍 Consegna a: *${deliveryAddress}*\n💶 **Totale da pagare al Rider:** ${finalTotal.toFixed(2)} € (inclusi 5 € di consegna in contanti).\n\nGrazie mille e a presto! ✂️🚚`;
+                                                }
+                                            } catch (ordErr) {
+                                                console.error("[AutoPilot] ⚠️ Errore creazione ordine prodotto:", ordErr);
+                                            }
+                                        }
 
                              // 3. GESTIONE APPUNTAMENTO (SE NON È UN ORDINE PRODOTTO)
                              const matchedService = contextData.services.find(s => s.id === extracted.serviceId)
