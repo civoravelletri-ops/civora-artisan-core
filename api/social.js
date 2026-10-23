@@ -232,10 +232,6 @@ ${historyText}
 🛑 REGOLE RIGIDE DI CONVERSAZIONE (MAX 2 RIGHE):
 1. COMPRENDI SLANG E DIALETTO: Capisci espressioni colloquiali ("al volo", "me poi prenota", "wee bella", "un buco"). Rispondi con calore e naturalezza.
 2. BREVITÀ: Rispondi in MASSIMO 2 o 3 righe corte.
-3. DOMANDE DI IDENTITÀ (es. "siete voi Mr Barber?", "chi sei?"):
-   - Conferma subito: "Ciao! 👋 Sì, esattamente! Sei in contatto con ${salonName}. Come possiamo aiutarti? ✂️"
-4. DOMANDE MULTIPLE (es. "dove siete, in cosa siete specializzati, avete posto?"):
-   - Rispondi in un solo messaggio sintetico toccando tutti i punti.
 
 Rispondi ESCLUSIVAMENTE con questo JSON:
 {
@@ -334,44 +330,49 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
                 }
             }
 
-            // 🧹 Puliamo la risposta togliendo eventuali spazi vuoti che causavano l'errore del Ciao!
             let finalReply = (extracted.replyText || "").trim();
             const displayName = extracted.customerName || recognizedClientName || '';
             const lowerMsg = messageText.toLowerCase();
             const cleanText = lowerMsg.replace(/[^\w\s]/gi, '').trim();
 
             // =========================================================================
-            // 🎯 SMISTAMENTO NATURALE DEI MESSAGGI REALI
+            // 🎯 SMISTAMENTO NATURALE DEI MESSAGGI REALI E DELLE DOMANDE SUI SERVIZI
             // =========================================================================
 
-            // 0. SALUTI PURI E SEMPLICI ("Ciao", "Buongiorno", "Salve")
+            // 0. SALUTI PURI E SEMPLICI
             const isJustGreeting = cleanText === "ciao" || cleanText === "buongiorno" || cleanText === "buonasera" || cleanText === "salve" || cleanText === "hey" || cleanText === "ehi";
 
-            // 1. IDENTITÀ
+            // 1. IDENTITÀ E DOMANDE DI SERVIZIO
             const asksIdentity = (lowerMsg.includes("siete voi") || lowerMsg.includes("chi sei") || lowerMsg.includes("è il salone") || lowerMsg.includes("parlo con") || lowerMsg.includes("ho preso il numero"));
-
-            // 2. ORARI E INFO
             const asksWhereOrWhen = (lowerMsg.includes("dove siete") || lowerMsg.includes("indirizzo") || lowerMsg.includes("a che ora") || lowerMsg.includes("aperti") || lowerMsg.includes("parcheggi") || lowerMsg.includes("specializzat"));
-
-            // 3. PRODOTTI
             const asksProducts = lowerMsg.includes("prodott") || lowerMsg.includes("compra") || lowerMsg.includes("ordin") || lowerMsg.includes("cera") || lowerMsg.includes("shampoo");
+            
+            // LA NUOVA REGOLA SALVA-VITA: CHIEDE IL LISTINO O CHE SERVIZI FATE
+            const asksServices = lowerMsg.includes("che servizi") || lowerMsg.includes("quali servizi") || lowerMsg.includes("listino") || lowerMsg.includes("prezzi") || lowerMsg.includes("quanto costa") || lowerMsg.includes("cosa fate") || lowerMsg.includes("trattamenti fate");
+            
+            const wantsToBook = lowerMsg.includes("prenot") || lowerMsg.includes("posto") || lowerMsg.includes("appuntamento") || lowerMsg.includes("al volo") || lowerMsg.includes("fissare");
 
             if (isJustGreeting) {
-                finalReply = `Ciao ${displayName ? displayName + ' ' : ''}! 👋 Benvenuto da ${salonName}. Come possiamo aiutarti oggi? (Vuoi prenotare un appuntamento o ti servono info?) ✂️`;
+                finalReply = `Ciao ${displayName ? displayName + ' ' : ''}! 👋 Benvenuto da ${salonName}. Come possiamo aiutarti oggi? (Vuoi prenotare un appuntamento o ti servono info sui prezzi?) ✂️`;
             }
-            else if (asksIdentity && !lowerMsg.includes("prenot") && !lowerMsg.includes("tagli")) {
+            else if (asksIdentity && !wantsToBook && !lowerMsg.includes("tagli")) {
                 finalReply = `Ciao! 👋 Sì, esattamente! Sei in contatto con *${salonName}*. Come possiamo aiutarti oggi? ✂️`;
             }
-            else if (asksWhereOrWhen && !lowerMsg.includes("prenot") && !lowerMsg.includes("posto") && !lowerMsg.includes("tagli")) {
+            else if (asksWhereOrWhen && !wantsToBook && !lowerMsg.includes("tagli")) {
                 let infoParts = [];
                 if (lowerMsg.includes("dove") || lowerMsg.includes("indirizzo")) infoParts.push(`📍 Siamo in *${salonAddress || 'in salone'}*`);
                 if (lowerMsg.includes("ora") || lowerMsg.includes("apert")) infoParts.push(`🕒 Orari: ${salonHours}`);
                 if (lowerMsg.includes("parchegg") && salonParking) infoParts.push(`🚗 Parcheggio: ${salonParking}`);
-                if (lowerMsg.includes("specializzat") && salonSpecs) infoParts.push(`✨ Specialità: ${salonSpecs}`);
-
+                
                 finalReply = infoParts.length > 0 ? infoParts.join('\n') + `\nTi serviva fissare un appuntamento? ✂️` : finalReply;
             }
-            else if (asksProducts && !extracted.time) {
+            // RISPOSTA PERFETTA PER LA DOMANDA SUI SERVIZI!
+            else if (asksServices && !wantsToBook && !lowerMsg.includes("tagli")) {
+                const emojiNums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"];
+                const topServices = contextData.services.slice(0, 5).map((s, idx) => `${emojiNums[idx]} *${s.name}* (${s.price}€)`).join('\n');
+                finalReply = `Facciamo vari trattamenti! Ecco i principali:\n\n${topServices}\n\nSe vuoi prenotarne uno, scrivimi pure il numero (es. 1 o 2)! ✂️`;
+            }
+            else if (asksProducts && !extracted.time && !wantsToBook) {
                 if (lowerMsg.includes("vendi") || lowerMsg.includes("quali") || lowerMsg.includes("avete")) {
                     const prods = (contextData.products || []).slice(0, 3).map((p, idx) => `${idx + 1}️⃣ *${p.name}* (${p.price}€)`).join('\n');
                     finalReply = `Sì! Abbiamo prodotti professionali disponibili:\n\n${prods}\n\nQuale ti interessa provare? 🧴`;
@@ -454,8 +455,8 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
                                 const bookPayload = {
                                     action: 'save_service_booking',
                                     vendorId: vendorId,
-                                    customerName: displayName || ("Cliente (" + cleanClientPhone.slice(-4) + ")"),
-                                    customerPhone: cleanClientPhone,
+                                    customerName: displayName || ("Cliente (" + senderPhone.slice(-4) + ")"),
+                                    customerPhone: senderPhone,
                                     serviceId: matchedService.id,
                                     bookedServiceName: matchedService.name,
                                     bookedServicePrice: matchedService.price || 0,
@@ -518,7 +519,6 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
                         }
                     }
                 } else {
-                    // SE L'UTENTE DICE COSE A CASO E NON SCATTANO LE ALTRE REGOLE
                     if (!finalReply) {
                         finalReply = `Scusami, non ho capito bene! Puoi dirmi cosa vorresti fare? (Es. Prenotare un *Taglio*, *Barba* o avere info sulle *Promozioni*) ✂️`;
                     }
