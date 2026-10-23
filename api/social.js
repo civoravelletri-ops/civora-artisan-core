@@ -1,25 +1,18 @@
 module.exports = async function handler(req, res) {
-    // Permetti al tuo sito di chiamare questa funzione (CORS)
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
-    if (req.method === 'OPTIONS') {
-        res.status(200).end();
-        return;
-    }
+    if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
     try {
         const body = req.body || {};
         const GROQ_API_KEY = process.env.GROQ_API_KEY;
-
-        if (!GROQ_API_KEY) {
-            return res.status(500).json({ errore: "Manca la chiave d'accesso GROQ_API_KEY nelle variabili d'ambiente di Vercel." });
-        }
+        if (!GROQ_API_KEY) return res.status(500).json({ errore: "Manca la chiave GROQ_API_KEY." });
 
         // =========================================================================
-        // 🤖 PILOTA AUTOMATICO WHATSAPP 24/7 (INGEGNERIA CIVORA BUSINESS)
+        // 🤖 PILOTA AUTOMATICO WHATSAPP 24/7 (CERVELLO LIBERO E INTELLIGENTE)
         // =========================================================================
         if (body.isWhatsAppAutoPilot && body.vendorId) {
             const vendorId = body.vendorId;
@@ -27,223 +20,105 @@ module.exports = async function handler(req, res) {
             const senderJid = body.senderJid || body.senderPhone || '';
             const pushName = (body.pushName || '').trim();
             const messageText = (body.messageText || "").trim();
-
             const messageTime = body.messageTime || new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
             const todayRome = body.messageDate || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
             const todayReadable = body.messageDateReadable || new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
 
-            if (!messageText) {
-                return res.status(200).json({ status: "skipped", reason: "Messaggio vuoto" });
-            }
+            if (!messageText) return res.status(200).json({ status: "skipped" });
 
-            console.log(`[AutoPilot] 📩 Ricevuto da "${pushName}" (${senderPhone}) alle ${messageTime}: "${messageText}"`);
+            console.log(`[AutoPilot] 📩 Messaggio da "${pushName}": "${messageText}"`);
 
             const API_BASE_URL = 'https://localmente-api.vercel.app/api/get-available-slots';
             const GATEWAY_BASE_URL = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
 
-            // 1. RECUPERO CONTESTO SALONE DAL MOTORE CENTRALE
+            // 1. RECUPERO CONTESTO
             let contextData = {
-                storeInfo: { 
-                    name: 'Il nostro salone', 
-                    address: '', 
-                    phone: '', 
-                    opening_hours: '',
-                    public_opening_hours_structured: [],
-                    special_opening_hours: [],
-                    specializations: [],
-                    parkingTips: '',
-                    directions: '',
-                    whatsapp_ai_autopilot: false, 
-                    whatsapp_connected: false 
-                },
-                services: [],
-                products: [],
-                client: { name: '', address: '', isKnown: false, phone: senderPhone },
-                chatHistory: []
+                storeInfo: { name: 'Il nostro salone', address: '', opening_hours: '', whatsapp_ai_autopilot: false, whatsapp_connected: false },
+                services: [], products: [], client: { name: '', address: '', phone: senderPhone }, chatHistory: []
             };
 
             try {
                 const ctxRes = await fetch(API_BASE_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'get_autopilot_context',
-                        vendorId: vendorId,
-                        customerPhone: senderPhone
-                    })
+                    body: JSON.stringify({ action: 'get_autopilot_context', vendorId: vendorId, customerPhone: senderPhone })
                 });
                 if (ctxRes.ok) {
-                    const fetchedCtx = await ctxRes.json();
-                    if (fetchedCtx.success) {
-                        contextData = fetchedCtx;
-                    }
+                    const fetched = await ctxRes.json();
+                    if (fetched.success) contextData = fetched;
                 }
-            } catch (ctxErr) {
-                console.error("[AutoPilot] ⚠️ Eccezione recupero contesto:", ctxErr.message);
+            } catch (e) {}
+
+            if (contextData.storeInfo.whatsapp_ai_autopilot !== true) {
+                return res.status(200).json({ status: "skipped" });
             }
 
-            // 🛑 CONTROLLO TELECOMANDO
-            if (contextData.storeInfo.whatsapp_ai_autopilot !== true || contextData.storeInfo.whatsapp_connected !== true) {
-                console.log(`[AutoPilot] 🛑 Pilota automatico DISATTIVATO dal negoziante per ${vendorId}.`);
-                return res.status(200).json({ status: "skipped", reason: "Pilota automatico non attivo" });
-            }
-
-            // 📅 FUNZIONI CALENDARIO E CHIUSURE SALONE
-            const daysMap = ["Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"];
-            const hoursSource = contextData.storeInfo.public_opening_hours_structured || contextData.storeInfo.opening_hours_structured || [];
-            const specialHoursList = contextData.storeInfo.special_opening_hours || [];
-
-            function isSalonClosedOnDate(dateStr) {
-                const dObj = new Date(dateStr + "T12:00:00Z");
-                const dayShort = daysMap[dObj.getUTCDay()];
-                const specialMatch = specialHoursList.find(s => s.startDate <= dateStr && s.endDate >= dateStr);
-                if (specialMatch) {
-                    return specialMatch.isClosedAllDay === true;
-                }
-                if (hoursSource.length > 0) {
-                    const dayConfig = hoursSource.find(d => d.day === dayShort);
-                    if (dayConfig && (dayConfig.isOpen === false || !dayConfig.slots || dayConfig.slots.length === 0)) {
-                        return true;
-                    }
-                }
-                return false;
-            }
-
-            function getNextOpenDate(fromDateStr) {
-                const baseDate = new Date(fromDateStr + "T12:00:00Z");
-                for (let i = 1; i <= 7; i++) {
-                    const testD = new Date(baseDate);
-                    testD.setUTCDate(baseDate.getUTCDate() + i);
-                    const testDateStr = testD.toISOString().split('T')[0];
-
-                    if (!isSalonClosedOnDate(testDateStr)) {
-                        const readable = testD.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
-                        return { dateStr: testDateStr, dayName: daysMap[testD.getUTCDay()], readable: readable, daysAhead: i };
-                    }
-                }
-                const tomorrowD = new Date(baseDate);
-                tomorrowD.setUTCDate(baseDate.getUTCDate() + 1);
-                return { dateStr: tomorrowD.toISOString().split('T')[0], dayName: 'Domani', readable: 'domani', daysAhead: 1 };
-            }
-
-            const nextOpen = getNextOpenDate(todayRome);
+            const tomorrowObj = new Date(todayRome + 'T12:00:00Z');
+            tomorrowObj.setUTCDate(tomorrowObj.getUTCDate() + 1);
+            const tomorrowRome = tomorrowObj.toISOString().split('T')[0];
 
             const recognizedClientName = contextData.client?.name || pushName || '';
-            const isKnownRegular = contextData.client?.isKnown === true;
-            const savedClientAddress = contextData.client?.address || '';
-            const lastClientService = contextData.client?.lastService || '';
             const salonName = contextData.storeInfo?.name || 'Salone';
-            const salonAddress = contextData.storeInfo?.address || '';
-            const salonHours = contextData.storeInfo?.opening_hours || 'Orario continuato';
-            const salonSpecs = (contextData.storeInfo?.specializations || []).join(', ');
-            const salonParking = contextData.storeInfo?.parkingTips || '';
-            const hasRecentChatHistory = contextData.chatHistory && Array.isArray(contextData.chatHistory) && contextData.chatHistory.length > 0;
-
-            // 🔍 FILTRO INTELLIGENTE SERVIZI (MAX 5 OPZIONI PERTINENTI)
-            function getMatchingServicesForQuery(text, allServices) {
-                const q = (text || "").toLowerCase();
-                if (!q) return allServices.slice(0, 5);
-
-                if (q.includes("tagli") || q.includes("capell") || q.includes("sfumat") || q.includes("fade") || q.includes("piega") || q.includes("al volo")) {
-                    const hair = allServices.filter(s => {
-                        const n = (s.name || "").toLowerCase();
-                        return n.includes("tagli") || n.includes("sfumat") || n.includes("fade") || n.includes("styling");
-                    });
-                    if (hair.length > 0) return hair.slice(0, 5);
-                }
-
-                if (q.includes("barb") || q.includes("rasatur")) {
-                    const beard = allServices.filter(s => (s.name || "").toLowerCase().includes("barb") || (s.name || "").toLowerCase().includes("rasatur"));
-                    if (beard.length > 0) return beard.slice(0, 5);
-                }
-
-                if (q.includes("color") || q.includes("tinta") || q.includes("balayage") || q.includes("meches")) {
-                    const col = allServices.filter(s => {
-                        const n = (s.name || "").toLowerCase();
-                        return n.includes("color") || n.includes("balayage") || n.includes("meches") || n.includes("tinta");
-                    });
-                    if (col.length > 0) return col.slice(0, 5);
-                }
-
-                return allServices.slice(0, 5);
-            }
-
-            const servicesListText = contextData.services.slice(0, 15).map(s => `- ${s.name} (Prezzo: ${s.price}€, ID: "${s.id}")`).join('\n');
-            const productsListText = (contextData.products && contextData.products.length > 0)
-                ? contextData.products.slice(0, 6).map(p => `- ${p.name} (${p.price}€)`).join('\n')
-                : '- Prodotti professionali da asporto.';
+            const hasRecentChatHistory = contextData.chatHistory && contextData.chatHistory.length > 0;
 
             let historyText = "";
             let lastAssistantMsg = "";
+            let lastDiscussedService = "";
+
             if (hasRecentChatHistory) {
-                historyText = "\nSTORICO CHAT RECENTE:\n" +
-                    contextData.chatHistory.map(m => {
-                        if (m.role === 'assistant') lastAssistantMsg = m.content;
-                        return m.role === 'assistant' ? `Tu: ${m.content}` : `Cliente: ${m.content}`;
-                    }).join('\n') + "\n";
-            }
-
-            // 🔢 RADAR SELEZIONE NUMERICA (es. "37", "il 2", "scelgo 1")
-            let numberSelectedServiceName = null;
-            let numberSelectedProductName = null;
-            const numberMatch = messageText.match(/\b(?:numero|il|scelgo|prendo)?\s*([1-9]|[1-3][0-9]|40|41)\b/i);
-
-            if (numberMatch && lastAssistantMsg) {
-                const chosenNum = parseInt(numberMatch[1], 10);
-                const emojiNum = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"][chosenNum - 1];
+                historyText = "\nSTORICO CHAT RECENTE:\n" + contextData.chatHistory.map(m => {
+                    if (m.role === 'assistant') lastAssistantMsg = m.content;
+                    return m.role === 'assistant' ? `Tu: ${m.content}` : `Cliente: ${m.content}`;
+                }).join('\n') + "\n";
                 
-                const regexNum = new RegExp(`(?:${emojiNum || chosenNum}\\.?|${chosenNum}\\.|${chosenNum}\\))\\s*\\*?([^*\\n(]+)\\*?`, 'i');
-                const foundItem = lastAssistantMsg.match(regexNum);
-
-                if (foundItem && foundItem[1]) {
-                    const itemName = foundItem[1].trim();
-                    console.log(`[AutoPilot] 🎯 Selezione numerica intercettata: ${chosenNum} -> "${itemName}"`);
-
-                    const matchedServ = contextData.services.find(s => s.name.toLowerCase() === itemName.toLowerCase() || s.name.toLowerCase().includes(itemName.toLowerCase()));
-                    const matchedProd = contextData.products && contextData.products.find(p => p.name.toLowerCase() === itemName.toLowerCase() || p.name.toLowerCase().includes(itemName.toLowerCase()));
-
-                    if (matchedServ) numberSelectedServiceName = matchedServ.name;
-                    else if (matchedProd) numberSelectedProductName = matchedProd.name;
-                }
+                // Ricorda di cosa stavamo parlando!
+                const serviceNameMatch = lastAssistantMsg.match(/\*([^*\n]+)\*/);
+                if (serviceNameMatch) lastDiscussedService = serviceNameMatch[1].trim();
             }
 
-            // PROMPT DEL DIRETTORE
+            // LISTE CORTE (Max 15 per far capire all'IA, ma lei ne proporrà massimo 4 o 5)
+            const servicesListText = contextData.services.slice(0, 15).map(s => `- ${s.name} (Prezzo: ${s.price}€, ID: "${s.id}")`).join('\n');
+            const productsListText = (contextData.products || []).slice(0, 8).map(p => `- ${p.name} (${p.price}€)`).join('\n');
+
+            // IL NUOVO PROMPT INTELLIGENTE (CHE LASCIA RAGIONARE L'IA COME IERI!)
             const autoPilotSystemPrompt = `Sei l'assistente WhatsApp del salone "${salonName}".
-Oggi è ${todayReadable} (${todayRome}), ore ${messageTime}.
-Il prossimo giorno di apertura è ${nextOpen.readable} (${nextOpen.dateStr}).
+Oggi è ${todayReadable}, ore ${messageTime}.
+Nome Cliente: "${recognizedClientName}".
+Indirizzo Salone: ${contextData.storeInfo.address}
+Orari: ${contextData.storeInfo.opening_hours}
 
-DATI ATTIVITÀ:
-- Nome Salone: ${salonName}
-- Indirizzo esatto: ${salonAddress || 'in salone'}
-- Orari apertura: ${salonHours}
-- Specializzazioni del salone: ${salonSpecs || 'Tagli moderni, sfumature, barba e trattamenti capelli'}
-${salonParking ? `- Consigli parcheggio: ${salonParking}` : ''}
-${recognizedClientName ? `- Nome Cliente: "${recognizedClientName}" (${isKnownRegular ? 'Cliente abituale' : 'Nuovo contatto'}).` : '- Cliente: Nuovo.'}
-${lastClientService ? `- Ultimo servizio fatto: "${lastClientService}".` : ''}
-
-SERVIZI SALONE:
+LISTINO SERVIZI:
 ${servicesListText}
 
-PRODOTTI IN VENDITA:
+CATALOGO PRODOTTI:
 ${productsListText}
 
 ${historyText}
 
-🛑 REGOLE RIGIDE DI CONVERSAZIONE (MAX 2 RIGHE):
-1. COMPRENDI SLANG E DIALETTO: Capisci espressioni colloquiali ("al volo", "me poi prenota", "wee bella", "un buco"). Rispondi con calore e naturalezza.
-2. BREVITÀ: Rispondi in MASSIMO 2 o 3 righe corte.
+REGOLE COMPORTAMENTALI (MOLTO IMPORTANTI):
+1. SEI INTELLIGENTE: Leggi lo storico. Se gli hai appena chiesto "A che ora preferisci?" e lui risponde "9", capisci da solo che intende le 09:00 per il servizio di cui stavate parlando (${lastDiscussedService})! Imposta intent "confirm_booking", time "09:00", serviceName "${lastDiscussedService}".
+2. STILE WHATSAPP: Usa massimo 2-3 righe corte. Sii amichevole ma super diretto. 
+3. NON FARE LISTONI: Se ti chiede che servizi fai, elenca SOLO i 4-5 più importanti usando i numeri (1️⃣, 2️⃣...).
+4. SALUTI: Saluta solo al primissimo messaggio. Se state già chattando, vai dritto al punto!
+5. ORDINI PRODOTTI: Se vuole un prodotto, chiedi l'indirizzo per la consegna rapida (+2,99€ in contanti). Se ti dà l'indirizzo, l'intent è "order_product".
+
+SPIEGAZIONE INTENTI JSON (Scegli con intelligenza!):
+- "general_greeting": Ciao iniziale o domande su orari/indirizzo.
+- "clarify_service": Vuole prenotare ma non sai ancora il servizio esatto, proponi 3-4 opzioni.
+- "ask_availability": Ha scelto un servizio preciso, chiedi al database che ore sono libere.
+- "confirm_booking": Ha confermato un orario preciso (es. "alle 9", "ok 16:30").
+- "order_product": Vuole comprare un prodotto E ti ha dato l'indirizzo.
 
 Rispondi ESCLUSIVAMENTE con questo JSON:
 {
- "intent": "ask_availability",
+ "intent": "ask_availability", 
  "customerName": "${recognizedClientName}",
- "productOrdered": "${numberSelectedProductName || ''}",
- "deliveryAddress": "",
  "date": "${todayRome}",
  "time": "",
- "serviceId": "",
- "serviceName": "${numberSelectedServiceName || ''}",
- "replyText": "risposta brevissima per WhatsApp"
+ "serviceName": "",
+ "productOrdered": "",
+ "deliveryAddress": "",
+ "replyText": "testo della tua risposta in 2 righe"
 }`;
 
             const groqMessages = [
@@ -251,35 +126,16 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
                 { role: "user", content: messageText }
             ];
 
-            let extracted = {
-                intent: numberSelectedServiceName ? "ask_availability" : (numberSelectedProductName ? "order_product" : "general_greeting"),
-                customerName: recognizedClientName,
-                productOrdered: numberSelectedProductName || "",
-                deliveryAddress: "",
-                date: todayRome,
-                time: "",
-                serviceId: "",
-                serviceName: numberSelectedServiceName || "",
-                replyText: ""
-            };
-
-            const GROQ_CANDIDATES = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+            let extracted = { intent: "general_greeting", date: todayRome, time: "", serviceName: "", replyText: "" };
             let aiSuccess = false;
 
+            const GROQ_CANDIDATES = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
             for (const modelId of GROQ_CANDIDATES) {
                 try {
                     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                         method: "POST",
-                        headers: {
-                            "Authorization": `Bearer ${GROQ_API_KEY}`,
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({
-                            model: modelId,
-                            messages: groqMessages,
-                            temperature: 0.1,
-                            max_tokens: 500
-                        })
+                        headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
+                        body: JSON.stringify({ model: modelId, messages: groqMessages, temperature: 0.1, max_tokens: 500 })
                     });
 
                     if (groqRes.ok) {
@@ -293,308 +149,163 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
                         if (firstBrace !== -1 && lastBrace !== -1) {
                             cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
                         }
-
-                        const parsed = JSON.parse(cleanJson);
-                        extracted = { ...extracted, ...parsed };
-
-                        if (numberSelectedServiceName) {
-                            extracted.serviceName = numberSelectedServiceName;
-                            extracted.intent = "ask_availability";
-                        }
+                        extracted = { ...extracted, ...JSON.parse(cleanJson) };
                         aiSuccess = true;
+                        console.log(`[AutoPilot] 🧠 IA ha scelto Intent: ${extracted.intent}, Service: ${extracted.serviceName}, Time: ${extracted.time}`);
                         break;
                     }
-                } catch (pErr) {
-                    console.warn(`[AutoPilot] ⚠️ Eccezione su ${modelId}:`, pErr.message);
-                }
+                } catch (e) {}
             }
 
-            // Recupero data/ora dal messaggio precedente se sta confermando
-            if (extracted.intent === "confirm_booking" && lastAssistantMsg) {
-                const dateMatch = lastAssistantMsg.match(/\b(\d{1,2})\/(\d{1,2})\b/);
-                if (dateMatch) {
-                    const currentYear = new Date().getFullYear();
-                    extracted.date = `${currentYear}-${dateMatch[2].padStart(2, '0')}-${dateMatch[1].padStart(2, '0')}`;
-                }
-                if (!extracted.time) {
-                    const timeMatch = lastAssistantMsg.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
-                    if (timeMatch) extracted.time = timeMatch[0];
-                }
-                const serviceNameMatch = lastAssistantMsg.match(/\*([^*\n]+)\*/);
-                if (serviceNameMatch && serviceNameMatch[1]) {
-                    const foundService = contextData.services.find(s => s.name.toLowerCase().includes(serviceNameMatch[1].trim().toLowerCase()));
-                    if (foundService) {
-                        extracted.serviceId = foundService.id;
-                        extracted.serviceName = foundService.name;
-                    }
-                }
-            }
-
-            let finalReply = (extracted.replyText || "").trim();
-            const displayName = extracted.customerName || recognizedClientName || '';
-            const lowerMsg = messageText.toLowerCase();
-            const cleanText = lowerMsg.replace(/[^\w\s]/gi, '').trim();
+            let finalReply = extracted.replyText;
 
             // =========================================================================
-            // 🎯 SMISTAMENTO NATURALE DEI MESSAGGI REALI E DELLE DOMANDE SUI SERVIZI
+            // 🎬 ESECUZIONE AZIONI (L'IA HA RAGIONATO, ORA IL SERVER AGISCE)
             // =========================================================================
 
-            // 0. SALUTI PURI E SEMPLICI
-            const isJustGreeting = cleanText === "ciao" || cleanText === "buongiorno" || cleanText === "buonasera" || cleanText === "salve" || cleanText === "hey" || cleanText === "ehi";
-
-            // 1. IDENTITÀ E DOMANDE DI SERVIZIO
-            const asksIdentity = (lowerMsg.includes("siete voi") || lowerMsg.includes("chi sei") || lowerMsg.includes("è il salone") || lowerMsg.includes("parlo con") || lowerMsg.includes("ho preso il numero"));
-            const asksWhereOrWhen = (lowerMsg.includes("dove siete") || lowerMsg.includes("indirizzo") || lowerMsg.includes("a che ora") || lowerMsg.includes("aperti") || lowerMsg.includes("parcheggi") || lowerMsg.includes("specializzat"));
-            const asksProducts = lowerMsg.includes("prodott") || lowerMsg.includes("compra") || lowerMsg.includes("ordin") || lowerMsg.includes("cera") || lowerMsg.includes("shampoo");
-            
-            // LA NUOVA REGOLA SALVA-VITA: CHIEDE IL LISTINO O CHE SERVIZI FATE
-            const asksServices = lowerMsg.includes("che servizi") || lowerMsg.includes("quali servizi") || lowerMsg.includes("listino") || lowerMsg.includes("prezzi") || lowerMsg.includes("quanto costa") || lowerMsg.includes("cosa fate") || lowerMsg.includes("trattamenti fate");
-            
-            const wantsToBook = lowerMsg.includes("prenot") || lowerMsg.includes("posto") || lowerMsg.includes("appuntamento") || lowerMsg.includes("al volo") || lowerMsg.includes("fissare");
-
-            if (isJustGreeting) {
-                finalReply = `Ciao ${displayName ? displayName + ' ' : ''}! 👋 Benvenuto da ${salonName}. Come possiamo aiutarti oggi? (Vuoi prenotare un appuntamento o ti servono info sui prezzi?) ✂️`;
-            }
-            else if (asksIdentity && !wantsToBook && !lowerMsg.includes("tagli")) {
-                finalReply = `Ciao! 👋 Sì, esattamente! Sei in contatto con *${salonName}*. Come possiamo aiutarti oggi? ✂️`;
-            }
-            else if (asksWhereOrWhen && !wantsToBook && !lowerMsg.includes("tagli")) {
-                let infoParts = [];
-                if (lowerMsg.includes("dove") || lowerMsg.includes("indirizzo")) infoParts.push(`📍 Siamo in *${salonAddress || 'in salone'}*`);
-                if (lowerMsg.includes("ora") || lowerMsg.includes("apert")) infoParts.push(`🕒 Orari: ${salonHours}`);
-                if (lowerMsg.includes("parchegg") && salonParking) infoParts.push(`🚗 Parcheggio: ${salonParking}`);
-                
-                finalReply = infoParts.length > 0 ? infoParts.join('\n') + `\nTi serviva fissare un appuntamento? ✂️` : finalReply;
-            }
-            // RISPOSTA PERFETTA PER LA DOMANDA SUI SERVIZI!
-            else if (asksServices && !wantsToBook && !lowerMsg.includes("tagli")) {
-                const emojiNums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"];
-                const topServices = contextData.services.slice(0, 5).map((s, idx) => `${emojiNums[idx]} *${s.name}* (${s.price}€)`).join('\n');
-                finalReply = `Facciamo vari trattamenti! Ecco i principali:\n\n${topServices}\n\nSe vuoi prenotarne uno, scrivimi pure il numero (es. 1 o 2)! ✂️`;
-            }
-            else if (asksProducts && !extracted.time && !wantsToBook) {
-                if (lowerMsg.includes("vendi") || lowerMsg.includes("quali") || lowerMsg.includes("avete")) {
-                    const prods = (contextData.products || []).slice(0, 3).map((p, idx) => `${idx + 1}️⃣ *${p.name}* (${p.price}€)`).join('\n');
-                    finalReply = `Sì! Abbiamo prodotti professionali disponibili:\n\n${prods}\n\nQuale ti interessa provare? 🧴`;
-                } else {
-                    let deliveryAddress = extracted.deliveryAddress || savedClientAddress || "";
-                    const addrMatch = messageText.match(/(?:via|viale|corso|piazza)\s+[^,\n.]+/i);
-                    if (addrMatch) deliveryAddress = addrMatch[0].trim();
-
-                    if (deliveryAddress) {
-                        finalReply = `Perfetto! Ricevuto ordine per *${deliveryAddress}*. Totale con consegna rapida a Velletri: 2,99€ in contanti al corriere. A presto! 🚚✨`;
-                    } else {
-                        finalReply = `Ottima scelta! Per la consegna a domicilio a Velletri (2,99€ con pagamento in contanti al rider), a quale indirizzo dobbiamo consegnare? 🛵`;
-                    }
-                }
-            }
-            // =========================================================================
-            // ✂️ GESTIONE APPUNTAMENTO
-            // =========================================================================
-            else {
-                let matchedService = null;
-
-                if (extracted.serviceName) {
-                    matchedService = contextData.services.find(s => s.name.toLowerCase().includes(extracted.serviceName.toLowerCase())) || null;
-                }
-                if (!matchedService) {
-                    matchedService = contextData.services.find(s => lowerMsg.includes(s.name.toLowerCase())) || null;
-                }
-
-                const isGenericQuestion = (lowerMsg.includes("prenotare") || lowerMsg.includes("posto") || lowerMsg.includes("appuntamento") || lowerMsg.includes("c'è posto") || lowerMsg.includes("ce posto")) && !matchedService && !lowerMsg.includes("tagli") && !lowerMsg.includes("barb") && !lowerMsg.includes("color") && !lowerMsg.includes("al volo");
-
-                if (isGenericQuestion) {
-                    finalReply = `Ciao ${displayName ? displayName + ' ' : ''}! 👋 Certamente, abbiamo disponibilità. Cosa vorresti fare? (Es. *Taglio*, *Barba* o *Trattamenti*) ✂️`;
-                }
-                else if (!matchedService && (lowerMsg.includes("tagli") || lowerMsg.includes("capell") || lowerMsg.includes("al volo") || extracted.intent === "clarify_service")) {
-                    const cuts = getMatchingServicesForQuery(messageText, contextData.services);
-                    const emojiNums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"];
-                    const menu = cuts.map((s, idx) => `${emojiNums[idx]} *${s.name}* (${s.price}€)`).join('\n');
-                    finalReply = `Per i capelli abbiamo queste opzioni:\n\n${menu}\n\nRispondi con il *numero* (es. 1 o 2) o con il nome! ✂️`;
-                }
-                else if (matchedService) {
-                    let targetDate = extracted.date || todayRome;
+            // 1. GESTIONE ORDINE PRODOTTO
+            if (extracted.intent === "order_product" && extracted.productOrdered && extracted.deliveryAddress) {
+                try {
+                    let orderItemsList = [];
+                    let subtotal = 0;
+                    const prodMatch = contextData.products.find(p => p.name.toLowerCase().includes(extracted.productOrdered.toLowerCase()));
                     
-                    if ((lowerMsg === "si" || lowerMsg === "sì" || lowerMsg === "ok") && lastAssistantMsg && (lastAssistantMsg.includes("completo") || lastAssistantMsg.includes("pieni") || lastAssistantMsg.includes("chiusi"))) {
-                        targetDate = nextOpen.dateStr;
+                    if (prodMatch) {
+                        orderItemsList.push({ productId: prodMatch.id, productName: prodMatch.name, quantity: 1, price: parseFloat(prodMatch.price) || 0, type: 'offers' });
+                        subtotal = parseFloat(prodMatch.price) || 0;
                     }
 
-                    if (isSalonClosedOnDate(targetDate)) {
-                        finalReply = `Il salone è chiuso in quella data per riposo! 🛋️ Riapriamo *${nextOpen.readable}*: vuoi che ti controlli gli orari per quel giorno? ✂️`;
-                    } else {
-                        let availableSlots = [];
+                    if (orderItemsList.length > 0) {
+                        const shippingCost = 2.99;
+                        const finalTotal = subtotal + shippingCost;
+                        
+                        await fetch(API_BASE_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                action: 'save_whatsapp_product_order',
+                                vendorId: vendorId,
+                                customerName: recognizedClientName || "Cliente WhatsApp",
+                                customerPhone: senderPhone,
+                                deliveryAddress: extracted.deliveryAddress,
+                                deliveryZip: "00049",
+                                deliveryCity: "Velletri",
+                                orderNotes: 'WhatsApp AI - Pagamento contanti alla consegna',
+                                subtotal: subtotal,
+                                totalPrice: finalTotal,
+                                shippingCost: shippingCost,
+                                items: orderItemsList
+                            })
+                        });
+                        finalReply = `Perfetto! ✅ Ordine confermato in salone:\n1x ${prodMatch.name}\n📍 Consegna a: *${extracted.deliveryAddress}*\n💶 *Totale al corriere:* ${finalTotal.toFixed(2)}€ (inclusi 2,99€ spedizione). A presto! 🚚✨`;
+                    }
+                } catch (e) {}
+            }
+            
+            // 2. GESTIONE APPUNTAMENTO (CERCA SLOT O SALVA)
+            else if (extracted.intent === "ask_availability" || extracted.intent === "confirm_booking") {
+                const matchedService = contextData.services.find(s => s.name.toLowerCase().includes((extracted.serviceName || '').toLowerCase()));
+                
+                if (matchedService) {
+                    let targetDate = extracted.date || todayRome;
+
+                    // Se il cliente prima ha risposto "ok" al cambio giorno, l'IA forse ha lasciato la data di oggi, forziamo domani.
+                    if (messageText.toLowerCase() === "si" || messageText.toLowerCase() === "ok") {
+                        if (lastAssistantMsg && (lastAssistantMsg.includes("completo") || lastAssistantMsg.includes("domani"))) targetDate = tomorrowRome;
+                    }
+
+                    // Se chiede slot liberi
+                    if (extracted.intent === "ask_availability") {
                         try {
                             const slotsRes = await fetch(API_BASE_URL, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    action: 'getAvailableSlots',
-                                    vendorId: vendorId,
-                                    serviceId: matchedService.id,
-                                    date: targetDate
-                                })
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'getAvailableSlots', vendorId: vendorId, serviceId: matchedService.id, date: targetDate })
                             });
                             if (slotsRes.ok) {
                                 const slotsJson = await slotsRes.json();
-                                availableSlots = slotsJson.slots || [];
+                                const avSlots = slotsJson.slots || [];
+                                
+                                if (avSlots.length > 0) {
+                                    const alts = avSlots.slice(0, 4).join(', ');
+                                    finalReply = `Ho liberi questi orari per *${matchedService.name}*: ${alts}. A che ora preferisci? ✂️`;
+                                } else {
+                                    // Se oggi è pieno, cerca in automatico per domani
+                                    if (targetDate === todayRome) {
+                                        const tomRes = await fetch(API_BASE_URL, {
+                                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ action: 'getAvailableSlots', vendorId: vendorId, serviceId: matchedService.id, date: tomorrowRome })
+                                        });
+                                        const tomJson = await tomRes.json();
+                                        const tomSlots = tomJson.slots || [];
+                                        if (tomSlots.length > 0) {
+                                            finalReply = `Per oggi siamo al completo, ma per domani ho liberi: ${tomSlots.slice(0,4).join(', ')}. Ti andrebbe bene uno di questi? ✂️`;
+                                        } else {
+                                            finalReply = `Oggi e domani siamo pieni per questo servizio. Vuoi controllare per dopodomani?`;
+                                        }
+                                    } else {
+                                        finalReply = `Purtroppo in quella data siamo al completo. Vuoi controllare un altro giorno?`;
+                                    }
+                                }
                             }
                         } catch (e) {}
-
-                        if (extracted.intent === "confirm_booking" && extracted.time) {
-                            try {
-                                const durationMins = matchedService.duration || 30;
-                                const dummyDate = new Date(`${targetDate}T12:00:00Z`);
-                                const romeLoc = dummyDate.toLocaleString("en-US", { timeZone: "Europe/Rome" });
-                                const utcLoc = dummyDate.toLocaleString("en-US", { timeZone: "UTC" });
-                                const offsetMins = (new Date(utcLoc) - new Date(romeLoc)) / 60000;
-
-                                const startMs = new Date(`${targetDate}T${extracted.time}:00Z`).getTime() + (offsetMins * 60000);
-                                const startDateTime = new Date(startMs);
-                                const endDateTime = new Date(startMs + durationMins * 60000);
-
-                                const bookPayload = {
-                                    action: 'save_service_booking',
-                                    vendorId: vendorId,
-                                    customerName: displayName || ("Cliente (" + senderPhone.slice(-4) + ")"),
-                                    customerPhone: senderPhone,
-                                    serviceId: matchedService.id,
-                                    bookedServiceName: matchedService.name,
-                                    bookedServicePrice: matchedService.price || 0,
-                                    bookedServiceDuration: durationMins,
-                                    bookedTotalOccupiedTime: durationMins,
-                                    startDateTime: startDateTime.toISOString(),
-                                    endDateTime: endDateTime.toISOString(),
-                                    status: 'confirmed',
-                                    source: 'whatsapp_ai_autopilot',
-                                    appointmentCode: 'WA_' + Date.now().toString().slice(-4),
-                                    type: 'cura_persona'
-                                };
-
-                                const saveRes = await fetch(API_BASE_URL, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify(bookPayload)
-                                });
-
-                                if (saveRes.ok) {
-                                    finalReply = `🎉 Perfetto! Ti confermo l'appuntamento per *${matchedService.name}* alle *${extracted.time}*. Ti abbiamo inserito in agenda, a presto! ✂️✨`;
-                                } else {
-                                    finalReply = `Purtroppo lo slot delle ${extracted.time} è stato appena occupato. Vuoi un altro orario?`;
-                                }
-                            } catch (bErr) {
-                                finalReply = `Ho preso nota per le ${extracted.time}, ti confermo tutto a breve!`;
-                            }
-                        }
-                        else {
-                            if (availableSlots.length > 0) {
-                                const alts = availableSlots.slice(0, 4).join(', ');
-                                const alVoloText = lowerMsg.includes("al volo") ? `Al volo per oggi ho liberi: *${alts}*. Ti blocco il primo? ✂️` : `Perfetto per *${matchedService.name}*! Ho liberi questi orari: *${alts}*. Quale preferisci? ✂️`;
-                                finalReply = alVoloText;
-                            } else {
-                                let nextDaySlots = [];
-                                try {
-                                    const nextRes = await fetch(API_BASE_URL, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            action: 'getAvailableSlots',
-                                            vendorId: vendorId,
-                                            serviceId: matchedService.id,
-                                            date: nextOpen.dateStr
-                                        })
-                                    });
-                                    if (nextRes.ok) {
-                                        const nextJson = await nextRes.json();
-                                        nextDaySlots = nextJson.slots || [];
-                                    }
-                                } catch (e) {}
-
-                                if (nextDaySlots.length > 0) {
-                                    const nextAlts = nextDaySlots.slice(0, 4).join(', ');
-                                    finalReply = `Per oggi siamo al completo per *${matchedService.name}*!\nPer *${nextOpen.readable}* ho liberi: *${nextAlts}*. Ti andrebbe bene uno di questi? ✂️`;
-                                } else {
-                                    finalReply = `Siamo al completo per *${matchedService.name}*. Per quale giorno preferisci che ti controlli? ✂️`;
-                                }
-                            }
-                        }
                     }
-                } else {
-                    if (!finalReply) {
-                        finalReply = `Scusami, non ho capito bene! Puoi dirmi cosa vorresti fare? (Es. Prenotare un *Taglio*, *Barba* o avere info sulle *Promozioni*) ✂️`;
+                    
+                    // Se ha confermato un orario (es "9")
+                    if (extracted.intent === "confirm_booking" && extracted.time) {
+                        try {
+                            const durationMins = matchedService.duration || 30;
+                            const romeLoc = new Date().toLocaleString("en-US", { timeZone: "Europe/Rome" });
+                            const utcLoc = new Date().toLocaleString("en-US", { timeZone: "UTC" });
+                            const offsetMins = (new Date(utcLoc) - new Date(romeLoc)) / 60000;
+                            const startMs = new Date(`${targetDate}T${extracted.time}:00Z`).getTime() + (offsetMins * 60000);
+                            const startDateTime = new Date(startMs);
+                            const endDateTime = new Date(startMs + durationMins * 60000);
+
+                            const saveRes = await fetch(API_BASE_URL, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    action: 'save_service_booking', vendorId: vendorId,
+                                    customerName: recognizedClientName || "Cliente", customerPhone: senderPhone,
+                                    serviceId: matchedService.id, bookedServiceName: matchedService.name,
+                                    bookedServicePrice: matchedService.price, bookedTotalOccupiedTime: durationMins,
+                                    startDateTime: startDateTime.toISOString(), endDateTime: endDateTime.toISOString(),
+                                    status: 'confirmed', source: 'whatsapp_ai_autopilot', type: 'cura_persona'
+                                })
+                            });
+
+                            if (saveRes.ok) {
+                                finalReply = `🎉 Perfetto! Ti confermo l'appuntamento per *${matchedService.name}* alle *${extracted.time}*. Ti abbiamo inserito in agenda, a presto! ✂️✨`;
+                            } else {
+                                finalReply = `Purtroppo lo slot delle ${extracted.time} è stato appena occupato o non è valido. Puoi dirmi un altro orario?`;
+                            }
+                        } catch (e) {
+                            finalReply = `Ricevuto per le ${extracted.time}, confermo a breve!`;
+                        }
                     }
                 }
             }
 
-            // 3. SALVATAGGIO MEMORIA
+            // 3. SALVA MEMORIA CHAT
             try {
                 await fetch(API_BASE_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'save_autopilot_message',
-                        vendorId: vendorId,
-                        customerPhone: senderPhone,
-                        userMessage: messageText,
-                        aiReply: finalReply,
-                        customerName: displayName
-                    })
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'save_autopilot_message', vendorId: vendorId, customerPhone: senderPhone, userMessage: messageText, aiReply: finalReply, customerName: recognizedClientName })
                 });
-            } catch (saveMemErr) {}
+            } catch (e) {}
 
-            // 4. INVIO WHATSAPP VIA GATEWAY
+            // 4. INVIO WHATSAPP
             try {
                 await fetch(`${GATEWAY_BASE_URL}/send-message`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        vendorId: vendorId,
-                        phone: senderJid || senderPhone,
-                        message: finalReply
-                    })
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ vendorId: vendorId, phone: senderJid || senderPhone, message: finalReply })
                 });
-            } catch (sendErr) {
-                console.error("[AutoPilot] ⚠️ Errore invio Gateway:", sendErr.message);
-            }
+            } catch (e) {}
 
             return res.status(200).json({ success: true, processed: true, reply: finalReply });
         }
-        // =========================================================================
 
-        const contesto = body.contesto;
-        if (!contesto) {
-            return res.status(400).json({ errore: "Dati di contesto mancanti nella richiesta." });
-        }
-
-        const isLowStock = contesto.quantita > 0 && contesto.quantita <= 3;
-        const hasDiscount = contesto.originalPrice && contesto.originalPrice > (contesto.prezzo || 0);
-        const discountPercent = hasDiscount ? Math.round(((contesto.originalPrice - contesto.prezzo) / contesto.originalPrice) * 100) : 0;
-
-        let systemPrompt = `Sei un Senior Social Media Copywriter da Agenzia di Marketing di Lusso. Crea post magnetici per promuovere servizi e prodotti. Rispondi solo con il testo del post.`;
-        let userPromptText = `Dati: Negozio: "${contesto.store_name || 'Salone'}", Servizio: "${contesto.nome || 'Servizio'}", Prezzo: ${contesto.prezzo || '0'}€, Link: ${contesto.link_shop || 'https://www.civora.it'}`;
-
-        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${GROQ_API_KEY}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "llama-3.3-70b-versatile",
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    { role: "user", content: userPromptText }
-                ],
-                temperature: 0.2,
-                max_tokens: 800
-            })
-        });
-
-        const data = await response.json();
-        const postOutput = data.choices?.[0]?.message?.content || "";
-        res.status(200).json({ post: postOutput.trim() });
-
+        res.status(200).json({ status: "ok" });
     } catch (error) {
-        console.error("[api/social.js] Errore critico:", error);
-        res.status(500).json({ errore: "Errore interno del server: " + error.message });
+        res.status(500).json({ errore: error.message });
     }
 };
