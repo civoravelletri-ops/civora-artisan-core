@@ -79,76 +79,76 @@ module.exports = async function handler(req, res) {
                                     });
 
                                     const recognizedClientName = contextData.client?.name || '';
-                                    const savedClientAddress = contextData.client?.address || '';
-                                    const salonName = contextData.storeInfo?.name || 'Salone';
-                                    const salonAddress = contextData.storeInfo?.address || '';
-                                    const salonPhone = contextData.storeInfo?.phone || '';
-
-                                    // Lista Servizi (Tagli, Barba, Trattamenti)
-                                    const servicesListText = contextData.services.length > 0
-                                        ? contextData.services.map(s => `- ${s.name} (ID: "${s.id}", Prezzo: ${s.price}€, Durata: ${s.duration} min)`).join('\n')
-                                        : '- Servizio Standard (ID: "default", Prezzo: 0€, Durata: 30 min)';
-
-                                    // 🛍️ Lista Prodotti da comprare/portare a casa di QUESTO salone
-                                    const productsListText = (contextData.products && contextData.products.length > 0)
-                                        ? contextData.products.map(p => `- ${p.name} ${p.brand ? '(' + p.brand + ')' : ''} - Prezzo: ${p.price}€`).join('\n')
-                                        : '- Nessun prodotto fisico attualmente a catalogo per la vendita da asporto.';
-
-                                    // Cronologia chat
-                                    let historyText = "";
-                                    let lastAssistantMsg = "";
-                                    if (contextData.chatHistory && Array.isArray(contextData.chatHistory) && contextData.chatHistory.length > 0) {
-                                        historyText = "\nSTORICO CHAT RECENTE:\n" +
-                                            contextData.chatHistory.map(m => {
-                                                if (m.role === 'assistant') lastAssistantMsg = m.content;
-                                                return m.role === 'assistant' ? `Tu (Salone): ${m.content}` : `Cliente: ${m.content}`;
-                                            }).join('\n') + "\n";
-                                    }
-
-                                    const autoPilotSystemPrompt = `Sei l'assistente virtuale WhatsApp del salone "${salonName}".
-                  Oggi è ${todayReadable} (${todayRome}).
-
-                  DATI ATTIVITÀ:
-                  - Nome Salone: ${salonName}
-                  - Indirizzo esatto: ${salonAddress || 'in salone'}
-                  - Telefono: ${salonPhone || ''}
-                  ${recognizedClientName ? `- Nome Cliente già noto: "${recognizedClientName}". Salutalo per nome!` : '- Nome Cliente: Non ancora noto. Sii molto caloroso e quando serve (per fissare l\'appuntamento o per la consegna) chiedigli con gentilezza a che nome fissare!'}
-                  ${savedClientAddress ? `- Indirizzo già salvato in Rubrica: "${savedClientAddress}". Se ordina prodotti, chiedigli se vuole la consegna lì o a un altro indirizzo!` : ''}
-
-                  LISTINO SERVIZI IN SALONE (Tagli, Barbe, Trattamenti):
-                  ${servicesListText}
-
-                  PRODOTTI FISICI IN VENDITA DA ASPORTO (Shampoo, Cere, Lozioni, Cosmetici):
-                  ${productsListText}
-
-                  ${historyText}
-
-                  LINEE GUIDA PER LE RISPOSTE:
-                  1. Parla in modo naturale, caldo e amichevole (usa emoji).
-                  2. DISTINZIONE IMPORTANTE (PRODOTTI vs SERVIZI):
-                     - Se il cliente chiede prodotti (cere, shampoo, gel, ecc.), rispondi elencando i PRODOTTI FISICI con i prezzi reali.
-                     - Se chiede tagli, barbe o trattamenti, fai riferimento al LISTINO SERVIZI.
-                  3. GESTIONE CLIENTI NUOVI: rispondi subito alla richiesta. Se decide di prenotare o acquistare, chiedigli con gentilezza a che nome segnare!
-                  4. GESTIONE CLIENTI ABITUALI: se ha già un indirizzo salvato ("${savedClientAddress}"), proponiglielo direttamente se chiede la consegna a domicilio!
-                  5. GESTIONE APPUNTAMENTO (STOP AI LOOP):
-                     - Se il cliente dice "Sì", "Ok", "Confermo", "A quell'ora va bene", l'intento è "confirm_booking". ESTRAI la data e l'ora proposte nell'ultimo messaggio del salone!
-                     - Se propone una data/ora ("oggi alle 16", "domani mattina"), l'intento è "ask_availability".
-                  6. INTENTI:
-                     - "confirm_booking": vuole bloccare il posto concordato.
-                     - "ask_availability": chiede orari o date disponibili.
-                     - "info_question": chiede info su prodotti, prezzi, indirizzo.
-                     - "general_greeting": saluta e basta.
-
-                  Rispondi ESCLUSIVAMENTE con un JSON valido:
-                  {
-                   "intent": "ask_availability",
-                   "customerName": "${recognizedClientName}",
-                   "date": "${todayRome}",
-                   "time": "",
-                   "serviceId": "",
-                   "serviceName": "",
-                   "replyText": "risposta dettagliata per WhatsApp"
-                  }`;
+                                                      const savedClientAddress = contextData.client?.address || '';
+                                                      const lastClientService = contextData.client?.lastService || '';
+                                                      const salonName = contextData.storeInfo?.name || 'Salone';
+                                                      const salonAddress = contextData.storeInfo?.address || '';
+                                                      const salonPhone = contextData.storeInfo?.phone || '';
+                                    
+                                                      // Lista Servizi (Tagli, Barba, Trattamenti)
+                                                      const servicesListText = contextData.services.length > 0
+                                                          ? contextData.services.map(s => `- ${s.name} (ID: "${s.id}", Prezzo: ${s.price}€, Durata: ${s.duration} min)`).join('\n')
+                                                          : '- Servizio Standard (ID: "default", Prezzo: 0€, Durata: 30 min)';
+                                    
+                                                      // 🛍️ Lista Prodotti da comprare/portare a casa di QUESTO salone
+                                                      const productsListText = (contextData.products && contextData.products.length > 0)
+                                                          ? contextData.products.map(p => `- ${p.name} ${p.brand ? '(' + p.brand + ')' : ''} - Prezzo: ${p.price}€`).join('\n')
+                                                          : '- Nessun prodotto fisico attualmente a catalogo per la vendita da asporto.';
+                                    
+                                                      // Cronologia chat
+                                                      let historyText = "";
+                                                      let lastAssistantMsg = "";
+                                                      if (contextData.chatHistory && Array.isArray(contextData.chatHistory) && contextData.chatHistory.length > 0) {
+                                                          historyText = "\nSTORICO CHAT RECENTE:\n" +
+                                                              contextData.chatHistory.map(m => {
+                                                                  if (m.role === 'assistant') lastAssistantMsg = m.content;
+                                                                  return m.role === 'assistant' ? `Tu (Salone): ${m.content}` : `Cliente: ${m.content}`;
+                                                              }).join('\n') + "\n";
+                                                      }
+                                    
+                                                      const autoPilotSystemPrompt = `Sei l'assistente virtuale WhatsApp del salone "${salonName}".
+                                    Oggi è ${todayReadable} (${todayRome}).
+                                    
+                                    DATI ATTIVITÀ E CLIENTE:
+                                    - Nome Salone: ${salonName}
+                                    - Indirizzo esatto: ${salonAddress || 'in salone'}
+                                    ${recognizedClientName ? `- Nome Cliente già noto: "${recognizedClientName}". Salutalo per nome!` : '- Nome Cliente: Non ancora noto. Chiedi a che nome fissare al momento giusto!'}
+                                    ${lastClientService ? `- Ultimo servizio fatto dal cliente: "${lastClientService}".` : ''}
+                                    ${savedClientAddress ? `- Indirizzo salvato in Rubrica: "${savedClientAddress}".` : ''}
+                                    
+                                    LISTINO SERVIZI IN SALONE:
+                                    ${servicesListText}
+                                    
+                                    PRODOTTI FISICI IN VENDITA DA ASPORTO:
+                                    ${productsListText}
+                                    
+                                    ${historyText}
+                                    
+                                    LINEE GUIDA PER LE RISPOSTE:
+                                    1. Parla in modo naturale, caldo e amichevole (usa emoji).
+                                    2. GESTIONE "IL SOLITO": Se il cliente è già noto, ha un "Ultimo servizio fatto" registrato e chiede un appuntamento senza specificare cosa vuole fare, chiedigli con naturalezza e simpatia se vuole prenotare per "il solito" citando il nome dell'ultimo servizio (es. "Ciao Marco! 👋 Vuoi che ti prenoti per il solito ${lastClientService} o oggi cambiamo?"). 
+                                       - Se il cliente accetta "il solito" o dice "sì", usa il servizio ${lastClientService} per cercare gli orari. 
+                                       - Se invece chiede un servizio diverso, usa il nuovo.
+                                    3. DISTINZIONE (PRODOTTI vs SERVIZI): Se chiede prodotti fisici da asporto, usa il listino prodotti. Se chiede trattamenti, usa il listino servizi.
+                                    4. GESTIONE APPUNTAMENTO (STOP AI LOOP):
+                                       - Se il cliente dice "Sì", "Ok", "Confermo", l'intento è "confirm_booking". ESTRAI la data e l'ora dall'ultimo messaggio del salone!
+                                       - Se propone una data/ora ("oggi alle 16", "domani mattina"), l'intento è "ask_availability".
+                                    5. INTENTI:
+                                       - "confirm_booking": vuole bloccare il posto concordato.
+                                       - "ask_availability": chiede orari o date disponibili.
+                                       - "info_question": chiede info su prodotti, prezzi, indirizzo.
+                                       - "general_greeting": saluta e basta.
+                                    
+                                    Rispondi ESCLUSIVAMENTE con un JSON valido:
+                                    {
+                                     "intent": "ask_availability",
+                                     "customerName": "${recognizedClientName}",
+                                     "date": "${todayRome}",
+                                     "time": "",
+                                     "serviceId": "",
+                                     "serviceName": "",
+                                     "replyText": "risposta dettagliata per WhatsApp"
+                                    }`;
 
                                     const groqMessages = [
                                         { role: "system", content: autoPilotSystemPrompt },
