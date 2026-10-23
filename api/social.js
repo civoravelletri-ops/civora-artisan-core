@@ -20,7 +20,7 @@ module.exports = async function handler(req, res) {
         }
 
         // =========================================================================
-        // 🤖 PILOTA AUTOMATICO WHATSAPP 24/7 (INGEGNERIA CIVORA BUSINESS: MEMORIA + AGENDA + PRODOTTI)
+        // 🤖 PILOTA AUTOMATICO WHATSAPP 24/7 (INGEGNERIA CIVORA BUSINESS)
         // =========================================================================
         if (body.isWhatsAppAutoPilot && body.vendorId && body.senderPhone) {
             const vendorId = body.vendorId;
@@ -36,7 +36,7 @@ module.exports = async function handler(req, res) {
             const API_BASE_URL = 'https://localmente-api.vercel.app/api/get-available-slots';
             const GATEWAY_BASE_URL = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
 
-            // 1. RECUPERO CONTESTO COMPLETO DAL MOTORE CENTRALE
+            // 1. RECUPERO CONTESTO SALONE DAL MOTORE CENTRALE
             let contextData = {
                 storeInfo: { name: 'Il nostro salone', address: '', phone: '', opening_hours: '', whatsapp_ai_autopilot: false, whatsapp_connected: false },
                 services: [],
@@ -59,16 +59,16 @@ module.exports = async function handler(req, res) {
                     const fetchedCtx = await ctxRes.json();
                     if (fetchedCtx.success) {
                         contextData = fetchedCtx;
-                        console.log(`[AutoPilot] 🧠 Contesto: Cliente "${contextData.client?.name || 'Nuovo'}", Indirizzo Rubrica: "${contextData.client?.address || 'Nessuno'}", Servizi: ${contextData.services.length}, Prodotti: ${contextData.products?.length || 0}`);
+                        console.log(`[AutoPilot] 🧠 Contesto: Cliente "${contextData.client?.name || 'Nuovo'}", Servizi attivi: ${contextData.services.length}, Prodotti: ${contextData.products?.length || 0}`);
                     }
                 }
             } catch (ctxErr) {
                 console.error("[AutoPilot] ⚠️ Eccezione recupero contesto:", ctxErr.message);
             }
 
-            // 🛑 CONTROLLO TELECOMANDO: Se il negoziante ha spento la levetta nella Dashboard, l'AI sta zitta!
+            // 🛑 CONTROLLO TELECOMANDO DASHBOARD
             if (contextData.storeInfo.whatsapp_ai_autopilot !== true || contextData.storeInfo.whatsapp_connected !== true) {
-                console.log(`[AutoPilot] 🛑 Pilota automatico DISATTIVATO dal negoziante per ${vendorId}. L'AI rimane in silenzio.`);
+                console.log(`[AutoPilot] 🛑 Pilota automatico DISATTIVATO dal negoziante per ${vendorId}. L'AI tace.`);
                 return res.status(200).json({ status: "skipped", reason: "Pilota automatico o WhatsApp non attivo" });
             }
 
@@ -85,17 +85,54 @@ module.exports = async function handler(req, res) {
             const salonAddress = contextData.storeInfo?.address || '';
             const hasRecentChatHistory = contextData.chatHistory && Array.isArray(contextData.chatHistory) && contextData.chatHistory.length > 0;
 
-            // Lista Servizi Reali (Tagli, Barba, Trattamenti)
+            // 🔍 FUNZIONE INTELLIGENTE: TROVA TUTTI I SERVIZI PERTINENTI ALLA RICHIESTA
+            function getMatchingServicesForQuery(text, allServices) {
+                const q = (text || "").toLowerCase();
+                if (!q) return allServices;
+
+                // Se chiede di capelli, tagli o styling
+                if (q.includes("tagli") || q.includes("capell") || q.includes("sfumat") || q.includes("fade") || q.includes("rasat") || q.includes("piega") || q.includes("pettin")) {
+                    const hairServices = allServices.filter(s => {
+                        const n = (s.name || "").toLowerCase();
+                        const c = (s.category || "").toLowerCase();
+                        return n.includes("tagli") || n.includes("capell") || n.includes("sfumat") || n.includes("fade") || n.includes("styling") || c.includes("capell") || c.includes("styling") || c.includes("tagli");
+                    });
+                    if (hairServices.length > 0) return hairServices;
+                }
+
+                // Se chiede di barba o rasatura
+                if (q.includes("barb") || q.includes("rasatur") || q.includes("panno cald") || q.includes("baff")) {
+                    const beardServices = allServices.filter(s => {
+                        const n = (s.name || "").toLowerCase();
+                        const c = (s.category || "").toLowerCase();
+                        return n.includes("barb") || n.includes("rasatur") || c.includes("barb");
+                    });
+                    if (beardServices.length > 0) return beardServices;
+                }
+
+                // Se chiede di colore, mèches o balayage
+                if (q.includes("color") || q.includes("tinta") || q.includes("balayage") || q.includes("meches") || q.includes("mèches") || q.includes("shatush") || q.includes("schiarit") || q.includes("platin")) {
+                    const colorServices = allServices.filter(s => {
+                        const n = (s.name || "").toLowerCase();
+                        const c = (s.category || "").toLowerCase();
+                        return n.includes("color") || n.includes("tinta") || n.includes("balayage") || n.includes("meches") || n.includes("shatush") || n.includes("schiarit") || c.includes("color");
+                    });
+                    if (colorServices.length > 0) return colorServices;
+                }
+
+                return allServices;
+            }
+
+            // Lista Servizi e Prodotti formattata per l'AI
             const servicesListText = contextData.services.length > 0
                 ? contextData.services.map(s => `- ${s.name} (ID: "${s.id}", Prezzo: ${s.price}€, Durata: ${s.duration} min)`).join('\n')
                 : '- Servizio Standard (ID: "default", Prezzo: 0€, Durata: 30 min)';
 
-            // Lista Prodotti Fisici da asporto / consegna di questo salone
             const productsListText = (contextData.products && contextData.products.length > 0)
                 ? contextData.products.map(p => `- ${p.name} ${p.brand ? '(' + p.brand + ')' : ''} - Prezzo: ${p.price}€`).join('\n')
                 : '- Nessun prodotto fisico attualmente a catalogo per la vendita da asporto.';
 
-            // Cronologia chat recente
+            // Cronologia chat
             let historyText = "";
             let lastAssistantMsg = "";
             if (hasRecentChatHistory) {
@@ -106,53 +143,49 @@ module.exports = async function handler(req, res) {
                     }).join('\n') + "\n";
             }
 
-            // PROMPT DEL DIRETTORE
+            // PROMPT DEL DIRETTORE: MASSIMA CONCISIONE E VELOCITÀ WHATSAPP
             const autoPilotSystemPrompt = `Sei l'assistente virtuale WhatsApp del salone "${salonName}".
 Oggi è ${todayReadable} (${todayRome}).
 
-DATI SALONE E CLIENTE:
-- Salone: ${salonName}
-- Indirizzo salone: ${salonAddress || 'in sede'}
-${recognizedClientName ? `- Cliente noto: "${recognizedClientName}".` : '- Cliente: Nome non ancora noto.'}
-${lastClientService ? `- Ultimo servizio fatto in passato: "${lastClientService}".` : ''}
+DATI ATTIVITÀ E CLIENTE:
+- Salone: ${salonName} (${salonAddress || 'in salone'})
+${recognizedClientName ? `- Cliente noto: "${recognizedClientName}".` : '- Cliente: Nome non noto.'}
+${lastClientService ? `- Ultimo servizio fatto dal cliente: "${lastClientService}".` : ''}
 ${savedClientAddress ? `- Indirizzo salvato in Rubrica: "${savedClientAddress}".` : ''}
 
 LISTINO DEI NOSTRI SERVIZI REALI:
 ${servicesListText}
 
-CATALOGO DEI NOSTRI PRODOTTI IN VENDITA DA ASPORTO:
+CATALOGO PRODOTTI IN VENDITA DA ASPORTO:
 ${productsListText}
 
 ${historyText}
 
-REGOLE FERREE:
-1. 🛑 SALUTI E TONO NATURALE:
+🛑 REGOLE FERREE DI SCRITTURA (STILE WHATSAPP REALE):
+1. BREVITÀ ESTREMA: Rispondi in MASSIMO 2 o 3 righe corte. Niente poemi, niente frasi lunghe. Diretto e veloce come un vero negoziante al cellulare.
+2. SALUTI:
    ${hasRecentChatHistory 
-     ? "- LA CHAT È GIÀ INIZIATA: NON DIRE MAI 'Ciao', 'Buongiorno' o 'Ciao [Nome]' all'inizio della frase! Rispondi direttamente e in modo fluido come una persona vera su WhatsApp."
-     : `- È IL PRIMO MESSAGGIO: Saluta con cordialità ed energia.${recognizedClientName ? ` Usa il suo nome: "Ciao ${recognizedClientName}! 👋"` : ' "Ciao! 👋"'}`
+     ? "- LA CONVERSAZIONE È GIÀ AVVIATA: NON DIRE MAI 'Ciao', 'Buongiorno' o 'Ciao [Nome]' all'inizio del messaggio! Rispondi direttamente alla domanda."
+     : `- È IL PRIMO MESSAGGIO: Saluta brevemente con emoji.${recognizedClientName ? ` "Ciao ${recognizedClientName}! 👋"` : ' "Ciao! 👋"'}`
    }
+3. RICHIESTE SERVIZI GENERICHE:
+   - Se il cliente chiede genericamente un servizio (es. "tagliare i capelli", "fare il colore") e ci sono più opzioni nel listino:
+     Usa intent "clarify_service". Elenca SOLO i servizi pertinenti con il prezzo in modo compatto (es. "Abbiamo: • Taglio Classico (20€) • Taglio & Styling (25€). Quale preferisci? ✂️").
+   - Se il cliente è noto e ha fatto "${lastClientService || ''}", chiedigli brevemente se vuole fare il solito.
+   - Se specifica il servizio esatto (es. "Taglio Uomo"), allora l'intent è "ask_availability" o "confirm_booking".
+4. ORDINI PRODOTTI:
+   - Se chiede di comprare un prodotto fisico: intent "order_product".
+   - Se MANCA l'indirizzo: chiedi semplicemente via, civico e città per la consegna rapida (+2,99€ in contanti). NON dire che l'ordine è confermato finché non hai l'indirizzo!
 
-2. 🛍️ REGOLA VENDITA PRODOTTI:
-   - Se il cliente chiede di COMPRARE o ORDINARE un prodotto fisico: l'intent DEVE essere "order_product".
-   - Estrai in "productOrdered" il nome del prodotto.
-   - Se il cliente scrive o ha già un indirizzo di consegna, estrailo in "deliveryAddress".
-   - Se MANCA l'indirizzo: chiedi con simpatia l'indirizzo completo (via, civico e città) per la consegna a domicilio con pagamento in contanti al rider (+2,99€ spedizione rapida a Velletri). NON DIRE MAI CHE L'ORDINE È CONFERMATO FINCHÉ NON HAI L'INDIRIZZO!
+INTENTI:
+- "order_product": vuole comprare prodotti fisici o ha dato l'indirizzo per riceverli.
+- "clarify_service": richiesta di servizio generica da chiarire mostrando le opzioni pertinenti.
+- "ask_availability": chiede orari o date per un servizio preciso.
+- "confirm_booking": vuole bloccare il posto ("Sì", "Ok", "Confermo", "Va bene alle 16").
+- "info_question": info generali brevi.
+- "general_greeting": saluta e basta.
 
-3. ✂️ REGOLA PRENOTAZIONE SERVIZI:
-   - Se il cliente fa una richiesta GENERICA (es. "taglio", "piega", "colore") e ci sono più opzioni nel listino:
-     L'intent DEVE essere "clarify_service". Elenca le opzioni con i prezzi e chiedi quale preferisce (senza risalutare con 'Ciao'!).
-   - Se il cliente è noto e ha un ultimo servizio fatto (${lastClientService || 'nessuno'}), proponigli con naturalezza se vuole "il solito ${lastClientService}".
-   - Se il cliente indica chiaramente il servizio (es. "Taglio Uomo"), l'intent è "ask_availability" o "confirm_booking".
-
-4. GESTIONE INTENTI:
-   - "order_product": vuole comprare prodotti fisici o sta dando l'indirizzo per riceverli.
-   - "clarify_service": richiesta di servizio generica/ambigua da chiarire.
-   - "ask_availability": chiede che orari o giorni sono liberi per un servizio preciso.
-   - "confirm_booking": vuole bloccare il posto concordato ("Sì", "Ok", "Confermo", "Va bene alle 16").
-   - "info_question": chiede info su orari, dove siete o prezzi.
-   - "general_greeting": saluta e basta.
-
-Rispondi ESCLUSIVAMENTE con un JSON valido:
+Rispondi ESCLUSIVAMENTE con questo JSON compatto:
 {
  "intent": "ask_availability",
  "customerName": "${recognizedClientName}",
@@ -162,7 +195,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido:
  "time": "",
  "serviceId": "",
  "serviceName": "",
- "replyText": "risposta dettagliata per WhatsApp"
+ "replyText": "risposta brevissima di 2 righe per WhatsApp"
 }`;
 
             const groqMessages = [
@@ -201,7 +234,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido:
                             model: modelId,
                             messages: groqMessages,
                             temperature: 0.1,
-                            max_tokens: 800
+                            max_tokens: 600
                         })
                     });
 
@@ -219,7 +252,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido:
 
                         const parsed = JSON.parse(cleanJson);
                         extracted = { ...extracted, ...parsed };
-                        console.log(`[AutoPilot] ✅ Risposta (${modelId}) Intent: ${extracted.intent}:`, extracted.replyText);
+                        console.log(`[AutoPilot] ✅ Risposta (${modelId}) [Intent: ${extracted.intent}]:`, extracted.replyText);
                         aiSuccess = true;
                         break;
                     }
@@ -272,7 +305,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido:
             const cleanClientPhone = senderPhone.replace(/@.*$/, '');
 
             // =========================================================================
-            // 🛍️ 1. SALVATAGGIO REALE ORDINI PRODOTTI IN DASHBOARD
+            // 🛍️ 1. SALVATAGGIO ORDINI PRODOTTI IN DASHBOARD
             // =========================================================================
             const wantsProduct = (
                 extracted.intent === "order_product" ||
@@ -373,12 +406,12 @@ Rispondi ESCLUSIVAMENTE con un JSON valido:
                         if (orderRes.ok) {
                             const orderJson = await orderRes.json();
                             console.log(`[AutoPilot] 🔔 ORDINE SALVATO IN DASHBOARD CON SUCCESSO! ID: ${orderJson.orderId}`);
-                            const itemsListText = orderItemsList.map(it => `• **${it.quantity}x ${it.productName}** (${(it.price * it.quantity).toFixed(2)} €)`).join('\n');
-                            finalReply = `Perfetto! ✅ Il tuo ordine è confermato ed è stato registrato in salone!\n\n📦 **Articoli:**\n${itemsListText}\n\n📍 Consegna a: *${deliveryAddress}*\n🛵 **Consegna Rapida:** ${shippingCost.toFixed(2)} €\n💶 **Totale da pagare al Rider:** ${finalTotal.toFixed(2)} € (in contanti alla consegna).\n\nAbbiamo passato l'ordine alla nostra postazione! A presto! 🚚✨`;
+                            const itemsListText = orderItemsList.map(it => `• ${it.quantity}x ${it.productName} (${(it.price * it.quantity).toFixed(2)}€)`).join('\n');
+                            finalReply = `Perfetto! ✅ Ordine confermato in salone:\n${itemsListText}\n📍 Consegna a: *${deliveryAddress}*\n💶 *Totale al corriere:* ${finalTotal.toFixed(2)}€ (inclusi ${shippingCost.toFixed(2)}€ consegna rapida). A presto! 🚚✨`;
                             productOrderProcessed = true;
                         }
                     } else if (orderItemsList.length > 0 && !deliveryAddress) {
-                        finalReply = `Perfetto! Per recapitarti i prodotti con consegna rapida a domicilio a Velletri (a partire da 2,99 € con pagamento in contanti al rider), a quale indirizzo dobbiamo consegnare? 🛵`;
+                        finalReply = `Perfetto! Per la consegna a domicilio a Velletri (2,99€ con pagamento in contanti al rider), a quale indirizzo dobbiamo consegnare? 🛵`;
                         productOrderProcessed = true;
                     }
                 } catch (ordErr) {
@@ -386,9 +419,9 @@ Rispondi ESCLUSIVAMENTE con un JSON valido:
                 }
             }
 
-            // =========================================================================
-            // ✂️ 2. GESTIONE APPUNTAMENTO (CON CONTROLLO AMBIGUITÀ E AGENDA REALE)
-            // =========================================================================
+            // =========================================================
+            // ✂️ 2. GESTIONE APPUNTAMENTO (FILTRO INTELLIGENTE SERVIZI)
+            // =========================================================
             if (!productOrderProcessed) {
                 let matchedService = null;
 
@@ -403,12 +436,22 @@ Rispondi ESCLUSIVAMENTE con un JSON valido:
                         || null;
                 }
 
-                // Se la richiesta è generica, NON SCEGLIERE A CASO!
+                // Cerca corrispondenza diretta nel testo del cliente (es. se ha scritto "Taglio & Styling" o "Taglio Classico")
+                if (!matchedService) {
+                    const msgLower = messageText.toLowerCase();
+                    const sortedServices = [...contextData.services].sort((a, b) => (b.name || '').length - (a.name || '').length);
+                    matchedService = sortedServices.find(s => msgLower.includes((s.name || '').toLowerCase())) || null;
+                }
+
+                // Se la richiesta è generica o il servizio non è specificato in modo univoco
                 if (extracted.intent === "clarify_service" || (!matchedService && (extracted.intent === "ask_availability" || extracted.intent === "confirm_booking"))) {
-                    console.log(`[AutoPilot] 🛡️ Richiesta servizio generica o non chiara. Chiedo chiarimento.`);
-                    const opzioniServizi = contextData.services.slice(0, 4).map(s => `• ${s.name} (${s.price}€)`).join('\n');
-                    const incipit = hasRecentChatHistory ? "Per poterti dare gli orari esatti o bloccare l'appuntamento" : `Ciao ${displayName || ''}! Per poterti dare gli orari esatti o bloccare l'appuntamento`;
-                    finalReply = `${incipit}, quale servizio vorresti fare di preciso?\n\nEcco i nostri servizi:\n${opzioniServizi}\n\nQuale preferisci? ✂️`;
+                    console.log(`[AutoPilot] 🛡️ Richiesta generica. Filtro i servizi pertinenti per: "${messageText}"`);
+
+                    // 🎯 Trova TUTTI i servizi pertinenti (es. tutti i tagli veri del salone!)
+                    const relevantServices = getMatchingServicesForQuery(messageText, contextData.services);
+                    const opzioniServizi = relevantServices.map(s => `• *${s.name}* (${s.price}€)`).join('\n');
+
+                    finalReply = `Per i capelli abbiamo queste opzioni:\n${opzioniServizi}\n\nQuale preferisci prenotare? ✂️`;
                 } 
                 else if (matchedService && (extracted.intent === "ask_availability" || extracted.intent === "confirm_booking")) {
                     const targetDate = extracted.date || todayRome;
@@ -476,16 +519,16 @@ Rispondi ESCLUSIVAMENTE con un JSON valido:
                             });
 
                             if (saveRes.ok) {
-                                finalReply = `🎉 Perfetto! Ti confermo l'appuntamento per *${matchedService.name}* in data *${dateReadable}* alle ore *${extracted.time}*.\nTi abbiamo inserito in agenda, a presto! ✂️✨`;
+                                finalReply = `🎉 Appuntamento confermato! Ti ho inserito in agenda per *${matchedService.name}* in data *${dateReadable}* alle ore *${extracted.time}*. Ti aspettiamo! ✂️✨`;
                                 console.log(`[AutoPilot] ✅ APPUNTAMENTO REGISTRATO A CALENDARIO CON SUCCESSO!`);
                             } else {
                                 const errJson = await saveRes.json().catch(() => ({}));
                                 console.warn("[AutoPilot] ⚠️ Errore salvataggio:", errJson.error);
-                                finalReply = `Ci dispiace, ma lo slot delle ${extracted.time} del ${dateReadable} non è più disponibile. Vuoi che controlliamo un altro orario?`;
+                                finalReply = `Purtroppo lo slot delle ${extracted.time} del ${dateReadable} è stato appena occupato. Vuoi che controlliamo un altro orario?`;
                             }
                         } catch (bErr) {
                             console.error("[AutoPilot] ⚠️ Eccezione salvataggio:", bErr);
-                            finalReply = `Abbiamo preso nota della tua richiesta per le ${extracted.time}, ti confermo tutto a brevissimo!`;
+                            finalReply = `Ho preso nota della tua richiesta per le ${extracted.time}, ti confermo tutto a brevissimo!`;
                         }
                     }
                     // CASO B: IL CLIENTE CHIEDE DISPONIBILITÀ
@@ -493,28 +536,28 @@ Rispondi ESCLUSIVAMENTE con un JSON valido:
                         if (extracted.time) {
                             const isTimeFree = availableSlots.includes(extracted.time);
                             if (isTimeFree) {
-                                finalReply = `Sì! Alle *${extracted.time}* del ${dateReadable} siamo liberi per *${matchedService.name}*. Ti blocco il posto in agenda? ✂️`;
+                                finalReply = `Sì! Alle *${extracted.time}* del ${dateReadable} siamo liberi per *${matchedService.name}*. Ti blocco il posto? ✂️`;
                             } else {
                                 if (availableSlots.length > 0) {
                                     const alternatives = availableSlots.slice(0, 3).join(', ');
-                                    finalReply = `Purtroppo alle ${extracted.time} siamo al completo! Però per *${matchedService.name}* ho liberi questi orari: *${alternatives}*. Ti andrebbe bene uno di questi?`;
+                                    finalReply = `Alle ${extracted.time} siamo pieni! Per *${matchedService.name}* ho liberi: *${alternatives}*. Ti andrebbe bene uno di questi?`;
                                 } else {
-                                    finalReply = `Purtroppo per il ${dateReadable} siamo al completo per *${matchedService.name}*. Vuoi che controlliamo per un altro giorno?`;
+                                    finalReply = `Per il ${dateReadable} siamo al completo per *${matchedService.name}*. Vuoi che controlliamo un'altra data?`;
                                 }
                             }
                         } else {
                             if (availableSlots.length > 0) {
-                                const alternatives = availableSlots.slice(0, 3).join(', ');
-                                finalReply = `Certo! Per *${matchedService.name}* (${dateReadable}) ho liberi questi orari: *${alternatives}*. A che ora preferisci? ✂️`;
+                                const alternatives = availableSlots.slice(0, 4).join(', ');
+                                finalReply = `Per *${matchedService.name}* (${dateReadable}) ho liberi questi orari: *${alternatives}*. Quale preferisci? ✂️`;
                             } else {
-                                finalReply = `Purtroppo per il ${dateReadable} non ci sono orari disponibili. Ti controllo un'altra data?`;
+                                finalReply = `Per il ${dateReadable} non ci sono orari disponibili. Ti controllo un'altra data?`;
                             }
                         }
                     }
                 }
             }
 
-            // 4. SALVA LA MEMORIA DELLA CONVERSAZIONE
+            // 3. SALVA LA MEMORIA DELLA CONVERSAZIONE
             if (extracted.intent !== "api_error") {
                 try {
                     await fetch(API_BASE_URL, {
@@ -534,7 +577,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido:
                 }
             }
 
-            // 5. INVIA LA RISPOSTA SU WHATSAPP TRAMITE IL GATEWAY
+            // 4. INVIA LA RISPOSTA SU WHATSAPP TRAMITE IL GATEWAY
             try {
                 await fetch(`${GATEWAY_BASE_URL}/send-message`, {
                     method: 'POST',
