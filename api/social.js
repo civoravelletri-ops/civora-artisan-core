@@ -84,17 +84,17 @@ module.exports = async function handler(req, res) {
                                                       const salonName = contextData.storeInfo?.name || 'Salone';
                                                       const salonAddress = contextData.storeInfo?.address || '';
                                                       const salonPhone = contextData.storeInfo?.phone || '';
-                                    
+
                                                       // Lista Servizi (Tagli, Barba, Trattamenti)
                                                       const servicesListText = contextData.services.length > 0
                                                           ? contextData.services.map(s => `- ${s.name} (ID: "${s.id}", Prezzo: ${s.price}€, Durata: ${s.duration} min)`).join('\n')
                                                           : '- Servizio Standard (ID: "default", Prezzo: 0€, Durata: 30 min)';
-                                    
+
                                                       // 🛍️ Lista Prodotti da comprare/portare a casa di QUESTO salone
                                                       const productsListText = (contextData.products && contextData.products.length > 0)
                                                           ? contextData.products.map(p => `- ${p.name} ${p.brand ? '(' + p.brand + ')' : ''} - Prezzo: ${p.price}€`).join('\n')
                                                           : '- Nessun prodotto fisico attualmente a catalogo per la vendita da asporto.';
-                                    
+
                                                       // Cronologia chat
                                                       let historyText = "";
                                                       let lastAssistantMsg = "";
@@ -105,7 +105,7 @@ module.exports = async function handler(req, res) {
                                                                   return m.role === 'assistant' ? `Tu (Salone): ${m.content}` : `Cliente: ${m.content}`;
                                                               }).join('\n') + "\n";
                                                       }
-                                    
+
                                                       const autoPilotSystemPrompt = `Sei l'assistente virtuale WhatsApp del salone "${salonName}".
                                                       Oggi è ${todayReadable} (${todayRome}).
 
@@ -261,98 +261,116 @@ module.exports = async function handler(req, res) {
                                                                                           const cleanClientPhone = senderPhone.replace(/@.*$/, '');
 
                                                                                           // =========================================================================
-                                                                                          // 🛍️ CONFERMA ACQUISTO PRODOTTI A DOMICILIO (SENZA VALORI FINTI O VELLETRI)
-                                                                                          // =========================================================================
-                                                                                          const isProductOrderConfirmation = (
-                                                                                              (extracted.intent === "confirm_booking" || extracted.intent === "info_question") &&
-                                                                                              !extracted.time &&
-                                                                                              (messageText.toLowerCase().includes("conferma") || messageText.toLowerCase().includes("tutto ok") || messageText.toLowerCase().includes("consegnare") || messageText.toLowerCase().includes("contanti") || messageText.toLowerCase().includes("puoi confermare")) &&
-                                                                                              lastAssistantMsg.toLowerCase().includes("consegn")
-                                                                                          );
-
-                                                                                          if (isProductOrderConfirmation) {
-                                                                                              try {
-                                                                                                  console.log(`[AutoPilot] 📦 Rilevata richiesta ordine prodotti da ${cleanClientPhone}!`);
-
-                                                                                                  const fullConversationText = (historyText + " " + messageText).toLowerCase();
-                                                                                                  let orderItemsList = [];
-                                                                                                  let subtotal = 0;
-                                                                                                  const shippingCost = 5;
-
-                                                                                                  if (contextData.products && contextData.products.length > 0) {
-                                                                                                      contextData.products.forEach(prod => {
-                                                                                                          const prodNameLower = prod.name.toLowerCase();
-                                                                                                          const cleanName = prodNameLower.split('(')[0].trim();
-                                                                                                          if (fullConversationText.includes(prodNameLower) || (cleanName.length > 3 && fullConversationText.includes(cleanName))) {
-                                                                                                              let itemQty = 1;
-                                                                                                              const qtyMatch = fullConversationText.match(/(\d+)\s*(?:unità|pezzi|confezioni|pz|x|boccette)/i);
-                                                                                                              if (qtyMatch && qtyMatch[1]) {
-                                                                                                                  itemQty = parseInt(qtyMatch[1], 10) || 1;
-                                                                                                              }
-
-                                                                                                              const itemPrice = parseFloat(prod.price) || 0;
-                                                                                                              orderItemsList.push({
-                                                                                                                  productName: prod.name,
-                                                                                                                  quantity: itemQty,
-                                                                                                                  price: itemPrice
-                                                                                                              });
-                                                                                                              subtotal += (itemPrice * itemQty);
-                                                                                                          }
-                                                                                                      });
-                                                                                                  }
-
-                                                                                                  // Estrazione Indirizzo di Consegna REALE
-                                                                                                  let deliveryAddress = savedClientAddress || "";
-                                                                                                  let deliveryZip = "";
-                                                                                                  let deliveryCity = "";
-
-                                                                                                  const addrMatch = lastAssistantMsg.match(/(?:consegnare a|consegneremo a|destinato a|indirizzo)\s*:?\s*\*?([^*\n.]+)/i);
-                                                                                                  if (addrMatch && addrMatch[1]) {
-                                                                                                      deliveryAddress = addrMatch[1].trim();
-                                                                                                  }
-
-                                                                                                  // CONTROLLO DI FERRO: Se mancano i prodotti o manca l'indirizzo, NON creiamo ordini finti!
-                                                                                                  if (orderItemsList.length === 0) {
-                                                                                                      finalReply = `Quale prodotto vorresti ordinare di preciso? Dimmi pure il nome così ti preparo il riepilogo con il totale esatto! 🧴`;
-                                                                                                  } else if (!deliveryAddress) {
-                                                                                                      finalReply = `Perfetto! Per completare l'ordine con pagamento in contanti alla consegna, mi diresti l'indirizzo esatto (via, civico e città) a cui dobbiamo spedire? 🚚`;
-                                                                                                  } else {
-                                                                                                      const zipMatch = deliveryAddress.match(/\b(00\d{3}|\d{5})\b/);
-                                                                                                      if (zipMatch) deliveryZip = zipMatch[1];
-
-                                                                                                      const finalTotal = subtotal + shippingCost;
-
-                                                                                                      const orderPayload = {
-                                                                                                          action: 'save_whatsapp_product_order',
-                                                                                                          vendorId: vendorId,
-                                                                                                          customerName: displayName || "Cliente WhatsApp",
-                                                                                                          customerPhone: cleanClientPhone,
-                                                                                                          deliveryAddress: deliveryAddress,
-                                                                                                          deliveryZip: deliveryZip || "00000",
-                                                                                                          deliveryCity: deliveryCity || "",
-                                                                                                          orderNotes: 'Ordinato tramite WhatsApp AI - Pagamento in contanti alla consegna',
-                                                                                                          totalPrice: finalTotal,
-                                                                                                          shippingCost: shippingCost,
-                                                                                                          items: orderItemsList
-                                                                                                      };
-
-                                                                                                      const orderRes = await fetch(API_BASE_URL, {
-                                                                                                          method: 'POST',
-                                                                                                          headers: { 'Content-Type': 'application/json' },
-                                                                                                          body: JSON.stringify(orderPayload)
-                                                                                                      });
-
-                                                                                                      if (orderRes.ok) {
-                                                                                                          const orderJson = await orderRes.json();
-                                                                                                          console.log(`[AutoPilot] 🔔 ORDINE REGISTRATO IN DASHBOARD! ID: ${orderJson.orderId}`);
-                                                                                                          const itemsListText = orderItemsList.map(it => `• **${it.quantity}x ${it.productName}** (${(it.price * it.quantity).toFixed(2)} €)`).join('\n');
-                                                                                                          finalReply = `Grazie ${displayName || ''}! ✅ Il tuo ordine è confermato ed è stato registrato in salone!\n\n📦 **Articoli:**\n${itemsListText}\n\n📍 Consegna a: *${deliveryAddress}*\n💶 **Totale da pagare al Rider:** ${finalTotal.toFixed(2)} € (inclusi 5 € di consegna in contanti).\n\nTi contatteremo per la consegna! A presto! 🚚✨`;
-                                                                                                      }
-                                                                                                  }
-                                                                                              } catch (ordErr) {
-                                                                                                  console.error("[AutoPilot] ⚠️ Errore creazione ordine prodotto:", ordErr);
-                                                                                              }
-                                                                                          }
+                                                                                                                              // 🛍️ SALVATAGGIO REALE ORDINE PRODOTTI IN DASHBOARD (CALCOLO CHECKOUT VELLETRI)
+                                                                                                                              // =========================================================================
+                                                                                                                              const wantsProduct = (
+                                                                                                                                  extracted.intent === "order_product" ||
+                                                                                                                                  (extracted.intent === "confirm_booking" && !extracted.time) ||
+                                                                                                                                  messageText.toLowerCase().includes("compra") ||
+                                                                                                                                  messageText.toLowerCase().includes("ordinare") ||
+                                                                                                                                  messageText.toLowerCase().includes("ordino") ||
+                                                                                                                                  messageText.toLowerCase().includes("prendo") ||
+                                                                                                                                  messageText.toLowerCase().includes("spedisc") ||
+                                                                                                                                  messageText.toLowerCase().includes("portamelo") ||
+                                                                                                                                  (lastAssistantMsg && lastAssistantMsg.toLowerCase().includes("spedire") && (messageText.toLowerCase().includes("via") || messageText.toLowerCase().includes("corso") || messageText.toLowerCase().includes("piazza") || messageText.toLowerCase().includes("viale")))
+                                                                                                                              );
+                                                                                          
+                                                                                                                              if (wantsProduct && !extracted.time) {
+                                                                                                                                  try {
+                                                                                                                                      console.log(`[AutoPilot] 📦 Rilevata richiesta prodotti da ${cleanClientPhone}! Analisi carrello...`);
+                                                                                          
+                                                                                                                                      const fullConversationText = (historyText + " " + messageText).toLowerCase();
+                                                                                                                                      let orderItemsList = [];
+                                                                                                                                      let subtotal = 0;
+                                                                                          
+                                                                                                                                      if (contextData.products && contextData.products.length > 0) {
+                                                                                                                                          contextData.products.forEach(prod => {
+                                                                                                                                              const prodNameLower = prod.name.toLowerCase();
+                                                                                                                                              const cleanName = prodNameLower.split('(')[0].trim();
+                                                                                                                                              if (fullConversationText.includes(prodNameLower) || (cleanName.length > 3 && fullConversationText.includes(cleanName))) {
+                                                                                                                                                  let itemQty = 1;
+                                                                                                                                                  const qtyMatch = fullConversationText.match(/(\d+)\s*(?:unità|pezzi|confezioni|pz|x|boccette)/i);
+                                                                                                                                                  if (qtyMatch && qtyMatch[1]) {
+                                                                                                                                                      itemQty = parseInt(qtyMatch[1], 10) || 1;
+                                                                                                                                                  }
+                                                                                          
+                                                                                                                                                  const itemPrice = parseFloat(prod.price) || 0;
+                                                                                                                                                  orderItemsList.push({
+                                                                                                                                                      docId: prod.id,
+                                                                                                                                                      productId: prod.id,
+                                                                                                                                                      productName: prod.name,
+                                                                                                                                                      name: prod.name,
+                                                                                                                                                      quantity: itemQty,
+                                                                                                                                                      price: itemPrice,
+                                                                                                                                                      type: 'offers'
+                                                                                                                                                  });
+                                                                                                                                                  subtotal += (itemPrice * itemQty);
+                                                                                                                                              }
+                                                                                                                                          });
+                                                                                                                                      }
+                                                                                          
+                                                                                                                                      // 🛵 CALCOLO SPEDIZIONE REALE DEL TUO CHECKOUT: 2,99€ (+0,20€ per ogni pezzo in più)
+                                                                                                                                      let totalItemsCount = 0;
+                                                                                                                                      orderItemsList.forEach(it => { totalItemsCount += (it.quantity || 1); });
+                                                                                                                                      const baseShipping = 2.99;
+                                                                                                                                      const extraItemCost = 0.20;
+                                                                                                                                      const shippingCost = totalItemsCount > 1 ? (baseShipping + ((totalItemsCount - 1) * extraItemCost)) : baseShipping;
+                                                                                          
+                                                                                                                                      // Estrazione Indirizzo Reale (rubrica o messaggio del cliente)
+                                                                                                                                      let deliveryAddress = savedClientAddress || "";
+                                                                                                                                      
+                                                                                                                                      if (!deliveryAddress) {
+                                                                                                                                          const addrRegex = /(?:via|viale|corso|piazza|largo|strada)\s+[^,\n.]+(?:,?\s*\d+)?(?:\s*,\s*[^,\n.]+)?/i;
+                                                                                                                                          const matchInUserMsg = messageText.match(addrRegex);
+                                                                                                                                          if (matchInUserMsg) {
+                                                                                                                                              deliveryAddress = matchInUserMsg[0].trim();
+                                                                                                                                          }
+                                                                                                                                      }
+                                                                                          
+                                                                                                                                      // Se il prodotto c'è e c'è l'indirizzo -> SALVA NELLA DASHBOARD!
+                                                                                                                                      if (orderItemsList.length > 0 && deliveryAddress) {
+                                                                                                                                          let deliveryZip = "00049";
+                                                                                                                                          let deliveryCity = "Velletri";
+                                                                                                                                          const zipMatch = deliveryAddress.match(/\b(00\d{3}|\d{5})\b/);
+                                                                                                                                          if (zipMatch) deliveryZip = zipMatch[1];
+                                                                                          
+                                                                                                                                          const finalTotal = subtotal + shippingCost;
+                                                                                          
+                                                                                                                                          const orderPayload = {
+                                                                                                                                              action: 'save_whatsapp_product_order',
+                                                                                                                                              vendorId: vendorId,
+                                                                                                                                              customerName: displayName || "Cliente WhatsApp",
+                                                                                                                                              customerPhone: cleanClientPhone,
+                                                                                                                                              deliveryAddress: deliveryAddress,
+                                                                                                                                              deliveryZip: deliveryZip,
+                                                                                                                                              deliveryCity: deliveryCity,
+                                                                                                                                              orderNotes: 'Ordinato tramite WhatsApp AI - Pagamento in contanti alla consegna',
+                                                                                                                                              subtotal: subtotal,
+                                                                                                                                              totalPrice: finalTotal,
+                                                                                                                                              shippingCost: shippingCost,
+                                                                                                                                              items: orderItemsList
+                                                                                                                                          };
+                                                                                          
+                                                                                                                                          const orderRes = await fetch(API_BASE_URL, {
+                                                                                                                                              method: 'POST',
+                                                                                                                                              headers: { 'Content-Type': 'application/json' },
+                                                                                                                                              body: JSON.stringify(orderPayload)
+                                                                                                                                          });
+                                                                                          
+                                                                                                                                          if (orderRes.ok) {
+                                                                                                                                              const orderJson = await orderRes.json();
+                                                                                                                                              console.log(`[AutoPilot] 🔔 ORDINE SALVATO IN DASHBOARD CON SUCCESSO! ID: ${orderJson.orderId}`);
+                                                                                                                                              const itemsListText = orderItemsList.map(it => `• **${it.quantity}x ${it.productName}** (${(it.price * it.quantity).toFixed(2)} €)`).join('\n');
+                                                                                                                                              finalReply = `Perfetto ${displayName || ''}! ✅ Il tuo ordine è confermato ed è stato registrato in salone!\n\n📦 **Articoli:**\n${itemsListText}\n\n📍 Consegna a: *${deliveryAddress}*\n🛵 **Consegna Rapida:** ${shippingCost.toFixed(2)} €\n💶 **Totale da pagare al Rider:** ${finalTotal.toFixed(2)} € (in contanti alla consegna).\n\nAbbiamo passato l'ordine alla nostra postazione! A presto! 🚚✨`;
+                                                                                                                                          }
+                                                                                                                                      } else if (orderItemsList.length > 0 && !deliveryAddress) {
+                                                                                                                                          // Manca l'indirizzo: chiedilo spiegando il costo reale di 2,99€
+                                                                                                                                          finalReply = `Perfetto! Abbiamo disponibilità per i tuoi prodotti. Per la consegna rapida a domicilio a Velletri (a partire da 2,99 € con pagamento in contanti al rider), a quale indirizzo dobbiamo consegnare? 🛵`;
+                                                                                                                                      }
+                                                                                                                                  } catch (ordErr) {
+                                                                                                                                      console.error("[AutoPilot] ⚠️ Errore salvataggio ordine prodotto:", ordErr);
+                                                                                                                                  }
+                                                                                                                              }
 
                                                                                           // =========================================================================
                                                                                           // 3. GESTIONE APPUNTAMENTO (CON CONTROLLO AMBIGUITÀ ZERO ERRORI)
