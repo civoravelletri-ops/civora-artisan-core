@@ -41,7 +41,7 @@ module.exports = async function handler(req, res) {
             const API_BASE_URL = 'https://localmente-api.vercel.app/api/get-available-slots';
             const GATEWAY_BASE_URL = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
 
-            // 1. RECUPERO ENCICLOPEDIA SALONE DAL MOTORE CENTRALE
+            // 1. RECUPERO CONTESTO SALONE DAL MOTORE CENTRALE
             let contextData = {
                 storeInfo: { 
                     name: 'Il nostro salone', 
@@ -96,14 +96,10 @@ module.exports = async function handler(req, res) {
             function isSalonClosedOnDate(dateStr) {
                 const dObj = new Date(dateStr + "T12:00:00Z");
                 const dayShort = daysMap[dObj.getUTCDay()];
-
-                // Controllo festività o orari speciali
                 const specialMatch = specialHoursList.find(s => s.startDate <= dateStr && s.endDate >= dateStr);
                 if (specialMatch) {
                     return specialMatch.isClosedAllDay === true;
                 }
-
-                // Controllo calendario settimanale
                 if (hoursSource.length > 0) {
                     const dayConfig = hoursSource.find(d => d.day === dayShort);
                     if (dayConfig && (dayConfig.isOpen === false || !dayConfig.slots || dayConfig.slots.length === 0)) {
@@ -113,7 +109,6 @@ module.exports = async function handler(req, res) {
                 return false;
             }
 
-            // Trova il primo giorno successivo in cui il salone è APERTO
             function getNextOpenDate(fromDateStr) {
                 const baseDate = new Date(fromDateStr + "T12:00:00Z");
                 for (let i = 1; i <= 7; i++) {
@@ -202,6 +197,8 @@ module.exports = async function handler(req, res) {
 
                 if (foundItem && foundItem[1]) {
                     const itemName = foundItem[1].trim();
+                    console.log(`[AutoPilot] 🎯 Selezione numerica intercettata: ${chosenNum} -> "${itemName}"`);
+
                     const matchedServ = contextData.services.find(s => s.name.toLowerCase() === itemName.toLowerCase() || s.name.toLowerCase().includes(itemName.toLowerCase()));
                     const matchedProd = contextData.products && contextData.products.find(p => p.name.toLowerCase() === itemName.toLowerCase() || p.name.toLowerCase().includes(itemName.toLowerCase()));
 
@@ -210,7 +207,7 @@ module.exports = async function handler(req, res) {
                 }
             }
 
-            // PROMPT DEL DIRETTORE: MASSIMA CONCISIONE E INTELLIGENZA UMANA
+            // PROMPT DEL DIRETTORE
             const autoPilotSystemPrompt = `Sei l'assistente WhatsApp del salone "${salonName}".
 Oggi è ${todayReadable} (${todayRome}), ore ${messageTime}.
 Il prossimo giorno di apertura è ${nextOpen.readable} (${nextOpen.dateStr}).
@@ -233,14 +230,12 @@ ${productsListText}
 ${historyText}
 
 🛑 REGOLE RIGIDE DI CONVERSAZIONE (MAX 2 RIGHE):
-1. COMPRENDI SLANG E DIALETTO: Capisci espressioni colloquiali ("al volo", "me poi prenota", "wee bella", "un buco"). Rispondi con calore, naturalezza e simpatia, ma chiaro.
+1. COMPRENDI SLANG E DIALETTO: Capisci espressioni colloquiali ("al volo", "me poi prenota", "wee bella", "un buco"). Rispondi con calore e naturalezza.
 2. BREVITÀ: Rispondi in MASSIMO 2 o 3 righe corte.
 3. DOMANDE DI IDENTITÀ (es. "siete voi Mr Barber?", "chi sei?"):
    - Conferma subito: "Ciao! 👋 Sì, esattamente! Sei in contatto con ${salonName}. Come possiamo aiutarti? ✂️"
 4. DOMANDE MULTIPLE (es. "dove siete, in cosa siete specializzati, avete posto?"):
    - Rispondi in un solo messaggio sintetico toccando tutti i punti.
-5. DOMANDE SU GIORNI DI CHIUSURA (es. "aprite domenica?", "siete aperti lunedì?"):
-   - Spiega con precisione gli orari o se quel giorno siete chiusi per riposo.
 
 Rispondi ESCLUSIVAMENTE con questo JSON:
 {
@@ -339,25 +334,32 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
                 }
             }
 
-            let finalReply = extracted.replyText;
+            // 🧹 Puliamo la risposta togliendo eventuali spazi vuoti che causavano l'errore del Ciao!
+            let finalReply = (extracted.replyText || "").trim();
             const displayName = extracted.customerName || recognizedClientName || '';
             const lowerMsg = messageText.toLowerCase();
+            const cleanText = lowerMsg.replace(/[^\w\s]/gi, '').trim();
 
             // =========================================================================
             // 🎯 SMISTAMENTO NATURALE DEI MESSAGGI REALI
             // =========================================================================
 
+            // 0. SALUTI PURI E SEMPLICI ("Ciao", "Buongiorno", "Salve")
+            const isJustGreeting = cleanText === "ciao" || cleanText === "buongiorno" || cleanText === "buonasera" || cleanText === "salve" || cleanText === "hey" || cleanText === "ehi";
+
             // 1. IDENTITÀ
             const asksIdentity = (lowerMsg.includes("siete voi") || lowerMsg.includes("chi sei") || lowerMsg.includes("è il salone") || lowerMsg.includes("parlo con") || lowerMsg.includes("ho preso il numero"));
 
-            // 2. ORARI & INDIRIZZO & PARCHEGGIO
+            // 2. ORARI E INFO
             const asksWhereOrWhen = (lowerMsg.includes("dove siete") || lowerMsg.includes("indirizzo") || lowerMsg.includes("a che ora") || lowerMsg.includes("aperti") || lowerMsg.includes("parcheggi") || lowerMsg.includes("specializzat"));
 
             // 3. PRODOTTI
             const asksProducts = lowerMsg.includes("prodott") || lowerMsg.includes("compra") || lowerMsg.includes("ordin") || lowerMsg.includes("cera") || lowerMsg.includes("shampoo");
 
-            // SE IL CLIENTE FA DOMANDE A RAFFICA O CHIEDE INFORMAZIONI
-            if (asksIdentity && !lowerMsg.includes("prenot") && !lowerMsg.includes("tagli")) {
+            if (isJustGreeting) {
+                finalReply = `Ciao ${displayName ? displayName + ' ' : ''}! 👋 Benvenuto da ${salonName}. Come possiamo aiutarti oggi? (Vuoi prenotare un appuntamento o ti servono info?) ✂️`;
+            }
+            else if (asksIdentity && !lowerMsg.includes("prenot") && !lowerMsg.includes("tagli")) {
                 finalReply = `Ciao! 👋 Sì, esattamente! Sei in contatto con *${salonName}*. Come possiamo aiutarti oggi? ✂️`;
             }
             else if (asksWhereOrWhen && !lowerMsg.includes("prenot") && !lowerMsg.includes("posto") && !lowerMsg.includes("tagli")) {
@@ -369,7 +371,6 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
 
                 finalReply = infoParts.length > 0 ? infoParts.join('\n') + `\nTi serviva fissare un appuntamento? ✂️` : finalReply;
             }
-            // SE IL CLIENTE CHIEDE PRODOTTI
             else if (asksProducts && !extracted.time) {
                 if (lowerMsg.includes("vendi") || lowerMsg.includes("quali") || lowerMsg.includes("avete")) {
                     const prods = (contextData.products || []).slice(0, 3).map((p, idx) => `${idx + 1}️⃣ *${p.name}* (${p.price}€)`).join('\n');
@@ -387,7 +388,7 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
                 }
             }
             // =========================================================================
-            // ✂️ GESTIONE APPUNTAMENTO (CON DIALETTO E GIORNO APERTO AUTOMATICO)
+            // ✂️ GESTIONE APPUNTAMENTO
             // =========================================================================
             else {
                 let matchedService = null;
@@ -401,29 +402,24 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
 
                 const isGenericQuestion = (lowerMsg.includes("prenotare") || lowerMsg.includes("posto") || lowerMsg.includes("appuntamento") || lowerMsg.includes("c'è posto") || lowerMsg.includes("ce posto")) && !matchedService && !lowerMsg.includes("tagli") && !lowerMsg.includes("barb") && !lowerMsg.includes("color") && !lowerMsg.includes("al volo");
 
-                // Se chiede genericamente "c'è posto?", chiedi che servizio vuole senza vomitare 40 cose
                 if (isGenericQuestion) {
-                    finalReply = `Ciao! 👋 Per oggi abbiamo ancora disponibilità. Cosa vorresti fare? (Es. *Taglio*, *Barba*, *Colore* o *Trattamenti*) ✂️`;
+                    finalReply = `Ciao ${displayName ? displayName + ' ' : ''}! 👋 Certamente, abbiamo disponibilità. Cosa vorresti fare? (Es. *Taglio*, *Barba* o *Trattamenti*) ✂️`;
                 }
-                // Se chiede taglio (anche in slang: "un taglio al volo"), mostra il menu numerato dei 4 tagli principali
                 else if (!matchedService && (lowerMsg.includes("tagli") || lowerMsg.includes("capell") || lowerMsg.includes("al volo") || extracted.intent === "clarify_service")) {
                     const cuts = getMatchingServicesForQuery(messageText, contextData.services);
                     const emojiNums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"];
                     const menu = cuts.map((s, idx) => `${emojiNums[idx]} *${s.name}* (${s.price}€)`).join('\n');
-                    finalReply = `Per i capelli abbiamo queste opzioni:\n\n${menu}\n\nRispondi con il *numero* (es. 1) o con il nome! ✂️`;
+                    finalReply = `Per i capelli abbiamo queste opzioni:\n\n${menu}\n\nRispondi con il *numero* (es. 1 o 2) o con il nome! ✂️`;
                 }
-                // Servizio identificato -> Controllo orari reale con anti-loop
                 else if (matchedService) {
                     let targetDate = extracted.date || todayRome;
                     
-                    // Se l'assistente aveva detto che oggi era pieno e il cliente dice "sì" o "ok", passa al primo giorno aperto!
                     if ((lowerMsg === "si" || lowerMsg === "sì" || lowerMsg === "ok") && lastAssistantMsg && (lastAssistantMsg.includes("completo") || lastAssistantMsg.includes("pieni") || lastAssistantMsg.includes("chiusi"))) {
                         targetDate = nextOpen.dateStr;
                     }
 
-                    // Se la data richiesta cade in un giorno di chiusura del salone
                     if (isSalonClosedOnDate(targetDate)) {
-                        finalReply = `Il salone è chiuso in quella data per riposo settimanale! 🛋️ Riapriamo *${nextOpen.readable}*: vuoi che ti controlli gli orari per quel giorno? ✂️`;
+                        finalReply = `Il salone è chiuso in quella data per riposo! 🛋️ Riapriamo *${nextOpen.readable}*: vuoi che ti controlli gli orari per quel giorno? ✂️`;
                     } else {
                         let availableSlots = [];
                         try {
@@ -443,7 +439,6 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
                             }
                         } catch (e) {}
 
-                        // CASO A: IL CLIENTE CONFERMA L'ORARIO
                         if (extracted.intent === "confirm_booking" && extracted.time) {
                             try {
                                 const durationMins = matchedService.duration || 30;
@@ -459,8 +454,8 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
                                 const bookPayload = {
                                     action: 'save_service_booking',
                                     vendorId: vendorId,
-                                    customerName: displayName || ("Cliente (" + senderPhone.slice(-4) + ")"),
-                                    customerPhone: senderPhone,
+                                    customerName: displayName || ("Cliente (" + cleanClientPhone.slice(-4) + ")"),
+                                    customerPhone: cleanClientPhone,
                                     serviceId: matchedService.id,
                                     bookedServiceName: matchedService.name,
                                     bookedServicePrice: matchedService.price || 0,
@@ -489,14 +484,12 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
                                 finalReply = `Ho preso nota per le ${extracted.time}, ti confermo tutto a breve!`;
                             }
                         }
-                        // CASO B: CHIEDE GLI ORARI (SE OGGI È PIENO, PROPONE IL PRIMO GIORNO APERTO!)
                         else {
                             if (availableSlots.length > 0) {
                                 const alts = availableSlots.slice(0, 4).join(', ');
                                 const alVoloText = lowerMsg.includes("al volo") ? `Al volo per oggi ho liberi: *${alts}*. Ti blocco il primo? ✂️` : `Perfetto per *${matchedService.name}*! Ho liberi questi orari: *${alts}*. Quale preferisci? ✂️`;
                                 finalReply = alVoloText;
                             } else {
-                                // OGGI È PIENO: CONTROLLA AUTOMATICAMENTE IL PROSSIMO GIORNO APERTO!
                                 let nextDaySlots = [];
                                 try {
                                     const nextRes = await fetch(API_BASE_URL, {
@@ -519,10 +512,15 @@ Rispondi ESCLUSIVAMENTE con questo JSON:
                                     const nextAlts = nextDaySlots.slice(0, 4).join(', ');
                                     finalReply = `Per oggi siamo al completo per *${matchedService.name}*!\nPer *${nextOpen.readable}* ho liberi: *${nextAlts}*. Ti andrebbe bene uno di questi? ✂️`;
                                 } else {
-                                    finalReply = `Per oggi siamo al completo per *${matchedService.name}*. Per quale giorno preferisci che ti controlli? ✂️`;
+                                    finalReply = `Siamo al completo per *${matchedService.name}*. Per quale giorno preferisci che ti controlli? ✂️`;
                                 }
                             }
                         }
+                    }
+                } else {
+                    // SE L'UTENTE DICE COSE A CASO E NON SCATTANO LE ALTRE REGOLE
+                    if (!finalReply) {
+                        finalReply = `Scusami, non ho capito bene! Puoi dirmi cosa vorresti fare? (Es. Prenotare un *Taglio*, *Barba* o avere info sulle *Promozioni*) ✂️`;
                     }
                 }
             }
