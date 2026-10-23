@@ -143,6 +143,34 @@ module.exports = async function handler(req, res) {
                     }).join('\n') + "\n";
             }
 
+            // 🔢 RADAR INTELLIGENTE PER NUMERI (es: cliente risponde "2" o "il 2")
+            let numberSelectedServiceName = null;
+            let numberSelectedProductName = null;
+            const numberMatch = messageText.match(/\b(?:numero|il|scelgo|prendo|voglio|faccio)?\s*([1-9]|10)\b/i);
+
+            if (numberMatch && lastAssistantMsg) {
+                const chosenNum = parseInt(numberMatch[1], 10);
+                const emojiNum = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"][chosenNum - 1];
+                
+                // Cerca nel messaggio precedente la riga con quel numero (es: "2️⃣ *Taglio & Styling*")
+                const regexNumberItem = new RegExp(`(?:${emojiNum}|${chosenNum}\\.|${chosenNum}\\))\\s*\\*?([^*\\n(]+)\\*?`, 'i');
+                const foundItem = lastAssistantMsg.match(regexNumberItem);
+
+                if (foundItem && foundItem[1]) {
+                    const itemName = foundItem[1].trim();
+                    console.log(`[AutoPilot] 🎯 Rilevata selezione numerica: ${chosenNum} -> "${itemName}"`);
+
+                    const matchedServ = contextData.services.find(s => s.name.toLowerCase() === itemName.toLowerCase() || s.name.toLowerCase().includes(itemName.toLowerCase()));
+                    const matchedProd = contextData.products && contextData.products.find(p => p.name.toLowerCase() === itemName.toLowerCase() || p.name.toLowerCase().includes(itemName.toLowerCase()));
+
+                    if (matchedServ) {
+                        numberSelectedServiceName = matchedServ.name;
+                    } else if (matchedProd) {
+                        numberSelectedProductName = matchedProd.name;
+                    }
+                }
+            }
+
             // PROMPT DEL DIRETTORE: MASSIMA CONCISIONE E VELOCITÀ WHATSAPP
             const autoPilotSystemPrompt = `Sei l'assistente virtuale WhatsApp del salone "${salonName}".
 Oggi è ${todayReadable} (${todayRome}).
@@ -161,27 +189,24 @@ ${productsListText}
 
 ${historyText}
 
-🛑 REGOLE FERREE DI SCRITTURA (STILE WHATSAPP REALE):
-1. BREVITÀ ESTREMA: Rispondi in MASSIMO 2 o 3 righe corte. Niente poemi, niente frasi lunghe. Diretto e veloce come un vero negoziante al cellulare.
+🛑 REGOLE DI SCRITTURA (STILE WHATSAPP):
+1. BREVITÀ: Rispondi in MASSIMO 2 o 3 righe corte. Diretto e veloce.
 2. SALUTI:
    ${hasRecentChatHistory 
-     ? "- LA CONVERSAZIONE È GIÀ AVVIATA: NON DIRE MAI 'Ciao', 'Buongiorno' o 'Ciao [Nome]' all'inizio del messaggio! Rispondi direttamente alla domanda."
-     : `- È IL PRIMO MESSAGGIO: Saluta brevemente con emoji.${recognizedClientName ? ` "Ciao ${recognizedClientName}! 👋"` : ' "Ciao! 👋"'}`
+     ? "- LA CONVERSAZIONE È GIÀ AVVIATA: NON DIRE MAI 'Ciao', 'Buongiorno' o 'Ciao [Nome]' all'inizio del messaggio!"
+     : `- È IL PRIMO MESSAGGIO: Saluta con cordialità.${recognizedClientName ? ` "Ciao ${recognizedClientName}! 👋"` : ' "Ciao! 👋"'}`
    }
-3. RICHIESTE SERVIZI GENERICHE:
-   - Se il cliente chiede genericamente un servizio (es. "tagliare i capelli", "fare il colore") e ci sono più opzioni nel listino:
-     Usa intent "clarify_service". Elenca SOLO i servizi pertinenti con il prezzo in modo compatto (es. "Abbiamo: • Taglio Classico (20€) • Taglio & Styling (25€). Quale preferisci? ✂️").
-   - Se il cliente è noto e ha fatto "${lastClientService || ''}", chiedigli brevemente se vuole fare il solito.
-   - Se specifica il servizio esatto (es. "Taglio Uomo"), allora l'intent è "ask_availability" o "confirm_booking".
+3. MENU NUMERATI (1️⃣, 2️⃣, 3️⃣):
+   - Se il cliente ha risposto con un numero (es. '1', 'il 2') riferendosi a un elenco precedente, imposta serviceName o productOrdered con il nome esatto e conferma SEMPRE citando per esteso il nome scelto (es: "Perfetto! *Taglio & Styling* (25€). Per che ora preferisci? ✂️").
 4. ORDINI PRODOTTI:
-   - Se chiede di comprare un prodotto fisico: intent "order_product".
+   - Se chiede di comprare un prodotto: intent "order_product".
    - Se MANCA l'indirizzo: chiedi semplicemente via, civico e città per la consegna rapida (+2,99€ in contanti). NON dire che l'ordine è confermato finché non hai l'indirizzo!
 
 INTENTI:
 - "order_product": vuole comprare prodotti fisici o ha dato l'indirizzo per riceverli.
-- "clarify_service": richiesta di servizio generica da chiarire mostrando le opzioni pertinenti.
+- "clarify_service": richiesta di servizio generica da chiarire mostrando le opzioni numerate.
 - "ask_availability": chiede orari o date per un servizio preciso.
-- "confirm_booking": vuole bloccare il posto ("Sì", "Ok", "Confermo", "Va bene alle 16").
+- "confirm_booking": vuole bloccare il posto concordato ("Sì", "Ok", "Confermo", "Va bene alle 16").
 - "info_question": info generali brevi.
 - "general_greeting": saluta e basta.
 
@@ -189,12 +214,12 @@ Rispondi ESCLUSIVAMENTE con questo JSON compatto:
 {
  "intent": "ask_availability",
  "customerName": "${recognizedClientName}",
- "productOrdered": "",
+ "productOrdered": "${numberSelectedProductName || ''}",
  "deliveryAddress": "",
  "date": "${todayRome}",
  "time": "",
  "serviceId": "",
- "serviceName": "",
+ "serviceName": "${numberSelectedServiceName || ''}",
  "replyText": "risposta brevissima di 2 righe per WhatsApp"
 }`;
 
@@ -204,14 +229,14 @@ Rispondi ESCLUSIVAMENTE con questo JSON compatto:
             ];
 
             let extracted = {
-                intent: "general_greeting",
+                intent: numberSelectedServiceName ? "ask_availability" : (numberSelectedProductName ? "order_product" : "general_greeting"),
                 customerName: recognizedClientName,
-                productOrdered: "",
+                productOrdered: numberSelectedProductName || "",
                 deliveryAddress: "",
                 date: todayRome,
                 time: "",
                 serviceId: "",
-                serviceName: "",
+                serviceName: numberSelectedServiceName || "",
                 replyText: ""
             };
 
@@ -252,6 +277,17 @@ Rispondi ESCLUSIVAMENTE con questo JSON compatto:
 
                         const parsed = JSON.parse(cleanJson);
                         extracted = { ...extracted, ...parsed };
+
+                        // Se abbiamo intercettato il numero manualmente, prevale per sicurezza
+                        if (numberSelectedServiceName && !extracted.serviceName) {
+                            extracted.serviceName = numberSelectedServiceName;
+                            extracted.intent = "ask_availability";
+                        }
+                        if (numberSelectedProductName && !extracted.productOrdered) {
+                            extracted.productOrdered = numberSelectedProductName;
+                            extracted.intent = "order_product";
+                        }
+
                         console.log(`[AutoPilot] ✅ Risposta (${modelId}) [Intent: ${extracted.intent}]:`, extracted.replyText);
                         aiSuccess = true;
                         break;
@@ -309,6 +345,7 @@ Rispondi ESCLUSIVAMENTE con questo JSON compatto:
             // =========================================================================
             const wantsProduct = (
                 extracted.intent === "order_product" ||
+                numberSelectedProductName ||
                 (extracted.intent === "confirm_booking" && !extracted.time) ||
                 messageText.toLowerCase().includes("compra") ||
                 messageText.toLowerCase().includes("ordinare") ||
@@ -325,7 +362,7 @@ Rispondi ESCLUSIVAMENTE con questo JSON compatto:
                 try {
                     console.log(`[AutoPilot] 📦 Rilevata richiesta prodotti da ${cleanClientPhone}! Analisi carrello...`);
 
-                    const fullConversationText = (historyText + " " + messageText).toLowerCase();
+                    const fullConversationText = (historyText + " " + messageText + " " + (extracted.productOrdered || "")).toLowerCase();
                     let orderItemsList = [];
                     let subtotal = 0;
 
@@ -411,7 +448,8 @@ Rispondi ESCLUSIVAMENTE con questo JSON compatto:
                             productOrderProcessed = true;
                         }
                     } else if (orderItemsList.length > 0 && !deliveryAddress) {
-                        finalReply = `Perfetto! Per la consegna a domicilio a Velletri (2,99€ con pagamento in contanti al rider), a quale indirizzo dobbiamo consegnare? 🛵`;
+                        const prodChosenName = orderItemsList[0].productName;
+                        finalReply = `Ottima scelta per *${prodChosenName}*! Per la consegna a domicilio a Velletri (2,99€ con pagamento in contanti al rider), a quale indirizzo dobbiamo consegnare? 🛵`;
                         productOrderProcessed = true;
                     }
                 } catch (ordErr) {
@@ -420,12 +458,16 @@ Rispondi ESCLUSIVAMENTE con questo JSON compatto:
             }
 
             // =========================================================
-            // ✂️ 2. GESTIONE APPUNTAMENTO (FILTRO INTELLIGENTE SERVIZI)
+            // ✂️ 2. GESTIONE APPUNTAMENTO (MENU NUMERATO 1️⃣ 2️⃣ 3️⃣)
             // =========================================================
             if (!productOrderProcessed) {
                 let matchedService = null;
 
-                if (extracted.serviceId) {
+                if (numberSelectedServiceName) {
+                    matchedService = contextData.services.find(s => s.name === numberSelectedServiceName) || null;
+                }
+
+                if (!matchedService && extracted.serviceId) {
                     matchedService = contextData.services.find(s => s.id === extracted.serviceId) || null;
                 }
 
@@ -436,22 +478,27 @@ Rispondi ESCLUSIVAMENTE con questo JSON compatto:
                         || null;
                 }
 
-                // Cerca corrispondenza diretta nel testo del cliente (es. se ha scritto "Taglio & Styling" o "Taglio Classico")
+                // Cerca corrispondenza diretta nel testo del cliente
                 if (!matchedService) {
                     const msgLower = messageText.toLowerCase();
                     const sortedServices = [...contextData.services].sort((a, b) => (b.name || '').length - (a.name || '').length);
                     matchedService = sortedServices.find(s => msgLower.includes((s.name || '').toLowerCase())) || null;
                 }
 
-                // Se la richiesta è generica o il servizio non è specificato in modo univoco
+                // Se la richiesta è generica o dobbiamo mostrare il MENU NUMERATO
                 if (extracted.intent === "clarify_service" || (!matchedService && (extracted.intent === "ask_availability" || extracted.intent === "confirm_booking"))) {
-                    console.log(`[AutoPilot] 🛡️ Richiesta generica. Filtro i servizi pertinenti per: "${messageText}"`);
+                    console.log(`[AutoPilot] 🛡️ Generazione Menu Numerato per: "${messageText}"`);
 
-                    // 🎯 Trova TUTTI i servizi pertinenti (es. tutti i tagli veri del salone!)
                     const relevantServices = getMatchingServicesForQuery(messageText, contextData.services);
-                    const opzioniServizi = relevantServices.map(s => `• *${s.name}* (${s.price}€)`).join('\n');
+                    const emojiNums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
 
-                    finalReply = `Per i capelli abbiamo queste opzioni:\n${opzioniServizi}\n\nQuale preferisci prenotare? ✂️`;
+                    // Costruisce il menu numerato bellissimo
+                    const menuNumerato = relevantServices.map((s, idx) => {
+                        const icon = emojiNums[idx] || `${idx + 1}.`;
+                        return `${icon} *${s.name}* (${s.price}€)`;
+                    }).join('\n');
+
+                    finalReply = `Per i capelli abbiamo queste opzioni:\n\n${menuNumerato}\n\nRispondi con il *numero* (es. 1 o 2) o con il nome! ✂️`;
                 } 
                 else if (matchedService && (extracted.intent === "ask_availability" || extracted.intent === "confirm_booking")) {
                     const targetDate = extracted.date || todayRome;
@@ -531,12 +578,12 @@ Rispondi ESCLUSIVAMENTE con questo JSON compatto:
                             finalReply = `Ho preso nota della tua richiesta per le ${extracted.time}, ti confermo tutto a brevissimo!`;
                         }
                     }
-                    // CASO B: IL CLIENTE CHIEDE DISPONIBILITÀ
+                    // CASO B: IL CLIENTE CHIEDE DISPONIBILITÀ (O HA SCELTO UN NUMERO)
                     else if (extracted.intent === "ask_availability") {
                         if (extracted.time) {
                             const isTimeFree = availableSlots.includes(extracted.time);
                             if (isTimeFree) {
-                                finalReply = `Sì! Alle *${extracted.time}* del ${dateReadable} siamo liberi per *${matchedService.name}*. Ti blocco il posto? ✂️`;
+                                finalReply = `Perfetto! Per *${matchedService.name}* alle *${extracted.time}* del ${dateReadable} siamo liberi. Ti blocco il posto? ✂️`;
                             } else {
                                 if (availableSlots.length > 0) {
                                     const alternatives = availableSlots.slice(0, 3).join(', ');
@@ -548,9 +595,9 @@ Rispondi ESCLUSIVAMENTE con questo JSON compatto:
                         } else {
                             if (availableSlots.length > 0) {
                                 const alternatives = availableSlots.slice(0, 4).join(', ');
-                                finalReply = `Per *${matchedService.name}* (${dateReadable}) ho liberi questi orari: *${alternatives}*. Quale preferisci? ✂️`;
+                                finalReply = `Perfetto per *${matchedService.name}*! Per il ${dateReadable} ho liberi: *${alternatives}*. Quale orario preferisci? ✂️`;
                             } else {
-                                finalReply = `Per il ${dateReadable} non ci sono orari disponibili. Ti controllo un'altra data?`;
+                                finalReply = `Per *${matchedService.name}* (${dateReadable}) siamo al completo. Vuoi che controllo un altro giorno?`;
                             }
                         }
                     }
