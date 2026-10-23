@@ -107,365 +107,379 @@ module.exports = async function handler(req, res) {
                                                       }
                                     
                                                       const autoPilotSystemPrompt = `Sei l'assistente virtuale WhatsApp del salone "${salonName}".
-                                    Oggi è ${todayReadable} (${todayRome}).
-                                    
-                                    DATI ATTIVITÀ E CLIENTE:
-                                    - Nome Salone: ${salonName}
-                                    - Indirizzo esatto: ${salonAddress || 'in salone'}
-                                    ${recognizedClientName ? `- Nome Cliente già noto: "${recognizedClientName}". Salutalo per nome!` : '- Nome Cliente: Non ancora noto. Chiedi a che nome fissare al momento giusto!'}
-                                    ${lastClientService ? `- Ultimo servizio fatto dal cliente: "${lastClientService}".` : ''}
-                                    ${savedClientAddress ? `- Indirizzo salvato in Rubrica: "${savedClientAddress}".` : ''}
-                                    
-                                    LISTINO SERVIZI IN SALONE:
-                                    ${servicesListText}
-                                    
-                                    PRODOTTI FISICI IN VENDITA DA ASPORTO:
-                                    ${productsListText}
-                                    
-                                    ${historyText}
-                                    
-                                    LINEE GUIDA PER LE RISPOSTE:
-                                    1. Parla in modo naturale, caldo e amichevole (usa emoji).
-                                    2. GESTIONE "IL SOLITO": Se il cliente è già noto, ha un "Ultimo servizio fatto" registrato e chiede un appuntamento senza specificare cosa vuole fare, chiedigli con naturalezza e simpatia se vuole prenotare per "il solito" citando il nome dell'ultimo servizio (es. "Ciao Marco! 👋 Vuoi che ti prenoti per il solito ${lastClientService} o oggi cambiamo?"). 
-                                       - Se il cliente accetta "il solito" o dice "sì", usa il servizio ${lastClientService} per cercare gli orari. 
-                                       - Se invece chiede un servizio diverso, usa il nuovo.
-                                    3. DISTINZIONE (PRODOTTI vs SERVIZI): Se chiede prodotti fisici da asporto, usa il listino prodotti. Se chiede trattamenti, usa il listino servizi.
-                                    4. GESTIONE APPUNTAMENTO (STOP AI LOOP):
-                                       - Se il cliente dice "Sì", "Ok", "Confermo", l'intento è "confirm_booking". ESTRAI la data e l'ora dall'ultimo messaggio del salone!
-                                       - Se propone una data/ora ("oggi alle 16", "domani mattina"), l'intento è "ask_availability".
-                                    5. INTENTI:
-                                       - "confirm_booking": vuole bloccare il posto concordato.
-                                       - "ask_availability": chiede orari o date disponibili.
-                                       - "info_question": chiede info su prodotti, prezzi, indirizzo.
-                                       - "general_greeting": saluta e basta.
-                                    
-                                    Rispondi ESCLUSIVAMENTE con un JSON valido:
-                                    {
-                                     "intent": "ask_availability",
-                                     "customerName": "${recognizedClientName}",
-                                     "date": "${todayRome}",
-                                     "time": "",
-                                     "serviceId": "",
-                                     "serviceName": "",
-                                     "replyText": "risposta dettagliata per WhatsApp"
-                                    }`;
+                                                      Oggi è ${todayReadable} (${todayRome}).
 
-                                    const groqMessages = [
-                                        { role: "system", content: autoPilotSystemPrompt },
-                                        { role: "user", content: messageText }
-                                    ];
+                                                      DATI ATTIVITÀ E CLIENTE:
+                                                      - Nome Salone: ${salonName}
+                                                      - Indirizzo esatto: ${salonAddress || 'in salone'}
+                                                      ${recognizedClientName ? `- Nome Cliente già noto: "${recognizedClientName}". Salutalo calorosamente per nome!` : '- Nome Cliente: Non ancora noto. Se non lo conosci, chiedi gentilmente a che nome fissare!'}
+                                                      ${lastClientService ? `- Ultimo servizio fatto dal cliente in passato: "${lastClientService}".` : ''}
+                                                      ${savedClientAddress ? `- Indirizzo salvato in Rubrica: "${savedClientAddress}".` : ''}
 
-                                    let extracted = {
-                                        intent: "general_greeting",
-                                        customerName: recognizedClientName,
-                                        date: todayRome,
-                                        time: "",
-                                        serviceId: contextData.services[0]?.id || "",
-                                        serviceName: contextData.services[0]?.name || "Servizio",
-                                        replyText: ""
-                                    };
+                                                      LISTINO DEI SERVIZI REALI DI QUESTO SALONE:
+                                                      ${servicesListText}
 
-                                    const GROQ_CANDIDATES = [
-                                        "llama-3.3-70b-versatile",
-                                        "llama-3.1-8b-instant",
-                                        "openai/gpt-oss-120b"
-                                    ];
-                                    let aiSuccess = false;
+                                                      CATALOGO PRODOTTI FISICI IN VENDITA DA ASPORTO:
+                                                      ${productsListText}
 
-                                    for (const modelId of GROQ_CANDIDATES) {
-                                        try {
-                                            const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                                                method: "POST",
-                                                headers: {
-                                                    "Authorization": `Bearer ${GROQ_API_KEY}`,
-                                                    "Content-Type": "application/json"
-                                                },
-                                                body: JSON.stringify({
-                                                    model: modelId,
-                                                    messages: groqMessages,
-                                                    temperature: 0.1,
-                                                    max_tokens: 800
-                                                })
-                                            });
+                                                      ${historyText}
 
-                                            if (groqRes.ok) {
-                                                const groqData = await groqRes.json();
-                                                let rawContent = groqData.choices?.[0]?.message?.content || "{}";
+                                                      REGOLE FERREE DI COMPORTAMENTO:
+                                                      1. Parla in modo caloroso, amichevole ed educato (usa emoji simpatiche).
+                                                      2. 🛑 REGOLA ANTI-ERRORE PER I SERVIZI (NON INDOVINARE MAI):
+                                                         - Se il cliente fa una richiesta GENERICA (es. "voglio tagliare i capelli", "vorrei fare il colore", "ho bisogno di una piega") e nel listino servizi ci sono più opzioni (es. Taglio Uomo, Taglio Donna, Taglio Bimbo):
+                                                           NON DEVI SCEGLIERE TU A CASO!
+                                                           Il tuo intent DEVE essere "clarify_service".
+                                                           Nella risposta (replyText) elenca con chiarezza e simpatia le opzioni disponibili con i relativi prezzi e chiedigli quale preferisce.
+                                                         - Se il cliente è già noto e ha un "Ultimo servizio fatto" (${lastClientService || 'nessuno'}), proponigli con naturalezza se vuole prenotare per "il solito ${lastClientService}".
+                                                         - Se invece il cliente specifica chiaramente il servizio (es. "Taglio Uomo"), allora l'intent è "ask_availability" o "confirm_booking".
 
-                                                let cleanJson = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-                                                cleanJson = cleanJson.replace(/```json/gi, "").replace(/```/g, "").trim();
-                                                const firstBrace = cleanJson.indexOf('{');
-                                                const lastBrace = cleanJson.lastIndexOf('}');
-                                                if (firstBrace !== -1 && lastBrace !== -1) {
-                                                    cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
-                                                }
+                                                      3. 🛑 REGOLA ANTI-ERRORE PER I PRODOTTI:
+                                                         - Non confermare ordini e non inventare prodotti che non sono nell'elenco.
+                                                         - Non inventare indirizzi di consegna: se il cliente vuole la spedizione e non ha un indirizzo salvato, chiedigli via, civico e città PRIMA di confermare l'ordine!
 
-                                                const parsed = JSON.parse(cleanJson);
-                                                extracted = { ...extracted, ...parsed };
-                                                console.log(`[AutoPilot] ✅ Risposta (${modelId}):`, extracted.replyText);
-                                                aiSuccess = true;
-                                                break;
-                                            }
-                                        } catch (pErr) {
-                                            console.warn(`[AutoPilot] ⚠️ Eccezione su ${modelId}:`, pErr.message);
-                                        }
-                                    }
+                                                      4. GESTIONE INTENTI:
+                                                         - "clarify_service": il cliente ha fatto una richiesta generica o ambigua su un servizio e devi chiedergli quale intende esattamente.
+                                                         - "ask_availability": il cliente ha specificato un servizio chiaro e chiede che orari o giorni sono liberi.
+                                                         - "confirm_booking": il cliente dice "Sì", "Ok", "Confermo", "Va bene questo orario" dopo che gli è stato proposto uno slot preciso.
+                                                         - "info_question": chiede informazioni su prezzi, dove siete o come funzionano i prodotti.
+                                                         - "general_greeting": saluta e basta.
 
-                                    // 💡 RECUPERO INTELLIGENTE DI SERVIZIO, DATA E ORA DAL MESSAGGIO PRECEDENTE DEL SALONE
-                                    if (extracted.intent === "confirm_booking" && lastAssistantMsg) {
-                                        const dateMatch = lastAssistantMsg.match(/\b(\d{1,2})\/(\d{1,2})\b/);
-                                        if (dateMatch) {
-                                            const currentYear = new Date().getFullYear();
-                                            const dayPart = dateMatch[1].padStart(2, '0');
-                                            const monthPart = dateMatch[2].padStart(2, '0');
-                                            extracted.date = `${currentYear}-${monthPart}-${dayPart}`;
-                                            console.log(`[AutoPilot] 💡 Data recuperata dallo storico: ${extracted.date}`);
-                                        }
+                                                      Rispondi ESCLUSIVAMENTE con un JSON valido:
+                                                      {
+                                                       "intent": "clarify_service",
+                                                       "customerName": "${recognizedClientName}",
+                                                       "date": "${todayRome}",
+                                                       "time": "",
+                                                       "serviceId": "",
+                                                       "serviceName": "",
+                                                       "replyText": "risposta dettagliata per WhatsApp"
+                                                      }`;
 
-                                        if (!extracted.time) {
-                                            const timeMatch = lastAssistantMsg.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
-                                            if (timeMatch) {
-                                                extracted.time = timeMatch[0];
-                                                console.log(`[AutoPilot] 💡 Orario recuperato dallo storico: ${extracted.time}`);
-                                            }
-                                        }
+                                                                                          const groqMessages = [
+                                                                                              { role: "system", content: autoPilotSystemPrompt },
+                                                                                              { role: "user", content: messageText }
+                                                                                          ];
 
-                                        const serviceNameMatch = lastAssistantMsg.match(/\*([^*\n]+)\*/);
-                                        if (serviceNameMatch && serviceNameMatch[1]) {
-                                            const prevServiceName = serviceNameMatch[1].trim().toLowerCase();
-                                            const foundService = contextData.services.find(s => s.name.toLowerCase() === prevServiceName || s.name.toLowerCase().includes(prevServiceName));
-                                            if (foundService) {
-                                                extracted.serviceId = foundService.id;
-                                                extracted.serviceName = foundService.name;
-                                                console.log(`[AutoPilot] 💡 Servizio recuperato dallo storico: ${foundService.name}`);
-                                            }
-                                        }
-                                    }
+                                                                                          let extracted = {
+                                                                                              intent: "general_greeting",
+                                                                                              customerName: recognizedClientName,
+                                                                                              date: todayRome,
+                                                                                              time: "",
+                                                                                              serviceId: "",
+                                                                                              serviceName: "",
+                                                                                              replyText: ""
+                                                                                          };
 
-                                    let finalReply = extracted.replyText;
+                                                                                          const GROQ_CANDIDATES = [
+                                                                                              "llama-3.3-70b-versatile",
+                                                                                              "llama-3.1-8b-instant",
+                                                                                              "openai/gpt-oss-120b"
+                                                                                          ];
+                                                                                          let aiSuccess = false;
 
-                                    if (!aiSuccess || !finalReply) {
-                                        finalReply = recognizedClientName
-                                            ? `Ciao ${recognizedClientName}, ti risponderemo a brevissimo con tutti i dettagli! ✨`
-                                            : `Ciao! Grazie per averci scritto da ${salonName}. Ti risponderemo a breve! ✨`;
-                                        extracted.intent = "api_error";
-                                    }
+                                                                                          for (const modelId of GROQ_CANDIDATES) {
+                                                                                              try {
+                                                                                                  const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                                                                                                      method: "POST",
+                                                                                                      headers: {
+                                                                                                          "Authorization": `Bearer ${GROQ_API_KEY}`,
+                                                                                                          "Content-Type": "application/json"
+                                                                                                      },
+                                                                                                      body: JSON.stringify({
+                                                                                                          model: modelId,
+                                                                                                          messages: groqMessages,
+                                                                                                          temperature: 0.1,
+                                                                                                          max_tokens: 800
+                                                                                                      })
+                                                                                                  });
 
-                                    const displayName = extracted.customerName || recognizedClientName || '';
-                                    const cleanClientPhone = senderPhone.replace(/@.*$/, '');
+                                                                                                  if (groqRes.ok) {
+                                                                                                      const groqData = await groqRes.json();
+                                                                                                      let rawContent = groqData.choices?.[0]?.message?.content || "{}";
 
-                                    // =========================================================================
-                                    // 🛍️ RICONOSCIMENTO AUTOMATICO: CONFERMA ACQUISTO PRODOTTI A DOMICILIO (MEMORIA RUBRICA)
-                                    // =========================================================================
-                                    const isProductOrderConfirmation = (
-                                        (extracted.intent === "confirm_booking" || extracted.intent === "info_question") &&
-                                        !extracted.time &&
-                                        (messageText.toLowerCase().includes("conferma") || messageText.toLowerCase().includes("tutto ok") || messageText.toLowerCase().includes("consegnare") || messageText.toLowerCase().includes("contanti") || messageText.toLowerCase().includes("puoi confermare")) &&
-                                        lastAssistantMsg.toLowerCase().includes("consegn")
-                                    );
+                                                                                                      let cleanJson = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+                                                                                                      cleanJson = cleanJson.replace(/```json/gi, "").replace(/```/g, "").trim();
+                                                                                                      const firstBrace = cleanJson.indexOf('{');
+                                                                                                      const lastBrace = cleanJson.lastIndexOf('}');
+                                                                                                      if (firstBrace !== -1 && lastBrace !== -1) {
+                                                                                                          cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
+                                                                                                      }
 
-                                    if (isProductOrderConfirmation) {
-                                        try {
-                                            console.log(`[AutoPilot] 📦 Rilevata conferma ordine prodotti da ${cleanClientPhone}! Analisi carrello...`);
+                                                                                                      const parsed = JSON.parse(cleanJson);
+                                                                                                      extracted = { ...extracted, ...parsed };
+                                                                                                      console.log(`[AutoPilot] ✅ Risposta (${modelId}):`, extracted.replyText);
+                                                                                                      aiSuccess = true;
+                                                                                                      break;
+                                                                                                  }
+                                                                                              } catch (pErr) {
+                                                                                                  console.warn(`[AutoPilot] ⚠️ Eccezione su ${modelId}:`, pErr.message);
+                                                                                              }
+                                                                                          }
 
-                                            const fullConversationText = (historyText + " " + messageText).toLowerCase();
-                                            let orderItemsList = [];
-                                            let subtotal = 0;
-                                            const shippingCost = 5;
+                                                                                          // 💡 RECUPERO INTELLIGENTE DI DATA E ORA DAL MESSAGGIO PRECEDENTE DEL SALONE
+                                                                                          if (extracted.intent === "confirm_booking" && lastAssistantMsg) {
+                                                                                              const dateMatch = lastAssistantMsg.match(/\b(\d{1,2})\/(\d{1,2})\b/);
+                                                                                              if (dateMatch) {
+                                                                                                  const currentYear = new Date().getFullYear();
+                                                                                                  const dayPart = dateMatch[1].padStart(2, '0');
+                                                                                                  const monthPart = dateMatch[2].padStart(2, '0');
+                                                                                                  extracted.date = `${currentYear}-${monthPart}-${dayPart}`;
+                                                                                                  console.log(`[AutoPilot] 💡 Data recuperata dallo storico: ${extracted.date}`);
+                                                                                              }
 
-                                            if (contextData.products && contextData.products.length > 0) {
-                                                contextData.products.forEach(prod => {
-                                                    const prodNameLower = prod.name.toLowerCase();
-                                                    const cleanName = prodNameLower.split('(')[0].trim();
-                                                    if (fullConversationText.includes(prodNameLower) || (cleanName.length > 3 && fullConversationText.includes(cleanName))) {
-                                                        let itemQty = 1;
-                                                        const qtyMatch = fullConversationText.match(/(\d+)\s*(?:unità|pezzi|confezioni|pz|x|boccette)/i);
-                                                        if (qtyMatch && qtyMatch[1]) {
-                                                            itemQty = parseInt(qtyMatch[1], 10) || 1;
-                                                        }
+                                                                                              if (!extracted.time) {
+                                                                                                  const timeMatch = lastAssistantMsg.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
+                                                                                                  if (timeMatch) {
+                                                                                                      extracted.time = timeMatch[0];
+                                                                                                      console.log(`[AutoPilot] 💡 Orario recuperato dallo storico: ${extracted.time}`);
+                                                                                                  }
+                                                                                              }
 
-                                                        const itemPrice = parseFloat(prod.price) || 0;
-                                                        orderItemsList.push({
-                                                            productName: prod.name,
-                                                            quantity: itemQty,
-                                                            price: itemPrice
-                                                        });
-                                                        subtotal += (itemPrice * itemQty);
-                                                    }
-                                                });
-                                            }
+                                                                                              const serviceNameMatch = lastAssistantMsg.match(/\*([^*\n]+)\*/);
+                                                                                              if (serviceNameMatch && serviceNameMatch[1]) {
+                                                                                                  const prevServiceName = serviceNameMatch[1].trim().toLowerCase();
+                                                                                                  const foundService = contextData.services.find(s => s.name.toLowerCase() === prevServiceName || s.name.toLowerCase().includes(prevServiceName));
+                                                                                                  if (foundService) {
+                                                                                                      extracted.serviceId = foundService.id;
+                                                                                                      extracted.serviceName = foundService.name;
+                                                                                                      console.log(`[AutoPilot] 💡 Servizio recuperato dallo storico: ${foundService.name}`);
+                                                                                                  }
+                                                                                              }
+                                                                                          }
 
-                                            if (orderItemsList.length === 0) {
-                                                let fallbackName = "Prodotto Salone";
-                                                let fallbackPrice = 18;
-                                                if (contextData.products && contextData.products.length > 0) {
-                                                    fallbackName = contextData.products[0].name;
-                                                    fallbackPrice = parseFloat(contextData.products[0].price) || 18;
-                                                }
-                                                orderItemsList.push({
-                                                    productName: fallbackName,
-                                                    quantity: 1,
-                                                    price: fallbackPrice
-                                                });
-                                                subtotal = fallbackPrice;
-                                            }
+                                                                                          let finalReply = extracted.replyText;
 
-                                            const finalTotal = subtotal + shippingCost;
+                                                                                          if (!aiSuccess || !finalReply) {
+                                                                                              finalReply = recognizedClientName
+                                                                                                  ? `Ciao ${recognizedClientName}, ti risponderemo a brevissimo con tutti i dettagli! ✨`
+                                                                                                  : `Ciao! Grazie per averci scritto da ${salonName}. Ti risponderemo a breve! ✨`;
+                                                                                              extracted.intent = "api_error";
+                                                                                          }
 
-                                            // Estrazione Indirizzo di Consegna (usa quello salvato in Rubrica se presente, o quello nuovo della chat)
-                                            let deliveryAddress = savedClientAddress || "Viale dei Cappuccini 5, 00049 Velletri";
-                                            let deliveryZip = "00049";
-                                            let deliveryCity = "Velletri";
+                                                                                          const displayName = extracted.customerName || recognizedClientName || '';
+                                                                                          const cleanClientPhone = senderPhone.replace(/@.*$/, '');
 
-                                            const addrMatch = lastAssistantMsg.match(/(?:consegnare a|consegneremo a|destinato a)\s*:?\s*\*?([^*\n.]+)/i);
-                                            if (addrMatch && addrMatch[1]) {
-                                                deliveryAddress = addrMatch[1].trim();
-                                            }
+                                                                                          // =========================================================================
+                                                                                          // 🛍️ CONFERMA ACQUISTO PRODOTTI A DOMICILIO (SENZA VALORI FINTI O VELLETRI)
+                                                                                          // =========================================================================
+                                                                                          const isProductOrderConfirmation = (
+                                                                                              (extracted.intent === "confirm_booking" || extracted.intent === "info_question") &&
+                                                                                              !extracted.time &&
+                                                                                              (messageText.toLowerCase().includes("conferma") || messageText.toLowerCase().includes("tutto ok") || messageText.toLowerCase().includes("consegnare") || messageText.toLowerCase().includes("contanti") || messageText.toLowerCase().includes("puoi confermare")) &&
+                                                                                              lastAssistantMsg.toLowerCase().includes("consegn")
+                                                                                          );
 
-                                            const zipMatch = deliveryAddress.match(/\b(00\d{3}|\d{5})\b/);
-                                            if (zipMatch) deliveryZip = zipMatch[1];
+                                                                                          if (isProductOrderConfirmation) {
+                                                                                              try {
+                                                                                                  console.log(`[AutoPilot] 📦 Rilevata richiesta ordine prodotti da ${cleanClientPhone}!`);
 
-                                            const orderPayload = {
-                                                action: 'save_whatsapp_product_order',
-                                                vendorId: vendorId,
-                                                customerName: displayName || "Cliente WhatsApp",
-                                                customerPhone: cleanClientPhone,
-                                                deliveryAddress: deliveryAddress,
-                                                deliveryZip: deliveryZip,
-                                                deliveryCity: deliveryCity,
-                                                orderNotes: 'Ordinato tramite WhatsApp AI - Pagamento in contanti alla consegna',
-                                                totalPrice: finalTotal,
-                                                shippingCost: shippingCost,
-                                                items: orderItemsList
-                                            };
+                                                                                                  const fullConversationText = (historyText + " " + messageText).toLowerCase();
+                                                                                                  let orderItemsList = [];
+                                                                                                  let subtotal = 0;
+                                                                                                  const shippingCost = 5;
 
-                                            const orderRes = await fetch(API_BASE_URL, {
-                                                method: 'POST',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify(orderPayload)
-                                            });
+                                                                                                  if (contextData.products && contextData.products.length > 0) {
+                                                                                                      contextData.products.forEach(prod => {
+                                                                                                          const prodNameLower = prod.name.toLowerCase();
+                                                                                                          const cleanName = prodNameLower.split('(')[0].trim();
+                                                                                                          if (fullConversationText.includes(prodNameLower) || (cleanName.length > 3 && fullConversationText.includes(cleanName))) {
+                                                                                                              let itemQty = 1;
+                                                                                                              const qtyMatch = fullConversationText.match(/(\d+)\s*(?:unità|pezzi|confezioni|pz|x|boccette)/i);
+                                                                                                              if (qtyMatch && qtyMatch[1]) {
+                                                                                                                  itemQty = parseInt(qtyMatch[1], 10) || 1;
+                                                                                                              }
 
-                                            if (orderRes.ok) {
-                                                const orderJson = await orderRes.json();
-                                                console.log(`[AutoPilot] 🔔 ORDINE REGISTRATO IN DASHBOARD & RUBRICA AGGIORNATA! ID: ${orderJson.orderId}`);
+                                                                                                              const itemPrice = parseFloat(prod.price) || 0;
+                                                                                                              orderItemsList.push({
+                                                                                                                  productName: prod.name,
+                                                                                                                  quantity: itemQty,
+                                                                                                                  price: itemPrice
+                                                                                                              });
+                                                                                                              subtotal += (itemPrice * itemQty);
+                                                                                                          }
+                                                                                                      });
+                                                                                                  }
 
-                                                const itemsListText = orderItemsList.map(it => `• **${it.quantity}x ${it.productName}** (${(it.price * it.quantity).toFixed(2)} €)`).join('\n');
+                                                                                                  // Estrazione Indirizzo di Consegna REALE
+                                                                                                  let deliveryAddress = savedClientAddress || "";
+                                                                                                  let deliveryZip = "";
+                                                                                                  let deliveryCity = "";
 
-                                                finalReply = `Ciao ${displayName || 'Marco'}! ✅ Il tuo ordine è confermato ed è stato registrato in salone!\n\n📦 **Articoli:**\n${itemsListText}\n\n📍 Consegna a: *${deliveryAddress}*\n💶 **Totale da pagare al Rider:** ${finalTotal.toFixed(2)} € (inclusi 5 € di consegna in contanti).\n\nAbbiamo memorizzato il tuo indirizzo per i prossimi ordini! A presto! ✂️🚚`;
-                                            }
-                                        } catch (ordErr) {
-                                            console.error("[AutoPilot] ⚠️ Errore creazione ordine prodotto:", ordErr);
-                                        }
-                                    }
+                                                                                                  const addrMatch = lastAssistantMsg.match(/(?:consegnare a|consegneremo a|destinato a|indirizzo)\s*:?\s*\*?([^*\n.]+)/i);
+                                                                                                  if (addrMatch && addrMatch[1]) {
+                                                                                                      deliveryAddress = addrMatch[1].trim();
+                                                                                                  }
 
-                                    // 3. GESTIONE APPUNTAMENTO (SE NON È UN ORDINE PRODOTTO)
-                                    const matchedService = contextData.services.find(s => s.id === extracted.serviceId)
-                                        || contextData.services.find(s => s.name.toLowerCase().includes((extracted.serviceName || '').toLowerCase()))
-                                        || contextData.services[0]
-                                        || { id: 'default', name: 'Servizio', duration: 30 };
+                                                                                                  // CONTROLLO DI FERRO: Se mancano i prodotti o manca l'indirizzo, NON creiamo ordini finti!
+                                                                                                  if (orderItemsList.length === 0) {
+                                                                                                      finalReply = `Quale prodotto vorresti ordinare di preciso? Dimmi pure il nome così ti preparo il riepilogo con il totale esatto! 🧴`;
+                                                                                                  } else if (!deliveryAddress) {
+                                                                                                      finalReply = `Perfetto! Per completare l'ordine con pagamento in contanti alla consegna, mi diresti l'indirizzo esatto (via, civico e città) a cui dobbiamo spedire? 🚚`;
+                                                                                                  } else {
+                                                                                                      const zipMatch = deliveryAddress.match(/\b(00\d{3}|\d{5})\b/);
+                                                                                                      if (zipMatch) deliveryZip = zipMatch[1];
 
-                                    const targetDate = extracted.date || todayRome;
-                                    const dateParts = targetDate.split('-');
-                                    const dateReadable = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}` : targetDate;
+                                                                                                      const finalTotal = subtotal + shippingCost;
 
-                                    if (!isProductOrderConfirmation && (extracted.intent === "ask_availability" || extracted.intent === "confirm_booking") && targetDate) {
-                                        let availableSlots = [];
-                                        try {
-                                            console.log(`[AutoPilot] 📅 Controllo slot per ${targetDate} - Servizio: ${matchedService.id}`);
-                                            const slotsRes = await fetch(API_BASE_URL, {
-                                                method: 'POST',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({
-                                                    action: 'getAvailableSlots',
-                                                    vendorId: vendorId,
-                                                    serviceId: matchedService.id,
-                                                    date: targetDate
-                                                })
-                                            });
-                                            if (slotsRes.ok) {
-                                                const slotsJson = await slotsRes.json();
-                                                availableSlots = slotsJson.slots || [];
-                                            }
-                                        } catch (sErr) {
-                                            console.error("[AutoPilot] ⚠️ Eccezione controllo slot:", sErr.message);
-                                        }
+                                                                                                      const orderPayload = {
+                                                                                                          action: 'save_whatsapp_product_order',
+                                                                                                          vendorId: vendorId,
+                                                                                                          customerName: displayName || "Cliente WhatsApp",
+                                                                                                          customerPhone: cleanClientPhone,
+                                                                                                          deliveryAddress: deliveryAddress,
+                                                                                                          deliveryZip: deliveryZip || "00000",
+                                                                                                          deliveryCity: deliveryCity || "",
+                                                                                                          orderNotes: 'Ordinato tramite WhatsApp AI - Pagamento in contanti alla consegna',
+                                                                                                          totalPrice: finalTotal,
+                                                                                                          shippingCost: shippingCost,
+                                                                                                          items: orderItemsList
+                                                                                                      };
 
-                                        // CASO A: IL CLIENTE CONFERMA -> PRENOTIAMO A DATABASE!
-                                        if (extracted.intent === "confirm_booking" && extracted.time) {
-                                            try {
-                                                const durationMins = matchedService.duration || 30;
-                                                const dummyDate = new Date(`${targetDate}T12:00:00Z`);
-                                                const romeLoc = dummyDate.toLocaleString("en-US", { timeZone: "Europe/Rome" });
-                                                const utcLoc = dummyDate.toLocaleString("en-US", { timeZone: "UTC" });
-                                                const offsetMins = (new Date(utcLoc) - new Date(romeLoc)) / 60000;
+                                                                                                      const orderRes = await fetch(API_BASE_URL, {
+                                                                                                          method: 'POST',
+                                                                                                          headers: { 'Content-Type': 'application/json' },
+                                                                                                          body: JSON.stringify(orderPayload)
+                                                                                                      });
 
-                                                const startMs = new Date(`${targetDate}T${extracted.time}:00Z`).getTime() + (offsetMins * 60000);
-                                                const startDateTime = new Date(startMs);
-                                                const endDateTime = new Date(startMs + durationMins * 60000);
+                                                                                                      if (orderRes.ok) {
+                                                                                                          const orderJson = await orderRes.json();
+                                                                                                          console.log(`[AutoPilot] 🔔 ORDINE REGISTRATO IN DASHBOARD! ID: ${orderJson.orderId}`);
+                                                                                                          const itemsListText = orderItemsList.map(it => `• **${it.quantity}x ${it.productName}** (${(it.price * it.quantity).toFixed(2)} €)`).join('\n');
+                                                                                                          finalReply = `Grazie ${displayName || ''}! ✅ Il tuo ordine è confermato ed è stato registrato in salone!\n\n📦 **Articoli:**\n${itemsListText}\n\n📍 Consegna a: *${deliveryAddress}*\n💶 **Totale da pagare al Rider:** ${finalTotal.toFixed(2)} € (inclusi 5 € di consegna in contanti).\n\nTi contatteremo per la consegna! A presto! 🚚✨`;
+                                                                                                      }
+                                                                                                  }
+                                                                                              } catch (ordErr) {
+                                                                                                  console.error("[AutoPilot] ⚠️ Errore creazione ordine prodotto:", ordErr);
+                                                                                              }
+                                                                                          }
 
-                                                console.log(`[AutoPilot] 💾 Salvataggio appuntamento per ${targetDate} alle ${extracted.time} (Servizio: ${matchedService.name})...`);
+                                                                                          // =========================================================================
+                                                                                          // 3. GESTIONE APPUNTAMENTO (CON CONTROLLO AMBIGUITÀ ZERO ERRORI)
+                                                                                          // =========================================================================
+                                                                                          let matchedService = null;
 
-                                                const bookPayload = {
-                                                    action: 'save_service_booking',
-                                                    vendorId: vendorId,
-                                                    customerName: displayName || ("Cliente WhatsApp (" + cleanClientPhone.slice(-4) + ")"),
-                                                    customerPhone: cleanClientPhone,
-                                                    serviceId: matchedService.id,
-                                                    bookedServiceName: matchedService.name,
-                                                    bookedServicePrice: matchedService.price || 0,
-                                                    bookedServiceDuration: durationMins,
-                                                    bookedTotalOccupiedTime: durationMins,
-                                                    startDateTime: startDateTime.toISOString(),
-                                                    endDateTime: endDateTime.toISOString(),
-                                                    status: 'confirmed',
-                                                    source: 'whatsapp_ai_autopilot',
-                                                    appointmentCode: 'WA_' + Date.now().toString().slice(-4),
-                                                    type: 'cura_persona'
-                                                };
+                                                                                          if (extracted.serviceId) {
+                                                                                              matchedService = contextData.services.find(s => s.id === extracted.serviceId) || null;
+                                                                                          }
 
-                                                const saveRes = await fetch(API_BASE_URL, {
-                                                    method: 'POST',
-                                                    headers: { 'Content-Type': 'application/json' },
-                                                    body: JSON.stringify(bookPayload)
-                                                });
+                                                                                          if (!matchedService && extracted.serviceName) {
+                                                                                              const searchName = extracted.serviceName.toLowerCase().trim();
+                                                                                              matchedService = contextData.services.find(s => s.name.toLowerCase().trim() === searchName)
+                                                                                                  || contextData.services.find(s => s.name.toLowerCase().includes(searchName))
+                                                                                                  || null;
+                                                                                          }
 
-                                                if (saveRes.ok) {
-                                                    finalReply = `🎉 Perfetto ${displayName}! Ti confermo l'appuntamento per *${matchedService.name}* in data *${dateReadable}* alle ore *${extracted.time}*.\nTi abbiamo inserito in agenda, a presto! ✂️✨`;
-                                                    console.log(`[AutoPilot] ✅ APPUNTAMENTO REGISTRATO A CALENDARIO CON SUCCESSO!`);
-                                                } else {
-                                                    const errJson = await saveRes.json().catch(() => ({}));
-                                                    console.warn("[AutoPilot] ⚠️ Errore salvataggio:", errJson.error);
-                                                    finalReply = `Ci dispiace ${displayName}, ma lo slot delle ${extracted.time} del ${dateReadable} non è più disponibile. Vuoi che controlliamo un altro orario?`;
-                                                }
-                                            } catch (bErr) {
-                                                console.error("[AutoPilot] ⚠️ Eccezione salvataggio:", bErr);
-                                                finalReply = `Abbiamo preso nota della tua richiesta per le ${extracted.time}, ti confermo tutto a brevissimo!`;
-                                            }
-                                        }
-                                        // CASO B: IL CLIENTE CHIEDE DISPONIBILITÀ
-                                        else if (extracted.intent === "ask_availability") {
-                                            if (extracted.time) {
-                                                const isTimeFree = availableSlots.includes(extracted.time);
-                                                if (isTimeFree) {
-                                                    finalReply = `Sì ${displayName}! Alle *${extracted.time}* del ${dateReadable} siamo liberi per *${matchedService.name}*. Ti blocco il posto in agenda? ✂️`;
-                                                } else {
-                                                    if (availableSlots.length > 0) {
-                                                        const alternatives = availableSlots.slice(0, 3).join(', ');
-                                                        finalReply = `Purtroppo alle ${extracted.time} siamo al completo! Però per *${matchedService.name}* ho liberi questi orari: *${alternatives}*. Ti andrebbe bene uno di questi?`;
-                                                    } else {
-                                                        finalReply = `Purtroppo per il ${dateReadable} siamo al completo per *${matchedService.name}*. Vuoi che controlliamo per un altro giorno?`;
-                                                    }
-                                                }
-                                            } else {
-                                                if (availableSlots.length > 0) {
-                                                    const alternatives = availableSlots.slice(0, 3).join(', ');
-                                                    finalReply = `Certo ${displayName}! Per *${matchedService.name}* (${dateReadable}) ho liberi questi orari: *${alternatives}*. A che ora preferisci? ✂️`;
-                                                } else {
-                                                    finalReply = `Ciao ${displayName}! Purtroppo per il ${dateReadable} non ci sono orari disponibili. Ti controllo un'altra data?`;
-                                                }
-                                            }
-                                        }
-                                    }
+                                                                                          // Se il cliente ha fatto una richiesta generica o ambigua, NON PRENDERE IL PRIMO SERVIZIO A CASO!
+                                                                                          if (extracted.intent === "clarify_service" || (!matchedService && (extracted.intent === "ask_availability" || extracted.intent === "confirm_booking"))) {
+                                                                                              console.log(`[AutoPilot] 🛡️ Richiesta servizio generica o non chiara. Chiedo chiarimento senza tirare a indovinare!`);
+                                                                                              if (!finalReply) {
+                                                                                                  const opzioniServizi = contextData.services.slice(0, 4).map(s => `• ${s.name} (${s.price}€)`).join('\n');
+                                                                                                  finalReply = `Ciao ${displayName || ''}! Per poterti dare gli orari esatti o bloccare l'appuntamento, quale servizio vorresti fare di preciso?\n\nEcco i nostri servizi:\n${opzioniServizi}\n\nQuale preferisci? ✂️`;
+                                                                                              }
+                                                                                          }
+                                                                                          else if (matchedService && !isProductOrderConfirmation && (extracted.intent === "ask_availability" || extracted.intent === "confirm_booking")) {
+                                                                                              const targetDate = extracted.date || todayRome;
+                                                                                              const dateParts = targetDate.split('-');
+                                                                                              const dateReadable = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}` : targetDate;
+
+                                                                                              let availableSlots = [];
+                                                                                              try {
+                                                                                                  console.log(`[AutoPilot] 📅 Controllo slot per ${targetDate} - Servizio: ${matchedService.name} (${matchedService.id})`);
+                                                                                                  const slotsRes = await fetch(API_BASE_URL, {
+                                                                                                      method: 'POST',
+                                                                                                      headers: { 'Content-Type': 'application/json' },
+                                                                                                      body: JSON.stringify({
+                                                                                                          action: 'getAvailableSlots',
+                                                                                                          vendorId: vendorId,
+                                                                                                          serviceId: matchedService.id,
+                                                                                                          date: targetDate
+                                                                                                      })
+                                                                                                  });
+                                                                                                  if (slotsRes.ok) {
+                                                                                                      const slotsJson = await slotsRes.json();
+                                                                                                      availableSlots = slotsJson.slots || [];
+                                                                                                  }
+                                                                                              } catch (sErr) {
+                                                                                                  console.error("[AutoPilot] ⚠️ Eccezione controllo slot:", sErr.message);
+                                                                                              }
+
+                                                                                              // CASO A: IL CLIENTE CONFERMA -> PRENOTIAMO A DATABASE!
+                                                                                              if (extracted.intent === "confirm_booking" && extracted.time) {
+                                                                                                  try {
+                                                                                                      const durationMins = matchedService.duration || 30;
+                                                                                                      const dummyDate = new Date(`${targetDate}T12:00:00Z`);
+                                                                                                      const romeLoc = dummyDate.toLocaleString("en-US", { timeZone: "Europe/Rome" });
+                                                                                                      const utcLoc = dummyDate.toLocaleString("en-US", { timeZone: "UTC" });
+                                                                                                      const offsetMins = (new Date(utcLoc) - new Date(romeLoc)) / 60000;
+
+                                                                                                      const startMs = new Date(`${targetDate}T${extracted.time}:00Z`).getTime() + (offsetMins * 60000);
+                                                                                                      const startDateTime = new Date(startMs);
+                                                                                                      const endDateTime = new Date(startMs + durationMins * 60000);
+
+                                                                                                      console.log(`[AutoPilot] 💾 Salvataggio appuntamento per ${targetDate} alle ${extracted.time} (${matchedService.name})...`);
+
+                                                                                                      const bookPayload = {
+                                                                                                          action: 'save_service_booking',
+                                                                                                          vendorId: vendorId,
+                                                                                                          customerName: displayName || ("Cliente WhatsApp (" + cleanClientPhone.slice(-4) + ")"),
+                                                                                                          customerPhone: cleanClientPhone,
+                                                                                                          serviceId: matchedService.id,
+                                                                                                          bookedServiceName: matchedService.name,
+                                                                                                          bookedServicePrice: matchedService.price || 0,
+                                                                                                          bookedServiceDuration: durationMins,
+                                                                                                          bookedTotalOccupiedTime: durationMins,
+                                                                                                          startDateTime: startDateTime.toISOString(),
+                                                                                                          endDateTime: endDateTime.toISOString(),
+                                                                                                          status: 'confirmed',
+                                                                                                          source: 'whatsapp_ai_autopilot',
+                                                                                                          appointmentCode: 'WA_' + Date.now().toString().slice(-4),
+                                                                                                          type: 'cura_persona'
+                                                                                                      };
+
+                                                                                                      const saveRes = await fetch(API_BASE_URL, {
+                                                                                                          method: 'POST',
+                                                                                                          headers: { 'Content-Type': 'application/json' },
+                                                                                                          body: JSON.stringify(bookPayload)
+                                                                                                      });
+
+                                                                                                      if (saveRes.ok) {
+                                                                                                          finalReply = `🎉 Perfetto ${displayName}! Ti confermo l'appuntamento per *${matchedService.name}* in data *${dateReadable}* alle ore *${extracted.time}*.\nTi abbiamo inserito in agenda, a presto! ✂️✨`;
+                                                                                                          console.log(`[AutoPilot] ✅ APPUNTAMENTO REGISTRATO A CALENDARIO CON SUCCESSO!`);
+                                                                                                      } else {
+                                                                                                          const errJson = await saveRes.json().catch(() => ({}));
+                                                                                                          console.warn("[AutoPilot] ⚠️ Errore salvataggio:", errJson.error);
+                                                                                                          finalReply = `Ci dispiace ${displayName}, ma lo slot delle ${extracted.time} del ${dateReadable} non è più disponibile. Vuoi che controlliamo un altro orario?`;
+                                                                                                      }
+                                                                                                  } catch (bErr) {
+                                                                                                      console.error("[AutoPilot] ⚠️ Eccezione salvataggio:", bErr);
+                                                                                                      finalReply = `Abbiamo preso nota della tua richiesta per le ${extracted.time}, ti confermo tutto a brevissimo!`;
+                                                                                                  }
+                                                                                              }
+                                                                                              // CASO B: IL CLIENTE CHIEDE DISPONIBILITÀ
+                                                                                              else if (extracted.intent === "ask_availability") {
+                                                                                                  if (extracted.time) {
+                                                                                                      const isTimeFree = availableSlots.includes(extracted.time);
+                                                                                                      if (isTimeFree) {
+                                                                                                          finalReply = `Sì ${displayName}! Alle *${extracted.time}* del ${dateReadable} siamo liberi per *${matchedService.name}*. Ti blocco il posto in agenda? ✂️`;
+                                                                                                      } else {
+                                                                                                          if (availableSlots.length > 0) {
+                                                                                                              const alternatives = availableSlots.slice(0, 3).join(', ');
+                                                                                                              finalReply = `Purtroppo alle ${extracted.time} siamo al completo! Però per *${matchedService.name}* ho liberi questi orari: *${alternatives}*. Ti andrebbe bene uno di questi?`;
+                                                                                                          } else {
+                                                                                                              finalReply = `Purtroppo per il ${dateReadable} siamo al completo per *${matchedService.name}*. Vuoi che controlliamo per un altro giorno?`;
+                                                                                                          }
+                                                                                                      }
+                                                                                                  } else {
+                                                                                                      if (availableSlots.length > 0) {
+                                                                                                          const alternatives = availableSlots.slice(0, 3).join(', ');
+                                                                                                          finalReply = `Certo ${displayName}! Per *${matchedService.name}* (${dateReadable}) ho liberi questi orari: *${alternatives}*. A che ora preferisci? ✂️`;
+                                                                                                      } else {
+                                                                                                          finalReply = `Ciao ${displayName}! Purtroppo per il ${dateReadable} non ci sono orari disponibili. Ti controllo un'altra data?`;
+                                                                                                      }
+                                                                                                  }
+                                                                                              }
+                                                                                          }
 
                   // 4. SALVA LA MEMORIA DELLA CONVERSAZIONE
                   if (extracted.intent !== "api_error") {
