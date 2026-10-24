@@ -85,108 +85,139 @@ module.exports = async function handler(req, res) {
             ].filter(Boolean)));
 
             // Esegue tutte le letture del database in contemporanea (circa 50ms)
-            const [clientTipsDoc, servicesSnap, productsSnap, clientSnap, chatHistorySnap] = await Promise.all([
-                // 1. Consigli salone (parcheggi e indicazioni)
-                db.collection('vendors').doc(vendorId).collection('consiglicliente').doc('main').get().catch(() => ({ exists: false })),
-                
-                // 2. Menu Servizi del salone
-                db.collection('artisan_services').where('vendorId', '==', vendorId).get().catch(() => ({ docs: [] })),
-                
-                // 3. Vetrina Prodotti
-                db.collection('offers').where('vendorId', '==', vendorId).get().catch(() => ({ docs: [] })),
-                
-                // 4. Controllo Rubrica Salone
-                db.collection('vendors').doc(vendorId).collection('clients')
-                    .where('phone', 'in', phoneVariants.slice(0, 10))
-                    .limit(1).get().catch(() => ({ empty: true })),
-                
-                // 5. Memoria ultimi messaggi chat
-                db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone)
-                    .collection('messages').orderBy('timestamp', 'desc').limit(6).get().catch(() => ({ docs: [] }))
-            ]);
-
-            // Estrazione Dati Salone
-            const storeName = vendorData.store_name || vendorData.owner_name || "il nostro salone";
-            const storeAddress = vendorData.address || "in salone";
-            const storeHours = vendorData.public_opening_hours || vendorData.opening_hours || "Orari standard";
-            const specializations = (vendorData.customization_specializations || []).join(', ');
+                        const [clientTipsDoc, servicesSnap, productsSnap, clientSnap, chatHistorySnap, trainingDoc] = await Promise.all([
+                            // 1. Consigli salone (parcheggi e indicazioni)
+                            db.collection('vendors').doc(vendorId).collection('consiglicliente').doc('main').get().catch(() => ({ exists: false })),
+                            
+                            // 2. Menu Servizi del salone
+                            db.collection('artisan_services').where('vendorId', '==', vendorId).get().catch(() => ({ docs: [] })),
+                            
+                            // 3. Vetrina Prodotti
+                            db.collection('offers').where('vendorId', '==', vendorId).get().catch(() => ({ docs: [] })),
+                            
+                            // 4. Controllo Rubrica Salone
+                            db.collection('vendors').doc(vendorId).collection('clients')
+                                .where('phone', 'in', phoneVariants.slice(0, 10))
+                                .limit(1).get().catch(() => ({ empty: true })),
+                            
+                            // 5. Memoria ultimi messaggi chat
+                            db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone)
+                                .collection('messages').orderBy('timestamp', 'desc').limit(6).get().catch(() => ({ docs: [] })),
             
-            const tipsData = clientTipsDoc.exists ? clientTipsDoc.data() : {};
-            const parkingInfo = tipsData.parkingTips || "";
-            const directionsInfo = tipsData.directions || "";
-
-            // Estrazione Servizi Reali
-            const servicesList = servicesSnap.docs
-                .map(d => d.data())
-                .filter(s => s.productName && s.isAvailable !== false)
-                .map(s => `- ${s.productName}: ${s.price}€ (${s.totalOccupiedTimeMinutes || s.serviceDuration || 30} min)`)
-                .slice(0, 20)
-                .join('\n');
-
-            // Estrazione Prodotti in Vendita
-            const productsList = productsSnap.docs
-                .map(d => d.data())
-                .filter(p => p.productName || p.name)
-                .map(p => `- ${p.productName || p.name}${p.brand ? ` (${p.brand})` : ''}: ${p.price || 0}€`)
-                .slice(0, 15)
-                .join('\n');
-
-            // Profilazione Cliente dalla Rubrica
-            let isKnownClient = false;
-            let clientFullName = pushName || "Cliente";
-            let clientNotesFormula = "";
-            let isVip = false;
-
-            if (!clientSnap.empty) {
-                const cData = clientSnap.docs[0].data();
-                isKnownClient = true;
-                clientFullName = `${cData.name || ''} ${cData.surname || ''}`.trim() || clientFullName;
-                clientNotesFormula = cData.notes || "";
-                isVip = Array.isArray(cData.tags) && cData.tags.includes('VIP');
-            }
-
-            // Storico Conversazione
-            let conversationHistory = [];
-            if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
-                conversationHistory = chatHistorySnap.docs.map(doc => ({
-                    role: doc.data().role === 'assistant' ? 'assistant' : 'user',
-                    content: doc.data().content
-                })).reverse();
-            }
-
-            // -------------------------------------------------------------
-            // 🧠 PREPARAZIONE DEL CERVELLO AI (Iniezione Contesto)
-            // -------------------------------------------------------------
-            const nowRome = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
-            const todayRome = new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
-
-            const systemPrompt = `Sei l'assistente virtuale ufficiale del salone "${storeName}" su WhatsApp.
-Oggi è ${todayRome}, ore ${nowRome}.
-
-DATI DEL SALONE:
-- Nome: ${storeName}
-- Indirizzo: ${storeAddress}
-- Orari di apertura: ${storeHours}
-${specializations ? `- Specializzazioni: ${specializations}` : ''}
-${parkingInfo ? `- Info Parcheggio: ${parkingInfo}` : ''}
-${directionsInfo ? `- Indicazioni per raggiungerci: ${directionsInfo}` : ''}
-
-SCHEDA DEL CLIENTE CON CUI STAI PARLANDO:
-- Nome: "${clientFullName}"
-- Tipo cliente: ${isKnownClient ? `Cliente abituale registrato in rubrica${isVip ? ' (⭐️ CLIENTE VIP)' : ''}` : 'Nuovo cliente (non ancora in rubrica)'}
-${clientNotesFormula ? `- Note tecniche/Abitudini/Formule passate del cliente: "${clientNotesFormula}"` : ''}
-
-MENU DEI SERVIZI E PREZZI:
-${servicesList || "Listino trattamenti disponibile in salone."}
-
-PRODOTTI DISPONIBILI IN SALONE:
-${productsList || "Prodotti professionali disponibili in negozio."}
-
-REGOLE DI CONVERSAZIONE WHATSAPP:
-1. Rispondi con grande calore, cordialità ed educazione, chiamando il cliente per nome se è noto.
-2. Rispondi in MASSIMO 2 o 3 frasi brevi, naturali e facili da leggere sullo schermo di uno smartphone.
-3. Se chiedono prezzi o servizi, usa ESCLUSIVAMENTE quelli indicati nel listino sopra. Non inventare mai sconti o servizi non presenti.
-4. Se il cliente chiede dove siete o orari, fornisci con precisione i dati del salone.`;
+                            // 6. 🧠 NUOVO: Pacchetto Addestramento & Clone (personal_ai_chat -> Training)
+                            db.collection('vendors').doc(vendorId).collection('personal_ai_chat').doc('Training').get().catch(() => ({ exists: false }))
+                        ]);
+            
+                        // =========================================================================
+                        // PACCHETTO 1: ISTRUZIONI, PERSONALITÀ & MENTE DEL TITOLARE (IL CLONE)
+                        // =========================================================================
+                        const trainingData = (trainingDoc && trainingDoc.exists) ? trainingDoc.data() : null;
+                        const hasCustomTraining = trainingData && trainingData.ai_ethics_accepted === true;
+            
+                        let personalityDirectives = "";
+                        if (hasCustomTraining) {
+                            if (trainingData.compiled_ai_persona) {
+                                personalityDirectives = trainingData.compiled_ai_persona;
+                            } else {
+                                const soulWords = trainingData.ai_owner_soul_notes ? `\n- SLANG E MODO DI PARLARE NATURALE DEL TITOLARE: ${trainingData.ai_owner_soul_notes}` : '';
+                                const strictRules = trainingData.ai_strict_rules ? `\n- REGOLE FERREE / PALETTI INVALICABILI: ${trainingData.ai_strict_rules}` : '';
+                                personalityDirectives = `${soulWords}${strictRules}\n- RADAR RELAZIONALE ATTIVO: Adatta calore e confidenza in base a chi ti scrive (massima confidenza con gli amici in rubrica, accoglienza esplorativa con i numeri nuovi).`;
+                            }
+                        } else {
+                            personalityDirectives = `Rispondi con calore, naturalezza e massima educazione come una receptionist impeccabile.`;
+                        }
+            
+                        // =========================================================================
+                        // PACCHETTO 2: DATI REALI, CATALOGO & INFORMAZIONI DI FATTO (IL NEGOZIO)
+                        // =========================================================================
+                        const storeName = vendorData.store_name || vendorData.owner_name || "il nostro salone";
+                        const storeAddress = vendorData.address || "in salone";
+                        const storeHours = vendorData.public_opening_hours || vendorData.opening_hours || "Orari standard";
+                        const specializations = (vendorData.customization_specializations || []).join(', ');
+                        
+                        const tipsData = clientTipsDoc.exists ? clientTipsDoc.data() : {};
+                        const parkingInfo = tipsData.parkingTips || "";
+                        const directionsInfo = tipsData.directions || "";
+            
+                        // Listino Servizi Reali
+                        const servicesList = servicesSnap.docs
+                            .map(d => d.data())
+                            .filter(s => s.productName && s.isAvailable !== false)
+                            .map(s => `- ${s.productName}: ${s.price}€ (${s.totalOccupiedTimeMinutes || s.serviceDuration || 30} min)`)
+                            .slice(0, 20)
+                            .join('\n');
+            
+                        // Prodotti Reali
+                        const productsList = productsSnap.docs
+                            .map(d => d.data())
+                            .filter(p => p.productName || p.name)
+                            .map(p => `- ${p.productName || p.name}${p.brand ? ` (${p.brand})` : ''}: ${p.price || 0}€`)
+                            .slice(0, 15)
+                            .join('\n');
+            
+                        // Profilazione Cliente dalla Rubrica
+                        let isKnownClient = false;
+                        let clientFullName = pushName || "Cliente";
+                        let clientNotesFormula = "";
+                        let isVip = false;
+            
+                        if (!clientSnap.empty) {
+                            const cData = clientSnap.docs[0].data();
+                            isKnownClient = true;
+                            clientFullName = `${cData.name || ''} ${cData.surname || ''}`.trim() || clientFullName;
+                            clientNotesFormula = cData.notes || "";
+                            isVip = Array.isArray(cData.tags) && cData.tags.includes('VIP');
+                        }
+            
+                        // Storico Conversazione
+                        let conversationHistory = [];
+                        if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
+                            conversationHistory = chatHistorySnap.docs.map(doc => ({
+                                role: doc.data().role === 'assistant' ? 'assistant' : 'user',
+                                content: doc.data().content
+                            })).reverse();
+                        }
+            
+                        // -------------------------------------------------------------
+                        // 🧠 FUSIONE DEI DUE PACCHETTI NEL CERVELLO DELL'IA
+                        // -------------------------------------------------------------
+                        const nowRome = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+                        const todayRome = new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
+            
+                        const systemPrompt = `Sei l'assistente virtuale ufficiale del salone "${storeName}" su WhatsApp.
+            Oggi è ${todayRome}, ore ${nowRome}.
+            
+            ============================================================
+            PACCHETTO 1: CHI SEI E COME DEVI PARLARE (PERSONALITÀ E ISTRUZIONI)
+            ============================================================
+            ${personalityDirectives}
+            
+            REGOLE ESSENZIALI DI COMUNICAZIONE:
+            1. Rispondi SEMPRE in massimo 2 o 3 frasi brevi, naturali e facili da leggere su smartphone.
+            2. Sii trasparente: sei l'assistente del salone con il carattere e il calore del titolare.
+            3. Se chiedono prezzi o trattamenti, usa ESCLUSIVAMENTE quelli presenti nel listino dati qui sotto. Zero sconti inventati.
+            
+            ============================================================
+            PACCHETTO 2: DATI REALI DEL NEGOZIO E DEL CLIENTE (FATTI VERI)
+            ============================================================
+            DATI ATTIVITÀ:
+            - Nome Salone: ${storeName}
+            - Indirizzo esatto: ${storeAddress}
+            - Orari di apertura: ${storeHours}
+            ${specializations ? `- Specializzazioni: ${specializations}` : ''}
+            ${parkingInfo ? `- Info Parcheggio: ${parkingInfo}` : ''}
+            ${directionsInfo ? `- Indicazioni stradali: ${directionsInfo}` : ''}
+            
+            CLIENTE CON CUI STAI PARLANDO ADESSO:
+            - Nome riconosciuto: "${clientFullName}"
+            - Grado di familiarità: ${isKnownClient ? `Cliente abituale registrato in rubrica${isVip ? ' (⭐️ CLIENTE VIP)' : ''}` : 'Nuovo visitatore (non presente in rubrica, accoglilo con calore ed esplorazione)'}
+            ${clientNotesFormula ? `- Note tecniche/Formule passate del cliente: "${clientNotesFormula}"` : ''}
+            
+            MENU SERVIZI E PREZZI DISPONIBILI:
+            ${servicesList || "Listino trattamenti disponibile in salone."}
+            
+            PRODOTTI IN VENDITA DISPONIBILI:
+            ${productsList || "Prodotti professionali disponibili in negozio."}`;
 
             const messagesPayload = [
                 { role: "system", content: systemPrompt },
