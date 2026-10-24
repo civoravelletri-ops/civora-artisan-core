@@ -521,56 +521,148 @@ module.exports = async function handler(req, res) {
                         PRODOTTI IN VENDITA DISPONIBILI:
                         ${productsList || "Prodotti professionali disponibili in negozio."}`;
 
-                                    const messagesPayload = [
-                                        { role: "system", content: systemPrompt },
-                                        ...conversationHistory,
-                                        { role: "user", content: activeUserPrompt }
-                                    ];
-
-                                    let aiReply = `Ciao ${clientFullName || ''}! Come posso aiutarti oggi da ${storeName}?`;
-
-                                    const GROQ_CANDIDATES = [
-                                        "llama-3.3-70b-versatile",
-                                                        "llama-3.1-8b-instant",
-                                                        "openai/gpt-oss-120b",
-                                        "llama-3.3-70b-versatile",
-                                                    "llama-3.1-8b-instant",
-                                                    "openai/gpt-oss-20b",
-                                                    "qwen/qwen3.6-27b",
-                                                    "gemma2-9b-it",
-                                    ];
-
-                                    for (const modelId of GROQ_CANDIDATES) {
-                                        try {
-                                            const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                                                method: "POST",
-                                                headers: {
-                                                    "Authorization": `Bearer ${(GROQ_API_KEY || '').trim()}`,
-                                                    "Content-Type": "application/json"
-                                                },
-                                                body: JSON.stringify({
-                                                    model: modelId,
-                                                    messages: messagesPayload,
-                                                    temperature: 0.3,
-                                                    max_tokens: 300
-                                                })
-                                            });
-
-                                            if (groqRes.ok) {
-                                                const groqData = await groqRes.json();
-                                                const content = groqData.choices?.[0]?.message?.content?.trim();
-                                                if (content) {
-                                                    aiReply = content;
-                                                    console.log(`[AutoPilot] ✅ Risposta generata con successo da Groq (${modelId})!`);
-                                                    break;
+                                    const todayIsoDate = new Date().toISOString().split('T')[0];
+                                    
+                                                const messagesPayload = [
+                                                    { role: "system", content: systemPrompt },
+                                                    ...conversationHistory,
+                                                    { role: "user", content: activeUserPrompt }
+                                                ];
+                                    
+                                                // Strumento reale collegato all'agenda del salone
+                                                const salonTools = [
+                                                    {
+                                                        type: "function",
+                                                        function: {
+                                                            name: "controlla_agenda_reale",
+                                                            description: "Interroga l'agenda reale del salone per verificare quali orari sono VERAMENTE liberi. Usala SEMPRE quando il cliente vuole prenotare, chiede disponibilità o orari per oggi, domani o qualsiasi data futura.",
+                                                            parameters: {
+                                                                type: "object",
+                                                                properties: {
+                                                                    dataRichiesta: {
+                                                                        type: "string",
+                                                                        description: `Data esatta richiesta nel formato YYYY-MM-DD. Tieni conto che oggi è ${todayIsoDate}.`
+                                                                    },
+                                                                    durataMinuti: {
+                                                                        type: "number",
+                                                                        description: "Durata stimata del servizio in minuti (default 30 se taglio normale, 45-60 se combinato con barba o altri trattamenti)."
+                                                                    }
+                                                                },
+                                                                required: ["dataRichiesta"]
+                                                            }
+                                                        }
+                                                    }
+                                                ];
+                                    
+                                                let aiReply = `Ciao ${clientFullName || ''}! Come posso aiutarti oggi da ${storeName}?`;
+                                    
+                                                const GROQ_CANDIDATES = [
+                                                    "llama-3.3-70b-versatile",
+                                                    "llama-3.1-8b-instant"
+                                                ];
+                                    
+                                                for (const modelId of GROQ_CANDIDATES) {
+                                                    try {
+                                                        // Prima chiamata: l'IA legge il messaggio e decide se deve consultare l'agenda
+                                                        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                                                            method: "POST",
+                                                            headers: {
+                                                                "Authorization": `Bearer ${(GROQ_API_KEY || '').trim()}`,
+                                                                "Content-Type": "application/json"
+                                                            },
+                                                            body: JSON.stringify({
+                                                                model: modelId,
+                                                                messages: messagesPayload,
+                                                                tools: salonTools,
+                                                                tool_choice: "auto",
+                                                                temperature: 0.3,
+                                                                max_tokens: 350
+                                                            })
+                                                        });
+                                    
+                                                        if (groqRes.ok) {
+                                                            const groqData = await groqRes.json();
+                                                            const choice = groqData.choices?.[0];
+                                                            const messageObj = choice?.message;
+                                    
+                                                            // Se il cliente ha chiesto un appuntamento, l'IA interroga l'agenda reale!
+                                                            if (messageObj?.tool_calls && messageObj.tool_calls.length > 0) {
+                                                                const call = messageObj.tool_calls[0];
+                                                                let callArgs = {};
+                                                                try { callArgs = JSON.parse(call.function.arguments); } catch(e) {}
+                                    
+                                                                const targetDate = callArgs.dataRichiesta || todayIsoDate;
+                                                                const targetDuration = callArgs.durataMinuti || 30;
+                                    
+                                                                console.log(`[AutoPilot Agenda] 🔍 Controllo slot reali per ${targetDate} (${targetDuration} min)...`);
+                                    
+                                                                // Interrogazione diretta a getAvailableSlots
+                                                                let realSlots = [];
+                                                                try {
+                                                                    const slotFetch = await fetch("https://localmente-api.vercel.app/api/get-available-slots", {
+                                                                        method: "POST",
+                                                                        headers: { "Content-Type": "application/json" },
+                                                                        body: JSON.stringify({
+                                                                            action: "getAvailableSlots",
+                                                                            vendorId: vendorId,
+                                                                            date: targetDate,
+                                                                            totalOccupiedTimeMinutes: targetDuration
+                                                                        })
+                                                                    });
+                                                                    const slotJson = await slotFetch.json();
+                                                                    realSlots = slotJson.slots || [];
+                                                                } catch(slotErr) {
+                                                                    console.warn("[AutoPilot Agenda] Errore lettura slot:", slotErr.message);
+                                                                }
+                                    
+                                                                // Consegniamo gli orari veri all'IA per fargli formulare la risposta al cliente
+                                                                messagesPayload.push(messageObj);
+                                                                messagesPayload.push({
+                                                                    role: "tool",
+                                                                    tool_call_id: call.id,
+                                                                    content: JSON.stringify({
+                                                                        dataRichiesta: targetDate,
+                                                                        orariVeramenteLiberi: realSlots.length > 0 ? realSlots : "Completo / Nessun orario disponibile"
+                                                                    })
+                                                                });
+                                    
+                                                                // Seconda risposta rapida con gli orari reali in mano
+                                                                const finalGroqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                                                                    method: "POST",
+                                                                    headers: {
+                                                                        "Authorization": `Bearer ${(GROQ_API_KEY || '').trim()}`,
+                                                                        "Content-Type": "application/json"
+                                                                    },
+                                                                    body: JSON.stringify({
+                                                                        model: modelId,
+                                                                        messages: messagesPayload,
+                                                                        temperature: 0.3,
+                                                                        max_tokens: 350
+                                                                    })
+                                                                });
+                                    
+                                                                if (finalGroqRes.ok) {
+                                                                    const finalData = await finalGroqRes.json();
+                                                                    const finalContent = finalData.choices?.[0]?.message?.content?.trim();
+                                                                    if (finalContent) {
+                                                                        aiReply = finalContent;
+                                                                        console.log(`[AutoPilot] ✅ Risposta con agenda reale generata con successo (${modelId})!`);
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            } else if (messageObj?.content) {
+                                                                // Se era una normale domanda (es. info o prezzi), risponde normalmente
+                                                                aiReply = messageObj.content.trim();
+                                                                console.log(`[AutoPilot] ✅ Risposta generata con successo da Groq (${modelId})!`);
+                                                                break;
+                                                            }
+                                                        } else {
+                                                            console.warn(`[Groq Info] Modello ${modelId} non attivo sulla chiave, provo il successivo...`);
+                                                        }
+                                                    } catch (aiErr) {
+                                                        console.warn(`[AutoPilot] Tentativo fallito su ${modelId}:`, aiErr.message);
+                                                    }
                                                 }
-                                            } else {
-                                                console.warn(`[Groq Info] Modello ${modelId} non attivo sulla chiave, provo il successivo...`);
-                                            }
-                                        } catch (aiErr) {
-                                            console.warn(`[AutoPilot] Tentativo fallito su ${modelId}:`, aiErr.message);
-                                        }
-                                    }
 
                                     // 💾 Salvataggio messaggi e aggiornamento scheda cliente con data e ora precisa
                                     try {
