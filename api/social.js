@@ -4,12 +4,12 @@ const admin = require('firebase-admin');
 if (!admin.apps.length) {
     try {
         let rawKey = (process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '').trim();
-        
+
         // Se inizia con "ewog" o non inizia con "{", è un Base64 e lo decifriamo
         if (!rawKey.startsWith('{')) {
             rawKey = Buffer.from(rawKey, 'base64').toString('utf8');
         }
-        
+
         const serviceAccount = JSON.parse(rawKey);
         admin.initializeApp({
             credential: admin.credential.cert(serviceAccount)
@@ -76,9 +76,9 @@ module.exports = async function handler(req, res) {
 
             if (!isWaConnected || !isAutoPilotOn) {
                 console.log(`[Buttafuori] 🛑 Accesso negato per ${vendorId}. Connesso: ${isWaConnected}, Pilota IA: ${isAutoPilotOn}`);
-                return res.status(200).json({ 
-                    status: "skipped", 
-                    reason: "Pilota automatico o WhatsApp disattivati dal negoziante" 
+                return res.status(200).json({
+                    status: "skipped",
+                    reason: "Pilota automatico o WhatsApp disattivati dal negoziante"
                 });
             }
 
@@ -88,17 +88,38 @@ module.exports = async function handler(req, res) {
             // 🤵 IL MAGGIORDOMO: RACCOLTA DATI ISTANTANEA (IN PARALLELO)
             // -------------------------------------------------------------
             let cleanPhone = senderPhone.replace(/\D/g, '');
-            if (!cleanPhone.startsWith('39') && cleanPhone.length === 10) cleanPhone = '39' + cleanPhone;
-
-            const phoneVariants = Array.from(new Set([
-                senderPhone,
-                cleanPhone,
-                `+${cleanPhone}`,
-                cleanPhone.startsWith('39') ? cleanPhone.substring(2) : cleanPhone
-            ].filter(Boolean)));
-
-            // Esegue tutte le letture del database in contemporanea (circa 50ms)
-                        const [clientTipsDoc, servicesSnap, productsSnap, clientSnap, chatHistorySnap, trainingDoc] = await Promise.all([
+                        if (!cleanPhone.startsWith('39') && cleanPhone.length === 10) cleanPhone = '39' + cleanPhone;
+            
+                        const phoneVariants = Array.from(new Set([
+                            senderPhone,
+                            cleanPhone,
+                            `+${cleanPhone}`,
+                            cleanPhone.startsWith('39') ? cleanPhone.substring(2) : cleanPhone
+                        ].filter(Boolean)));
+            
+                        const GATEWAY_BASE_URL = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
+            
+                        // Funzione rapida per spedire messaggi diretti tramite il server Render
+                        async function sendWhatsAppMessage(replyText) {
+                            try {
+                                await fetch(`${GATEWAY_BASE_URL}/send-message`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        vendorId: vendorId,
+                                        phone: senderJid || senderPhone,
+                                        message: replyText
+                                    })
+                                });
+                            } catch (sendErr) {
+                                console.error("[AutoPilot Gateway] Errore invio:", sendErr.message);
+                            }
+                        }
+            
+                        // -------------------------------------------------------------
+                        // 🤵 IL RAGAZZO: RACCOLTA DATI ISTANTANEA (IN PARALLELO)
+                        // -------------------------------------------------------------
+                        const [clientTipsDoc, servicesSnap, productsSnap, clientSnap, chatHistorySnap, trainingDoc, collaboratorsSnap, chatProfileDoc] = await Promise.all([
                             // 1. Consigli salone (parcheggi e indicazioni)
                             db.collection('vendors').doc(vendorId).collection('consiglicliente').doc('main').get().catch(() => ({ exists: false })),
                             
@@ -117,12 +138,161 @@ module.exports = async function handler(req, res) {
                             db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone)
                                 .collection('messages').orderBy('timestamp', 'desc').limit(6).get().catch(() => ({ docs: [] })),
             
-                            // 6. 🧠 NUOVO: Pacchetto Addestramento & Clone (personal_ai_chat -> Training)
-                            db.collection('vendors').doc(vendorId).collection('personal_ai_chat').doc('Training').get().catch(() => ({ exists: false }))
+                            // 6. Pacchetto Addestramento & Clone
+                            db.collection('vendors').doc(vendorId).collection('personal_ai_chat').doc('Training').get().catch(() => ({ exists: false })),
+            
+                            // 7. 👥 Squadra del Salone (Collaboratori e Staff)
+                            db.collection('vendors').doc(vendorId).collection('collaborators').where('isActive', '==', true).get().catch(() => ({ docs: [] })),
+            
+                            // 8. 📁 Fascicolo Chat Personale del Numero di Telefono
+                            db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone).get().catch(() => ({ exists: false }))
                         ]);
             
                         // =========================================================================
-                        // PACCHETTO 1: ISTRUZIONI, PERSONALITÀ & MENTE DEL TITOLARE (IL CLONE)
+                        // 🎯 RICONOSCIMENTO IMMEDIATO NOME CLIENTE
+                        // =========================================================================
+                        let isKnownClient = false;
+                        let clientFirstName = "";
+                        let clientFullName = "";
+                        let clientNotesFormula = "";
+                        let isVip = false;
+            
+                        if (!clientSnap.empty) {
+                            const cData = clientSnap.docs[0].data();
+                            isKnownClient = true;
+                            clientFirstName = (cData.name || "").trim();
+                            clientFullName = `${clientFirstName} ${cData.surname || ''}`.trim();
+                            clientNotesFormula = cData.notes || "";
+                            isVip = Array.isArray(cData.tags) && cData.tags.includes('VIP');
+                        } else if (pushName && pushName.length >= 2 && !pushName.includes("@")) {
+                            clientFirstName = pushName.trim().split(" ")[0];
+                            clientFullName = pushName.trim();
+                        }
+            
+                        const storeName = vendorData.store_name || vendorData.owner_name || "il nostro salone";
+                        const chatDocRef = db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone);
+                        const messagesCol = chatDocRef.collection('messages');
+            
+                        // Formattatore orario leggibile per lo storico chat
+                        const nowRomeStr = new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
+            
+                        const chatData = (chatProfileDoc && chatProfileDoc.exists) ? (chatProfileDoc.data() || {}) : null;
+                        const currentConsent = chatData ? chatData.aiConsentStatus : null;
+            
+                        // =========================================================================
+                        // 🚦 CASO 1: PRIMISSIMO CONTATTO (FASCICOLO NON ESISTE O NESSUN CONSENSO)
+                        // =========================================================================
+                        if (!chatData || !currentConsent) {
+                            // Registra subito la scheda del cliente nel database
+                            await chatDocRef.set({
+                                phone: cleanPhone,
+                                customerName: clientFullName || pushName || 'Cliente',
+                                firstContactAt: admin.firestore.FieldValue.serverTimestamp(),
+                                firstContactDate: nowRomeStr,
+                                aiConsentStatus: 'pending',
+                                pendingInitialMessage: messageText,
+                                lastMessage: messageText,
+                                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                            }, { merge: true });
+            
+                            // Salva il messaggio ricevuto
+                            await messagesCol.add({
+                                role: 'user',
+                                content: messageText,
+                                timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                                dateTimeRome: nowRomeStr
+                            });
+            
+                            // Messaggio veloce, sintetico e trasparente
+                            const greetingName = clientFirstName ? `Ciao ${clientFirstName}! 👋` : `Ciao! 👋`;
+                            const firstContactMsg = `${greetingName}\nSono l'assistente virtuale con Intelligenza Artificiale di *${storeName}*, addestrata dal titolare per darti informazioni, gestire prenotazioni e ordini.\n\nPer continuare:\n1️⃣ Digita *1* per chattare con me subito\n2️⃣ Digita *2* per attendere la risposta del titolare in persona`;
+            
+                            await sendWhatsAppMessage(firstContactMsg);
+            
+                            await messagesCol.add({
+                                role: 'assistant',
+                                content: firstContactMsg,
+                                timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                                dateTimeRome: nowRomeStr
+                            });
+            
+                            return res.status(200).json({ success: true, status: "consent_requested", phone: cleanPhone });
+                        }
+            
+                        // =========================================================================
+                        // 🚦 CASO 2: IL CLIENTE È IN ATTESA E STA DIGITANDO 1 OPPURE 2
+                        // =========================================================================
+                        if (currentConsent === 'pending') {
+                            const cleanedAnswer = messageText.trim().toLowerCase();
+                            const isAccept = /^(1|uno|si|sì|ok|accetto|1️⃣)$/i.test(cleanedAnswer);
+                            const isDecline = /^(2|due|no|rifiuto|2️⃣)$/i.test(cleanedAnswer);
+            
+                            // Salva il messaggio della risposta (es. "1" o "2")
+                            await messagesCol.add({
+                                role: 'user',
+                                content: messageText,
+                                timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                                dateTimeRome: nowRomeStr
+                            });
+            
+                            if (isDecline) {
+                                await chatDocRef.set({
+                                    aiConsentStatus: 'declined',
+                                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                                }, { merge: true });
+            
+                                const declineMsg = `Perfetto, nessun problema! 👤 Ho avvisato il titolare: ti risponderà personalmente appena possibile. A presto!`;
+                                await sendWhatsAppMessage(declineMsg);
+            
+                                await messagesCol.add({
+                                    role: 'assistant',
+                                    content: declineMsg,
+                                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                                    dateTimeRome: nowRomeStr
+                                });
+            
+                                return res.status(200).json({ success: true, status: "consent_declined" });
+                            }
+            
+                            if (!isAccept) {
+                                // Non ha digitato né 1 né 2: promemoria veloce
+                                const remindMsg = `Per poterti assistere, digita *1* per chattare con l'assistente IA oppure *2* per attendere il titolare. 😊`;
+                                await sendWhatsAppMessage(remindMsg);
+            
+                                await messagesCol.add({
+                                    role: 'assistant',
+                                    content: remindMsg,
+                                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                                    dateTimeRome: nowRomeStr
+                                });
+            
+                                return res.status(200).json({ success: true, status: "consent_reminded" });
+                            }
+            
+                            // Ha digitato 1 (ACCETTATO!): Sblocca il consenso e ripesca la sua domanda originaria
+                            await chatDocRef.set({
+                                aiConsentStatus: 'accepted',
+                                consentAcceptedAt: admin.firestore.FieldValue.serverTimestamp(),
+                                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                            }, { merge: true });
+            
+                            const originalQuestion = chatData.pendingInitialMessage || messageText;
+                            console.log(`[AutoPilot] 🟢 Consenso ACCETTATO da ${cleanPhone}! Riprendo la domanda: "${originalQuestion}"`);
+            
+                            // Istruiamo l'IA a confermare con calore l'accoglienza e rispondere subito alla domanda iniziale
+                            messageText = `[SISTEMA: Il cliente ha appena premuto 1 accettando l'assistente IA. Salutalo con calore ed entusiasmo dicendogli che sei pronta, e rispondi subito alla domanda che aveva fatto prima: "${originalQuestion}"]`;
+                        }
+            
+                        // =========================================================================
+                        // 🚦 CASO 3: SE IL CLIENTE AVEVA SCELTO DI PARLARE SOLO CON L'UMANO
+                        // =========================================================================
+                        if (currentConsent === 'declined') {
+                            console.log(`[AutoPilot] 🛑 Chat gestita manualmente per ${cleanPhone}. Pilota IA in pausa.`);
+                            return res.status(200).json({ status: "skipped", reason: "Chat gestita manualmente dal titolare" });
+                        }
+            
+                        // =========================================================================
+                        // 🚀 CASO 4: CONSENSO ATTIVO! IL CERVELLO DELL'IA ENTRA IN AZIONE
                         // =========================================================================
                         const trainingData = (trainingDoc && trainingDoc.exists) ? trainingDoc.data() : null;
                         const hasCustomTraining = trainingData && trainingData.ai_ethics_accepted === true;
@@ -140,10 +310,6 @@ module.exports = async function handler(req, res) {
                             personalityDirectives = `Rispondi con calore, naturalezza e massima educazione come una receptionist impeccabile.`;
                         }
             
-                        // =========================================================================
-                        // PACCHETTO 2: DATI REALI, CATALOGO & INFORMAZIONI DI FATTO (IL NEGOZIO)
-                        // =========================================================================
-                        const storeName = vendorData.store_name || vendorData.owner_name || "il nostro salone";
                         const storeAddress = vendorData.address || "in salone";
                         const storeHours = vendorData.public_opening_hours || vendorData.opening_hours || "Orari standard";
                         const specializations = (vendorData.customization_specializations || []).join(', ');
@@ -152,15 +318,19 @@ module.exports = async function handler(req, res) {
                         const parkingInfo = tipsData.parkingTips || "";
                         const directionsInfo = tipsData.directions || "";
             
-                        // Listino Servizi Reali
+                        const servicesNameMap = new Map();
+                        servicesSnap.docs.forEach(d => {
+                            const s = d.data();
+                            if (s.productName) servicesNameMap.set(d.id, s.productName);
+                        });
+            
                         const servicesList = servicesSnap.docs
                             .map(d => d.data())
                             .filter(s => s.productName && s.isAvailable !== false)
                             .map(s => `- ${s.productName}: ${s.price}€ (${s.totalOccupiedTimeMinutes || s.serviceDuration || 30} min)`)
-                            .slice(0, 20)
+                            .slice(0, 25)
                             .join('\n');
             
-                        // Prodotti Reali
                         const productsList = productsSnap.docs
                             .map(d => d.data())
                             .filter(p => p.productName || p.name)
@@ -168,111 +338,115 @@ module.exports = async function handler(req, res) {
                             .slice(0, 15)
                             .join('\n');
             
-                        // =========================================================================
-                                    // 🎯 RADAR PSICOLOGICO: RICONOSCIMENTO IMMEDIATO DEL CLIENTE
-                                    // =========================================================================
-                                    let isKnownClient = false;
-                                    let clientFirstName = "";
-                                    let clientFullName = "";
-                                    let clientNotesFormula = "";
-                                    let isVip = false;
-
-                                    if (!clientSnap.empty) {
-                                        // 1. TROVATO NELLA RUBRICA CIVORA (CLIENTE ABITUALE)
-                                        const cData = clientSnap.docs[0].data();
-                                        isKnownClient = true;
-                                        clientFirstName = (cData.name || "").trim();
-                                        clientFullName = `${clientFirstName} ${cData.surname || ''}`.trim();
-                                        clientNotesFormula = cData.notes || "";
-                                        isVip = Array.isArray(cData.tags) && cData.tags.includes('VIP');
-                                    } else if (pushName && pushName.length >= 2 && !pushName.includes("@")) {
-                                        // 2. NUOVO SU CIVORA, MA HA IL NOME SU WHATSAPP
-                                        clientFirstName = pushName.trim().split(" ")[0];
-                                        clientFullName = pushName.trim();
-                                    }
-
-                                    // Istruzioni psicologiche di accoglienza per l'IA
-                                    let customerRecognitionGuideline = "";
-                                    if (isKnownClient) {
-                                        customerRecognitionGuideline = `STAI PARLANDO CON UN CLIENTE ABITUALE REGISTRATO: "${clientFullName}"${isVip ? ' (CLIENTE VIP ⭐️)' : ''}.
-                        - REGOLE DI ACCOGLIENZA: Salutalo subito calorosamente per nome fin dalla prima parola (es. "Ciao ${clientFirstName}!").
-                        - NON presentare il salone come se fosse la prima volta (sa già chi siete!).
-                        - Trattalo con grande confidenza, affetto e calore da persona di casa.
-                        ${clientNotesFormula ? `- NOTE TECNICHE/FORMULE DEL CLIENTE: "${clientNotesFormula}" (Se chiede cosa ha fatto l'altra volta o vuole ripetere il servizio, fagli riferimento a questa formula).` : ''}`;
-                                    } else if (clientFirstName) {
-                                        customerRecognitionGuideline = `STAI PARLANDO CON UN NUOVO CLIENTE, MA CONOSCI IL SUO NOME DA WHATSAPP: "${clientFirstName}".
-                        - REGOLE DI ACCOGLIENZA: Dagli un caloroso benvenuto a nome del salone usando subito il suo nome di battesimo (es. "Ciao ${clientFirstName}! Benvenuto da ${storeName}!").
-                        - Mostrati felice di accoglierlo ed esplora con dolcezza cosa desidera fare.`;
-                                    } else {
-                                        customerRecognitionGuideline = `STAI PARLANDO CON UN NUMERO SCONOSCIUTO (Nessun nome registrato).
-                        - REGOLE DI ACCOGLIENZA: Dagli un caloroso benvenuto a nome del salone (es. "Ciao e benvenuto da ${storeName}! Come possiamo aiutarti oggi?").
-                        - Sii impeccabilmente gentile, accogliente e rassicurante.`;
-                                    }
-
-                                    // Storico Conversazione
-                                    let conversationHistory = [];
-                                    if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
-                                        conversationHistory = chatHistorySnap.docs.map(doc => ({
-                                            role: doc.data().role === 'assistant' ? 'assistant' : 'user',
-                                            content: doc.data().content
-                                        })).reverse();
-                                    }
-
-                                    // -------------------------------------------------------------
-                                    // 🧠 FUSIONE DEI DUE PACCHETTI NEL CERVELLO DELL'IA
-                                    // -------------------------------------------------------------
-                                    const nowRome = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
-                                    const todayRome = new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
-
-                                    const systemPrompt = `Sei l'assistente virtuale ufficiale del salone "${storeName}" su WhatsApp.
-                        Oggi è ${todayRome}, ore ${nowRome}.
-
-                        ============================================================
-                        PACCHETTO 1: CHI SEI E COME DEVI PARLARE (PERSONALITÀ E ISTRUZIONI)
-                        ============================================================
-                        ${personalityDirectives}
-
-                        REGOLE FERREE DI COMUNICAZIONE:
-                        1. Rispondi SEMPRE in massimo 2 o 3 frasi brevi, naturali e facili da leggere su smartphone.
-                        2. Sii trasparente: sei l'assistente del salone con il carattere e il calore del titolare.
-                        3. Se chiedono prezzi o trattamenti, usa ESCLUSIVAMENTE quelli presenti nel listino dati qui sotto. Zero sconti inventati.
-                        4. COMPRENDI LO SLANG: Capisci al volo espressioni colloquiali o dialettali ("al volo", "un buco", "sfumatura", "fresco", "a che ora staccate") e rispondi con calore e naturalezza.
-
-                        ============================================================
-                        PROFILO DEL CLIENTE CHE TI HA SCRITTO:
-                        ============================================================
-                        ${customerRecognitionGuideline}
-
-                        ============================================================
-                        PACCHETTO 2: DATI REALI DEL NEGOZIO (FATTI VERI)
-                        ============================================================
-                        DATI ATTIVITÀ:
-                        - Nome Salone: ${storeName}
-                        - Indirizzo esatto: ${storeAddress}
-                        - Orari di apertura: ${storeHours}
-                        ${specializations ? `- Specializzazioni: ${specializations}` : ''}
-                        ${parkingInfo ? `- Info Parcheggio: ${parkingInfo}` : ''}
-                        ${directionsInfo ? `- Indicazioni stradali: ${directionsInfo}` : ''}
-
-                        MENU SERVIZI E PREZZI DISPONIBILI:
-                        ${servicesList || "Listino trattamenti disponibile in salone."}
-
-                        PRODOTTI IN VENDITA DISPONIBILI:
-                        ${productsList || "Prodotti professionali disponibili in negozio."}`;
-
-            const messagesPayload = [
-                { role: "system", content: systemPrompt },
-                ...conversationHistory,
-                { role: "user", content: messageText }
-            ];
-
-            // Chiamata all'Intelligenza Artificiale (Con Modello Universale Istantaneo e Paracadute)
-                        let aiReply = `Ciao ${clientFullName}! Ti ringraziamo per averci scritto da ${storeName}. Come possiamo aiutarti oggi?`;
+                        // Squadra del salone
+                        const teamEntries = [];
+                        const ownerName = vendorData.owner_name || vendorData.store_name || "Titolare";
+                        const ownerJob = vendorData.owner_job_title ? ` (${vendorData.owner_job_title})` : '';
+                        const ownerSpecs = vendorData.owner_specialties ? `\n  - Specializzazioni: ${vendorData.owner_specialties}` : '';
+                        const ownerBio = vendorData.owner_bio ? `\n  - Bio: ${vendorData.owner_bio}` : '';
+                        const ownerAiNotes = vendorData.owner_ai_notes ? `\n  - Istruzioni IA: ${vendorData.owner_ai_notes}` : '';
+                        
+                        let ownerServs = "Tutti i servizi del salone";
+                        if (Array.isArray(vendorData.servicesOffered) && vendorData.servicesOffered.length > 0) {
+                            const mapped = vendorData.servicesOffered.map(id => servicesNameMap.get(id)).filter(Boolean);
+                            if (mapped.length > 0) ownerServs = mapped.join(', ');
+                        }
+                        teamEntries.push(`• 👑 ${ownerName}${ownerJob} [Titolare Principale]:\n  - Servizi che esegue: ${ownerServs}${ownerSpecs}${ownerBio}${ownerAiNotes}`);
+            
+                        if (collaboratorsSnap.docs && collaboratorsSnap.docs.length > 0) {
+                            collaboratorsSnap.docs.forEach(doc => {
+                                const c = doc.data();
+                                const cRole = (c.role === 'owner') ? '👑 Socio / Co-Titolare' : '✂️ Staff / Collaboratore';
+                                const cJob = c.jobTitle ? ` (${c.jobTitle})` : '';
+                                const cSpecs = c.specialties ? `\n  - Specializzazioni: ${c.specialties}` : '';
+                                const cBio = c.bio ? `\n  - Bio: ${c.bio}` : '';
+                                const cAiNotes = c.aiNotes ? `\n  - Istruzioni IA: ${c.aiNotes}` : '';
+            
+                                let cServs = "Servizi standard del salone";
+                                if (Array.isArray(c.servicesOffered) && c.servicesOffered.length > 0) {
+                                    const mapped = c.servicesOffered.map(id => servicesNameMap.get(id)).filter(Boolean);
+                                    if (mapped.length > 0) cServs = mapped.join(', ');
+                                }
+                                teamEntries.push(`• ${cRole}: ${c.name}${cJob}\n  - Servizi che esegue: ${cServs}${cSpecs}${cBio}${cAiNotes}`);
+                            });
+                        }
+                        const teamListFormatted = teamEntries.join('\n\n');
+            
+                        let customerRecognitionGuideline = "";
+                        if (isKnownClient) {
+                            customerRecognitionGuideline = `STAI PARLANDO CON UN CLIENTE ABITUALE REGISTRATO: "${clientFullName}"${isVip ? ' (CLIENTE VIP ⭐️)' : ''}.
+            - REGOLE DI ACCOGLIENZA: Salutalo calorosamente per nome (es. "Ciao ${clientFirstName}!"). Sa già chi siete!
+            - Trattalo con grande confidenza, affetto e calore da persona di casa.
+            ${clientNotesFormula ? `- NOTE TECNICHE/FORMULE DEL CLIENTE: "${clientNotesFormula}"` : ''}`;
+                        } else if (clientFirstName) {
+                            customerRecognitionGuideline = `STAI PARLANDO CON UN CLIENTE DI NOME: "${clientFirstName}". Sii accogliente e caloroso.`;
+                        } else {
+                            customerRecognitionGuideline = `STAI PARLANDO CON UN CLIENTE NUOVO. Sii impeccabilmente gentile, accogliente e professionale.`;
+                        }
+            
+                        let conversationHistory = [];
+                        if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
+                            conversationHistory = chatHistorySnap.docs.map(doc => ({
+                                role: doc.data().role === 'assistant' ? 'assistant' : 'user',
+                                content: doc.data().content
+                            })).reverse();
+                        }
+            
+                        const nowRome = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+                        const todayRome = new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
+            
+                        const systemPrompt = `Sei l'assistente virtuale ufficiale del salone "${storeName}" su WhatsApp.
+            Oggi è ${todayRome}, ore ${nowRome}.
+            
+            ============================================================
+            PACCHETTO 1: CHI SEI E COME DEVI PARLARE (PERSONALITÀ E ISTRUZIONI)
+            ============================================================
+            ${personalityDirectives}
+            
+            REGOLE FERREE DI COMUNICAZIONE:
+            1. Rispondi SEMPRE in massimo 2 o 3 frasi brevi, naturali e facili da leggere su smartphone.
+            2. Sei l'assistente virtuale ufficiale del salone, trasparente, efficiente e con il calore del titolare.
+            3. Se chiedono prezzi o trattamenti, usa ESCLUSIVAMENTE quelli presenti nel listino dati qui sotto. Zero sconti inventati.
+            4. COMPRENDI LO SLANG: Capisci al volo espressioni colloquiali o dialettali ("al volo", "un buco", "sfumatura", "fresco", "a che ora staccate") e rispondi con calore e naturalezza.
+            5. CONOSCI LA SQUADRA: Se chiedono chi lavora nel salone, quanti siete, chi esegue determinati servizi o chi è specializzato in cosa, rispondi con precisione usando ESCLUSIVAMENTE i dati della squadra riportati qui sotto.
+            
+            ============================================================
+            PROFILO DEL CLIENTE CHE TI HA SCRITTO:
+            ============================================================
+            ${customerRecognitionGuideline}
+            
+            ============================================================
+            PACCHETTO 2: DATI REALI DEL NEGOZIO E SQUADRA (FATTI VERI)
+            ============================================================
+            DATI ATTIVITÀ:
+            - Nome Salone: ${storeName}
+            - Indirizzo esatto: ${storeAddress}
+            - Orari di apertura: ${storeHours}
+            ${specializations ? `- Specializzazioni: ${specializations}` : ''}
+            ${parkingInfo ? `- Info Parcheggio: ${parkingInfo}` : ''}
+            ${directionsInfo ? `- Indicazioni stradali: ${directionsInfo}` : ''}
+            
+            SQUADRA E STAFF DEL SALONE (CHI LAVORA QUI E COSA FA):
+            ${teamListFormatted}
+            
+            MENU SERVIZI E PREZZI DISPONIBILI:
+            ${servicesList || "Listino trattamenti disponibile in salone."}
+            
+            PRODOTTI IN VENDITA DISPONIBILI:
+            ${productsList || "Prodotti professionali disponibili in negozio."}`;
+            
+                        const messagesPayload = [
+                            { role: "system", content: systemPrompt },
+                            ...conversationHistory,
+                            { role: "user", content: messageText }
+                        ];
+            
+                        let aiReply = `Ciao ${clientFullName || ''}! Come posso aiutarti oggi da ${storeName}?`;
             
                         const GROQ_CANDIDATES = [
                             "llama-3.3-70b-versatile",
-                                        "llama-3.1-8b-instant",
-                                        "openai/gpt-oss-120b",
+                            "llama-3.1-8b-instant",
+                            "openai/gpt-oss-120b",
                             "llama3-8b-8192"
                         ];
             
@@ -307,57 +481,39 @@ module.exports = async function handler(req, res) {
                                 console.warn(`[AutoPilot] Tentativo fallito su ${modelId}:`, aiErr.message);
                             }
                         }
-
-            // -------------------------------------------------------------
-            // 💾 SALVATAGGIO MEMORIA CHAT NELLA CARTELLA DEL SALONE
-            // -------------------------------------------------------------
-            try {
-                const chatDocRef = db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone);
-                const messagesCol = chatDocRef.collection('messages');
-
-                await Promise.all([
-                    messagesCol.add({
-                        role: 'user',
-                        content: messageText,
-                        timestamp: admin.firestore.FieldValue.serverTimestamp()
-                    }),
-                    messagesCol.add({
-                        role: 'assistant',
-                        content: aiReply,
-                        timestamp: admin.firestore.FieldValue.serverTimestamp()
-                    }),
-                    chatDocRef.set({
-                        phone: cleanPhone,
-                        customerName: clientFullName,
-                        lastMessage: aiReply,
-                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-                    }, { merge: true })
-                ]);
-            } catch (memErr) {
-                console.warn("[Memoria Chat] Errore salvataggio:", memErr.message);
-            }
-
-            // -------------------------------------------------------------
-            // 🚀 INVIO RISPOSTA AL SERVER RENDER (IL POSTINO)
-            // -------------------------------------------------------------
-            const GATEWAY_BASE_URL = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
             
-            try {
-                await fetch(`${GATEWAY_BASE_URL}/send-message`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        vendorId: vendorId,
-                        phone: senderJid || senderPhone,
-                        message: aiReply
-                    })
-                });
-                console.log(`[AutoPilot] 🚀 Risposta inviata al cliente "${clientFullName}" (${cleanPhone})!`);
-            } catch (sendErr) {
-                console.error("[AutoPilot] Errore invio Gateway Render:", sendErr.message);
-            }
-
-            return res.status(200).json({ success: true, client: clientFullName, reply: aiReply });
+                        // 💾 Salvataggio messaggi e aggiornamento scheda cliente con data e ora precisa
+                        try {
+                            await Promise.all([
+                                messagesCol.add({
+                                    role: 'user',
+                                    content: (currentConsent === 'pending') ? (chatData.pendingInitialMessage || 'Accettazione IA') : messageText,
+                                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                                    dateTimeRome: nowRomeStr
+                                }),
+                                messagesCol.add({
+                                    role: 'assistant',
+                                    content: aiReply,
+                                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                                    dateTimeRome: nowRomeStr
+                                }),
+                                chatDocRef.set({
+                                    phone: cleanPhone,
+                                    customerName: clientFullName || pushName || 'Cliente',
+                                    lastMessage: aiReply,
+                                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                                    lastActiveDate: nowRomeStr
+                                }, { merge: true })
+                            ]);
+                        } catch (memErr) {
+                            console.warn("[Memoria Chat] Errore salvataggio:", memErr.message);
+                        }
+            
+                        // 🚀 Invio risposta al Gateway WhatsApp
+                        await sendWhatsAppMessage(aiReply);
+                        console.log(`[AutoPilot] 🚀 Risposta inviata al cliente "${clientFullName || cleanPhone}"!`);
+            
+                        return res.status(200).json({ success: true, client: clientFullName, reply: aiReply });
         }
 
         // =========================================================================
