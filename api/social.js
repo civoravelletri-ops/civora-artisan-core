@@ -1,18 +1,31 @@
 const admin = require('firebase-admin');
 
-// 🔑 1. Inizializzazione diretta di Firebase Admin SDK
+// Inizializzazione ultra-sicura: decodifica automaticamente sia JSON normale che Base64 ("ewog...")
 if (!admin.apps.length) {
     try {
-        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+        let rawKey = (process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '').trim();
+        
+        // Se inizia con "ewog" o non inizia con "{", è un Base64 e lo decifriamo
+        if (!rawKey.startsWith('{')) {
+            rawKey = Buffer.from(rawKey, 'base64').toString('utf8');
+        }
+        
+        const serviceAccount = JSON.parse(rawKey);
         admin.initializeApp({
             credential: admin.credential.cert(serviceAccount)
         });
-        console.log('[Firebase Admin] Inizializzato con successo su social.js');
+        console.log('[Firebase Admin] ✅ Inizializzato con successo su social.js!');
     } catch (err) {
         console.error('[Firebase Admin Error] Errore inizializzazione:', err.message);
     }
 }
-const db = admin.firestore();
+
+let db;
+try {
+    db = admin.firestore();
+} catch (dbErr) {
+    console.error('[Firebase Admin DB Error]:', dbErr.message);
+}
 
 module.exports = async function handler(req, res) {
     // Permessi CORS
