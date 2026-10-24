@@ -557,9 +557,15 @@ module.exports = async function handler(req, res) {
                                                 let aiReply = `Ciao ${clientFullName || ''}! Come posso aiutarti oggi da ${storeName}?`;
                                     
                                                 const GROQ_CANDIDATES = [
-                                                    "llama-3.3-70b-versatile",
-                                                    "llama-3.1-8b-instant"
-                                                ];
+                                                                                        "llama-3.3-70b-versatile",
+                                                                                                        "llama-3.1-8b-instant",
+                                                                                                        "openai/gpt-oss-120b",
+                                                                                        "llama-3.3-70b-versatile",
+                                                                                                    "llama-3.1-8b-instant",
+                                                                                                    "openai/gpt-oss-20b",
+                                                                                                    "qwen/qwen3.6-27b",
+                                                                                                    "gemma2-9b-it"
+                                                                                    ];
                                     
                                                 for (const modelId of GROQ_CANDIDATES) {
                                                     try {
