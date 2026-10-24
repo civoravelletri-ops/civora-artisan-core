@@ -331,7 +331,7 @@ module.exports = async function handler(req, res) {
                                     // =========================================================================
                                     const trainingData = (trainingDoc && trainingDoc.exists) ? trainingDoc.data() : null;
                                     const hasCustomTraining = trainingData && trainingData.ai_ethics_accepted === true;
-                        
+
                                     let personalityDirectives = "";
                                     if (hasCustomTraining) {
                                         if (trainingData.compiled_ai_persona) {
@@ -344,25 +344,25 @@ module.exports = async function handler(req, res) {
                                     } else {
                                         personalityDirectives = `Rispondi con calore, naturalezza e massima educazione come una receptionist impeccabile.`;
                                     }
-                        
+
                                     const storeAddress = vendorData.address || "in salone";
                                     const storeHours = vendorData.public_opening_hours || vendorData.opening_hours || "Orari standard";
                                     const specializations = (vendorData.customization_specializations || []).join(', ');
-                                    
+
                                     const tipsData = clientTipsDoc.exists ? clientTipsDoc.data() : {};
                                     const parkingInfo = tipsData.parkingTips || "";
                                     const directionsInfo = tipsData.directions || "";
-                        
+
                                     const servicesNameMap = new Map();
                                     (servicesSnap.docs || []).forEach(d => {
                                         const s = d.data();
                                         if (s.productName) servicesNameMap.set(d.id, s.productName);
                                     });
-                        
+
                                     // Estrazione categorie e target per guidare l'IA nell'accoglienza intelligente
                                     const allCategoriesSet = new Set();
                                     const allTargetsSet = new Set();
-                        
+
                                     const servicesCatalogDetailed = (servicesSnap.docs || [])
                                         .map(d => ({ id: d.id, ...d.data() }))
                                         .filter(s => s.productName && s.isAvailable !== false)
@@ -371,24 +371,24 @@ module.exports = async function handler(req, res) {
                                             const target = (s.targetGender || s.targetAudience || 'unisex').trim().toLowerCase();
                                             const dur = s.totalOccupiedTimeMinutes || s.serviceDuration || 30;
                                             const price = parseFloat(s.price) || 0;
-                        
+
                                             allCategoriesSet.add(cat);
                                             if (target) allTargetsSet.add(target);
-                        
+
                                             return `• ${s.productName} [Categoria: ${cat}] [Target: ${target}]: ${price}€ (Durata: ${dur} min)`;
                                         });
-                        
+
                                     const servicesList = servicesCatalogDetailed.join('\n');
                                     const categoriesSummary = Array.from(allCategoriesSet).join(', ') || 'Generale';
                                     const targetsSummary = Array.from(allTargetsSet).join(', ') || 'Tutti';
-                        
+
                                     const productsList = (productsSnap.docs || [])
                                         .map(d => d.data())
                                         .filter(p => p.productName || p.name)
                                         .map(p => `- ${p.productName || p.name}${p.brand ? ` (${p.brand})` : ''}: ${p.price || 0}€`)
                                         .slice(0, 15)
                                         .join('\n');
-                        
+
                                     // Squadra del salone
                                     const teamEntries = [];
                                     const ownerName = vendorData.owner_name || vendorData.store_name || "Titolare";
@@ -396,14 +396,14 @@ module.exports = async function handler(req, res) {
                                     const ownerSpecs = vendorData.owner_specialties ? `\n  - Specializzazioni: ${vendorData.owner_specialties}` : '';
                                     const ownerBio = vendorData.owner_bio ? `\n  - Bio: ${vendorData.owner_bio}` : '';
                                     const ownerAiNotes = vendorData.owner_ai_notes ? `\n  - Istruzioni IA: ${vendorData.owner_ai_notes}` : '';
-                                    
+
                                     let ownerServs = "Tutti i servizi del salone";
                                     if (Array.isArray(vendorData.servicesOffered) && vendorData.servicesOffered.length > 0) {
                                         const mapped = vendorData.servicesOffered.map(id => servicesNameMap.get(id)).filter(Boolean);
                                         if (mapped.length > 0) ownerServs = mapped.join(', ');
                                     }
                                     teamEntries.push(`• 👑 ${ownerName}${ownerJob} [Titolare Principale]:\n  - Servizi che esegue: ${ownerServs}${ownerSpecs}${ownerBio}${ownerAiNotes}`);
-                        
+
                                     if (collaboratorsSnap.docs && collaboratorsSnap.docs.length > 0) {
                                         collaboratorsSnap.docs.forEach(doc => {
                                             const c = doc.data();
@@ -412,7 +412,7 @@ module.exports = async function handler(req, res) {
                                             const cSpecs = c.specialties ? `\n  - Specializzazioni: ${c.specialties}` : '';
                                             const cBio = c.bio ? `\n  - Bio: ${c.bio}` : '';
                                             const cAiNotes = c.aiNotes ? `\n  - Istruzioni IA: ${c.aiNotes}` : '';
-                        
+
                                             let cServs = "Servizi standard del salone";
                                             if (Array.isArray(c.servicesOffered) && c.servicesOffered.length > 0) {
                                                 const mapped = c.servicesOffered.map(id => servicesNameMap.get(id)).filter(Boolean);
@@ -422,7 +422,7 @@ module.exports = async function handler(req, res) {
                                         });
                                     }
                                     const teamListFormatted = teamEntries.join('\n\n');
-                        
+
                                     let customerRecognitionGuideline = "";
                                     if (isKnownClient) {
                                         customerRecognitionGuideline = `STAI PARLANDO CON UN CLIENTE ABITUALE REGISTRATO: "${clientFullName}"${isVip ? ' (CLIENTE VIP ⭐️)' : ''}.
@@ -434,7 +434,7 @@ module.exports = async function handler(req, res) {
                                     } else {
                                         customerRecognitionGuideline = `STAI PARLANDO CON UN CLIENTE NUOVO. Sii impeccabilmente gentile, accogliente e professionale.`;
                                     }
-                        
+
                                     // Storico messaggi: se è una nuova sessione (>60 min), non affolliamo la mente dell'IA con i vecchi scambi
                                     let conversationHistory = [];
                                     if (!isNewSession && chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
@@ -443,32 +443,32 @@ module.exports = async function handler(req, res) {
                                             content: doc.data().content
                                         })).reverse();
                                     }
-                        
+
                                     // Direttiva sul tempo trascorso
                                     const sessionDirective = isNewSession
                                         ? `STATO SESSIONE: Questa è una NUOVA CONVERSAZIONE (l'ultimo messaggio risale a oltre un'ora fa o a un altro giorno). Salutalo con naturalezza e calore accogliendo la sua richiesta come un nuovo momento.`
                                         : `STATO SESSIONE: CONVERSAZIONE IN CORSO (il cliente ti ha scritto pochi minuti fa). Rispondi dritto al punto senza ripetere convenevoli o saluti iniziali ogni volta.`;
-                        
+
                                     const nowRome = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
                                     const todayRome = new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
-                        
+
                                     const systemPrompt = `Sei l'assistente virtuale ufficiale del salone "${storeName}" su WhatsApp.
                         Oggi è ${todayRome}, ore ${nowRome}.
-                        
+
                         ============================================================
                         PACCHETTO 1: CHI SEI E COME DEVI PARLARE (PERSONALITÀ E ISTRUZIONI)
                         ============================================================
                         ${personalityDirectives}
-                        
+
                         REGOLE FERREE DI COMUNICAZIONE E VENDITA INTELLIGENTE:
                         1. FORMATO WHATSAPP PERFETTO & MENU SEMPRE NUMERATI:
                            - Rispondi sempre in massimo 2 o 3 frasi brevi, ariose e leggibili su smartphone. Metti sempre in grassetto i servizi e i prezzi (es. *Taglio Capelli: 20€*).
                            - REGOLA DELLA NUMERAZIONE (ZERO SFORZO PER IL CLIENTE): Quando proponi categorie, servizi, prodotti o orari, NUMERA SEMPRE ogni opzione in modo chiaro con numeri evidenti (es. 1️⃣, 2️⃣, 3️⃣... oppure 1., 2., 3.).
                            - Invita sempre il cliente a fare la sua scelta digitando semplicemente il numero corrispondente (es. "Digita pure il numero che preferisci!").
-                        
+
                         2. COMPRENSIONE ISTANTANEA DEI NUMERI:
                            - Se il cliente risponde con un semplice numero (es. "2", "il 3", "vorrei il 4", "scelgo 1"): guarda l'ultimo elenco che gli hai inviato, riconosci IMMEDIATAMENTE quale servizio, categoria o prodotto ha scelto, confermalo calorosamente per nome e prezzo e procedi dritto senza mai chiedergli di riscrivere il nome per esteso.
-                        
+
                         3. ZERO SPAM DEL LISTINO (ACCOGLIENZA ESPLORATIVA NUMERATA):
                            - Se il cliente chiede genericamente "Che servizi fate?", "Cosa offrite?" o "Avete un listino?": NON INCOLLARE MAI tutto il catalogo insieme!
                            - Proponigli invece con eleganza le macro-aree numerate del salone (es:
@@ -478,25 +478,25 @@ module.exports = async function handler(req, res) {
                              4️⃣ Trattamenti Specifici)
                              e chiedigli quale numero vuole esplorare.
                            - Quando sceglie una categoria (es. digita "2" per Uomo), mostragli solo i servizi di quel reparto, sempre numerati ordinatamente (1, 2, 3...) così che possa scegliere il trattamento premendo un solo tasto!
-                        
+
                         4. COMPRENSIONE INTELLIGENTE DELLE INTENZIONI:
                            - Se il cliente scrive frasi generiche come "Vorrei prenotare oggi o domani", "Avete posto?", "Posso venire per i capelli?": NON scegliere tu un servizio a caso e NON dire solo "sì c'è posto".
                            - Chiedi con garbo proponendogli le opzioni principali numerate per capire cosa desidera fare.
-                        
+
                         5. LOGICA MULTI-SERVIZIO & COMBO (COME LA CASSA DEL SALONE):
                            - Se il cliente chiede più cose insieme (es. "Vorrei fare taglio sartoriale e barba"):
                              * Controlla prima se a listino esiste già un servizio combo/pacchetto unico.
                              * Se non c'è una combo unica, unisci tu i singoli servizi: calcola la SOMMA dei prezzi e la SOMMA delle durate (es. "Possiamo abbinare *Taglio Sartoriale* (30 min - 25€) e *Cura Barba* (20 min - 15€): tempo totale 50 minuti per 40€").
-                        
+
                         6. CONOSCI LA SQUADRA: Se chiedono chi lavora nel salone, quanti siete, chi esegue determinati servizi o chi è specializzato in cosa, rispondi con precisione usando i dati della squadra sotto.
-                        
+
                         7. ${sessionDirective}
-                        
+
                         ============================================================
                         PROFILO DEL CLIENTE CHE TI HA SCRITTO:
                         ============================================================
                         ${customerRecognitionGuideline}
-                        
+
                         ============================================================
                         PACCHETTO 2: DATI REALI DEL NEGOZIO E CATALOGO (FATTI VERI)
                         ============================================================
@@ -507,33 +507,39 @@ module.exports = async function handler(req, res) {
                         ${specializations ? `- Specializzazioni: ${specializations}` : ''}
                         ${parkingInfo ? `- Info Parcheggio: ${parkingInfo}` : ''}
                         ${directionsInfo ? `- Indicazioni stradali: ${directionsInfo}` : ''}
-                        
+
                         MACRO-AREE E CATEGORIE DEL SALONE:
                         - Categorie presenti: ${categoriesSummary}
                         - Target presenti: ${targetsSummary}
-                        
+
                         SQUADRA E STAFF DEL SALONE (CHI LAVORA QUI E COSA FA):
                         ${teamListFormatted}
-                        
+
                         LISTINO SERVIZI E PREZZI DISPONIBILI:
                         ${servicesList || "Listino trattamenti disponibile in salone."}
-                        
+
                         PRODOTTI IN VENDITA DISPONIBILI:
                         ${productsList || "Prodotti professionali disponibili in negozio."}`;
-                        
+
                                     const messagesPayload = [
                                         { role: "system", content: systemPrompt },
                                         ...conversationHistory,
                                         { role: "user", content: activeUserPrompt }
                                     ];
-                        
+
                                     let aiReply = `Ciao ${clientFullName || ''}! Come posso aiutarti oggi da ${storeName}?`;
-                        
+
                                     const GROQ_CANDIDATES = [
                                         "llama-3.3-70b-versatile",
-                                        "llama-3.1-8b-instant"
+                                                        "llama-3.1-8b-instant",
+                                                        "openai/gpt-oss-120b",
+                                        "llama-3.3-70b-versatile",
+                                                    "llama-3.1-8b-instant",
+                                                    "openai/gpt-oss-20b",
+                                                    "qwen/qwen3.6-27b",
+                                                    "gemma2-9b-it",
                                     ];
-                        
+
                                     for (const modelId of GROQ_CANDIDATES) {
                                         try {
                                             const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -549,7 +555,7 @@ module.exports = async function handler(req, res) {
                                                     max_tokens: 300
                                                 })
                                             });
-                        
+
                                             if (groqRes.ok) {
                                                 const groqData = await groqRes.json();
                                                 const content = groqData.choices?.[0]?.message?.content?.trim();
@@ -565,7 +571,7 @@ module.exports = async function handler(req, res) {
                                             console.warn(`[AutoPilot] Tentativo fallito su ${modelId}:`, aiErr.message);
                                         }
                                     }
-                        
+
                                     // 💾 Salvataggio messaggi e aggiornamento scheda cliente con data e ora precisa
                                     try {
                                         await Promise.all([
@@ -592,11 +598,11 @@ module.exports = async function handler(req, res) {
                                     } catch (memErr) {
                                         console.warn("[Memoria Chat] Errore salvataggio:", memErr.message);
                                     }
-                        
+
                                     // 🚀 Invio risposta al Gateway WhatsApp
                                     await sendWhatsAppMessage(aiReply);
                                     console.log(`[AutoPilot] 🚀 Risposta inviata al cliente "${clientFullName || cleanPhone}"!`);
-                        
+
                                     return res.status(200).json({ success: true, client: clientFullName, reply: aiReply });
         }
 
