@@ -522,54 +522,81 @@ module.exports = async function handler(req, res) {
                         ${productsList || "Prodotti professionali disponibili in negozio."}`;
 
                                     const todayIsoDate = new Date().toISOString().split('T')[0];
-
+                                    
                                                 const messagesPayload = [
                                                     { role: "system", content: systemPrompt },
                                                     ...conversationHistory,
                                                     { role: "user", content: activeUserPrompt }
                                                 ];
-
-                                                // Strumento reale collegato all'agenda del salone
+                                    
+                                                // Strumenti collegati all'agenda e al registratore di cassa del salone
                                                 const salonTools = [
                                                     {
                                                         type: "function",
                                                         function: {
                                                             name: "controlla_agenda_reale",
-                                                            description: "Interroga l'agenda reale del salone per verificare quali orari sono VERAMENTE liberi. Usala SEMPRE quando il cliente vuole prenotare, chiede disponibilità o orari per oggi, domani o qualsiasi data futura.",
+                                                            description: "Interroga l'agenda per vedere quali orari sono VERAMENTE liberi. Usala quando il cliente chiede disponibilità o orari per oggi, domani o qualsiasi data futura.",
                                                             parameters: {
                                                                 type: "object",
                                                                 properties: {
                                                                     dataRichiesta: {
                                                                         type: "string",
-                                                                        description: `Data esatta richiesta nel formato YYYY-MM-DD. Tieni conto che oggi è ${todayIsoDate}.`
+                                                                        description: `Data richiesta nel formato YYYY-MM-DD. Tieni conto che oggi è ${todayIsoDate}.`
                                                                     },
                                                                     durataMinuti: {
                                                                         type: "number",
-                                                                        description: "Durata stimata del servizio in minuti (default 30 se taglio normale, 45-60 se combinato con barba o altri trattamenti)."
+                                                                        description: "Durata in minuti del servizio (default 30 se taglio normale, 45-60 se combinato con barba o altri trattamenti)."
                                                                     }
                                                                 },
                                                                 required: ["dataRichiesta"]
                                                             }
                                                         }
+                                                    },
+                                                    {
+                                                        type: "function",
+                                                        function: {
+                                                            name: "conferma_e_blocca_appuntamento",
+                                                            description: "Blocca e registra definitivamente l'appuntamento nel database del salone. Usala SOLO quando il cliente ha espresso chiaramente la volontà di prenotare un orario specifico (es. 'va bene alle 15:30', 'prendo il numero 2', 'confermo').",
+                                                            parameters: {
+                                                                type: "object",
+                                                                properties: {
+                                                                    data: {
+                                                                        type: "string",
+                                                                        description: `Data dell'appuntamento in formato YYYY-MM-DD (es. 2026-10-27).`
+                                                                    },
+                                                                    ora: {
+                                                                        type: "string",
+                                                                        description: "Orario scelto in formato HH:MM (es. 15:30)."
+                                                                    },
+                                                                    nomeServizio: {
+                                                                        type: "string",
+                                                                        description: "Nome esatto del servizio o della combo scelta (es. Taglio Capelli, oppure Taglio + Barba)."
+                                                                    },
+                                                                    prezzo: {
+                                                                        type: "number",
+                                                                        description: "Prezzo totale del servizio o della combo (es. 20 oppure 35)."
+                                                                    },
+                                                                    durataMinuti: {
+                                                                        type: "number",
+                                                                        description: "Durata totale in minuti (es. 30, 45, 60)."
+                                                                    }
+                                                                },
+                                                                required: ["data", "ora", "nomeServizio"]
+                                                            }
+                                                        }
                                                     }
                                                 ];
-
+                                    
                                                 let aiReply = `Ciao ${clientFullName || ''}! Come posso aiutarti oggi da ${storeName}?`;
-
+                                    
                                                 const GROQ_CANDIDATES = [
-                                                                                        "llama-3.3-70b-versatile",
-                                                                                                        "llama-3.1-8b-instant",
-                                                                                                        "openai/gpt-oss-120b",
-                                                                                        "llama-3.3-70b-versatile",
-                                                                                                    "llama-3.1-8b-instant",
-                                                                                                    "openai/gpt-oss-20b",
-                                                                                                    "qwen/qwen3.6-27b",
-                                                                                                    "gemma2-9b-it"
-                                                                                    ];
-
+                                                    "llama-3.3-70b-versatile",
+                                                    "llama-3.1-8b-instant"
+                                                ];
+                                    
                                                 for (const modelId of GROQ_CANDIDATES) {
                                                     try {
-                                                        // Prima chiamata: l'IA legge il messaggio e decide se deve consultare l'agenda
+                                                        // Prima chiamata: l'IA valuta se controllare gli orari o bloccare la prenotazione
                                                         const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                                                             method: "POST",
                                                             headers: {
@@ -585,54 +612,123 @@ module.exports = async function handler(req, res) {
                                                                 max_tokens: 350
                                                             })
                                                         });
-
+                                    
                                                         if (groqRes.ok) {
                                                             const groqData = await groqRes.json();
                                                             const choice = groqData.choices?.[0];
                                                             const messageObj = choice?.message;
-
-                                                            // Se il cliente ha chiesto un appuntamento, l'IA interroga l'agenda reale!
+                                    
+                                                            // Se l'IA ha deciso di usare uno strumento (controllo o prenotazione)
                                                             if (messageObj?.tool_calls && messageObj.tool_calls.length > 0) {
                                                                 const call = messageObj.tool_calls[0];
                                                                 let callArgs = {};
                                                                 try { callArgs = JSON.parse(call.function.arguments); } catch(e) {}
-
-                                                                const targetDate = callArgs.dataRichiesta || todayIsoDate;
-                                                                const targetDuration = callArgs.durataMinuti || 30;
-
-                                                                console.log(`[AutoPilot Agenda] 🔍 Controllo slot reali per ${targetDate} (${targetDuration} min)...`);
-
-                                                                // Interrogazione diretta a getAvailableSlots
-                                                                let realSlots = [];
-                                                                try {
-                                                                    const slotFetch = await fetch("https://localmente-api.vercel.app/api/get-available-slots", {
-                                                                        method: "POST",
-                                                                        headers: { "Content-Type": "application/json" },
-                                                                        body: JSON.stringify({
-                                                                            action: "getAvailableSlots",
-                                                                            vendorId: vendorId,
-                                                                            date: targetDate,
-                                                                            totalOccupiedTimeMinutes: targetDuration
-                                                                        })
-                                                                    });
-                                                                    const slotJson = await slotFetch.json();
-                                                                    realSlots = slotJson.slots || [];
-                                                                } catch(slotErr) {
-                                                                    console.warn("[AutoPilot Agenda] Errore lettura slot:", slotErr.message);
+                                    
+                                                                let toolResultPayload = {};
+                                    
+                                                                // CASO A: Il cliente chiede disponibilità di orari
+                                                                if (call.function.name === 'controlla_agenda_reale') {
+                                                                    const targetDate = callArgs.dataRichiesta || todayIsoDate;
+                                                                    const targetDuration = callArgs.durataMinuti || 30;
+                                    
+                                                                    console.log(`[AutoPilot Agenda] 🔍 Controllo slot per ${targetDate} (${targetDuration}m)...`);
+                                    
+                                                                    let realSlots = [];
+                                                                    try {
+                                                                        const slotFetch = await fetch("https://localmente-api.vercel.app/api/get-available-slots", {
+                                                                            method: "POST",
+                                                                            headers: { "Content-Type": "application/json" },
+                                                                            body: JSON.stringify({
+                                                                                action: "getAvailableSlots",
+                                                                                vendorId: vendorId,
+                                                                                date: targetDate,
+                                                                                totalOccupiedTimeMinutes: targetDuration
+                                                                            })
+                                                                        });
+                                                                        const slotJson = await slotFetch.json();
+                                                                        realSlots = slotJson.slots || [];
+                                                                    } catch(slotErr) {
+                                                                        console.warn("[AutoPilot Agenda] Errore lettura slot:", slotErr.message);
+                                                                    }
+                                    
+                                                                    toolResultPayload = {
+                                                                        dataRichiesta: targetDate,
+                                                                        orariVeramenteLiberi: realSlots.length > 0 ? realSlots : "Completo / Nessun orario disponibile"
+                                                                    };
                                                                 }
-
-                                                                // Consegniamo gli orari veri all'IA per fargli formulare la risposta al cliente
+                                    
+                                                                // CASO B: Il cliente ha scelto l'orario e vuole bloccare il posto!
+                                                                else if (call.function.name === 'conferma_e_blocca_appuntamento') {
+                                                                    const bookDateStr = callArgs.data || todayIsoDate;
+                                                                    const bookTimeStr = callArgs.ora || "10:00";
+                                                                    const bookDur = Number(callArgs.durataMinuti) || 30;
+                                                                    const bookServiceName = callArgs.nomeServizio || "Servizio";
+                                                                    const bookPrice = Number(callArgs.prezzo) || 0;
+                                    
+                                                                    console.log(`[AutoPilot Booking] 📝 Blocco appuntamento: ${bookServiceName} il ${bookDateStr} alle ${bookTimeStr}...`);
+                                    
+                                                                    const startDateTime = new Date(`${bookDateStr}T${bookTimeStr}:00`);
+                                                                    const endDateTime = new Date(startDateTime.getTime() + bookDur * 60000);
+                                    
+                                                                    try {
+                                                                        const saveBookingRes = await fetch("https://localmente-api.vercel.app/api/get-available-slots", {
+                                                                            method: "POST",
+                                                                            headers: { "Content-Type": "application/json" },
+                                                                            body: JSON.stringify({
+                                                                                action: "save_service_booking",
+                                                                                vendorId: vendorId,
+                                                                                customerName: clientFullName || pushName || "Cliente WhatsApp",
+                                                                                customerPhone: cleanPhone,
+                                                                                bookedServiceName: bookServiceName,
+                                                                                bookedServicePrice: bookPrice,
+                                                                                bookedServiceDuration: bookDur,
+                                                                                bookedTotalOccupiedTime: bookDur,
+                                                                                startDateTime: startDateTime.toISOString(),
+                                                                                endDateTime: endDateTime.toISOString(),
+                                                                                status: "confirmed",
+                                                                                source: "whatsapp_autopilot",
+                                                                                bookingOrigin: "manual",
+                                                                                paymentMethod: "cash_in_studio",
+                                                                                paymentStatus: "pending",
+                                                                                bookedForResourceId: vendorId,
+                                                                                appointmentCode: "WA_" + Date.now().toString().slice(-4),
+                                                                                type: "cura_persona"
+                                                                            })
+                                                                        });
+                                    
+                                                                        if (saveBookingRes.ok) {
+                                                                            toolResultPayload = {
+                                                                                esito: "SUCCESSO_PRENOTAZIONE",
+                                                                                dettagli: {
+                                                                                    servizio: bookServiceName,
+                                                                                    data: bookDateStr,
+                                                                                    ora: bookTimeStr,
+                                                                                    prezzo: bookPrice
+                                                                                },
+                                                                                messaggio: "Appuntamento registrato e posto bloccato con successo sul gestionale salone!"
+                                                                            };
+                                                                            console.log(`[AutoPilot Booking] ✅ Posto bloccato con successo nel database!`);
+                                                                        } else {
+                                                                            const errJson = await saveBookingRes.json().catch(() => ({}));
+                                                                            toolResultPayload = {
+                                                                                esito: "ERRORE",
+                                                                                motivo: errJson.error || "Posto già occupato o non disponibile"
+                                                                            };
+                                                                        }
+                                                                    } catch(saveErr) {
+                                                                        toolResultPayload = { esito: "ERRORE", motivo: saveErr.message };
+                                                                    }
+                                                                }
+                                    
+                                                                // Passiamo il risultato reale dell'agenda all'IA
                                                                 messagesPayload.push(messageObj);
                                                                 messagesPayload.push({
                                                                     role: "tool",
                                                                     tool_call_id: call.id,
-                                                                    content: JSON.stringify({
-                                                                        dataRichiesta: targetDate,
-                                                                        orariVeramenteLiberi: realSlots.length > 0 ? realSlots : "Completo / Nessun orario disponibile"
-                                                                    })
+                                                                    content: JSON.stringify(toolResultPayload)
                                                                 });
-
-                                                                // Seconda risposta rapida con gli orari reali in mano
+                                    
+                                                                // Risposta finale formulata dall'IA con la conferma o gli orari in mano
                                                                 const finalGroqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                                                                     method: "POST",
                                                                     headers: {
@@ -646,20 +742,20 @@ module.exports = async function handler(req, res) {
                                                                         max_tokens: 350
                                                                     })
                                                                 });
-
+                                    
                                                                 if (finalGroqRes.ok) {
                                                                     const finalData = await finalGroqRes.json();
                                                                     const finalContent = finalData.choices?.[0]?.message?.content?.trim();
                                                                     if (finalContent) {
                                                                         aiReply = finalContent;
-                                                                        console.log(`[AutoPilot] ✅ Risposta con agenda reale generata con successo (${modelId})!`);
+                                                                        console.log(`[AutoPilot] ✅ Risposta finale completata (${modelId})!`);
                                                                         break;
                                                                     }
                                                                 }
                                                             } else if (messageObj?.content) {
-                                                                // Se era una normale domanda (es. info o prezzi), risponde normalmente
+                                                                // Se era una normale conversazione senza prenotazione, risponde subito
                                                                 aiReply = messageObj.content.trim();
-                                                                console.log(`[AutoPilot] ✅ Risposta generata con successo da Groq (${modelId})!`);
+                                                                console.log(`[AutoPilot] ✅ Risposta generata con successo (${modelId})!`);
                                                                 break;
                                                             }
                                                         } else {
