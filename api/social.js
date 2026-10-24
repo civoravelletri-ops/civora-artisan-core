@@ -155,69 +155,97 @@ module.exports = async function handler(req, res) {
                             .slice(0, 15)
                             .join('\n');
             
-                        // Profilazione Cliente dalla Rubrica
-                        let isKnownClient = false;
-                        let clientFullName = pushName || "Cliente";
-                        let clientNotesFormula = "";
-                        let isVip = false;
-            
-                        if (!clientSnap.empty) {
-                            const cData = clientSnap.docs[0].data();
-                            isKnownClient = true;
-                            clientFullName = `${cData.name || ''} ${cData.surname || ''}`.trim() || clientFullName;
-                            clientNotesFormula = cData.notes || "";
-                            isVip = Array.isArray(cData.tags) && cData.tags.includes('VIP');
-                        }
-            
-                        // Storico Conversazione
-                        let conversationHistory = [];
-                        if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
-                            conversationHistory = chatHistorySnap.docs.map(doc => ({
-                                role: doc.data().role === 'assistant' ? 'assistant' : 'user',
-                                content: doc.data().content
-                            })).reverse();
-                        }
-            
-                        // -------------------------------------------------------------
-                        // 🧠 FUSIONE DEI DUE PACCHETTI NEL CERVELLO DELL'IA
-                        // -------------------------------------------------------------
-                        const nowRome = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
-                        const todayRome = new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
-            
-                        const systemPrompt = `Sei l'assistente virtuale ufficiale del salone "${storeName}" su WhatsApp.
-            Oggi è ${todayRome}, ore ${nowRome}.
-            
-            ============================================================
-            PACCHETTO 1: CHI SEI E COME DEVI PARLARE (PERSONALITÀ E ISTRUZIONI)
-            ============================================================
-            ${personalityDirectives}
-            
-            REGOLE ESSENZIALI DI COMUNICAZIONE:
-            1. Rispondi SEMPRE in massimo 2 o 3 frasi brevi, naturali e facili da leggere su smartphone.
-            2. Sii trasparente: sei l'assistente del salone con il carattere e il calore del titolare.
-            3. Se chiedono prezzi o trattamenti, usa ESCLUSIVAMENTE quelli presenti nel listino dati qui sotto. Zero sconti inventati.
-            
-            ============================================================
-            PACCHETTO 2: DATI REALI DEL NEGOZIO E DEL CLIENTE (FATTI VERI)
-            ============================================================
-            DATI ATTIVITÀ:
-            - Nome Salone: ${storeName}
-            - Indirizzo esatto: ${storeAddress}
-            - Orari di apertura: ${storeHours}
-            ${specializations ? `- Specializzazioni: ${specializations}` : ''}
-            ${parkingInfo ? `- Info Parcheggio: ${parkingInfo}` : ''}
-            ${directionsInfo ? `- Indicazioni stradali: ${directionsInfo}` : ''}
-            
-            CLIENTE CON CUI STAI PARLANDO ADESSO:
-            - Nome riconosciuto: "${clientFullName}"
-            - Grado di familiarità: ${isKnownClient ? `Cliente abituale registrato in rubrica${isVip ? ' (⭐️ CLIENTE VIP)' : ''}` : 'Nuovo visitatore (non presente in rubrica, accoglilo con calore ed esplorazione)'}
-            ${clientNotesFormula ? `- Note tecniche/Formule passate del cliente: "${clientNotesFormula}"` : ''}
-            
-            MENU SERVIZI E PREZZI DISPONIBILI:
-            ${servicesList || "Listino trattamenti disponibile in salone."}
-            
-            PRODOTTI IN VENDITA DISPONIBILI:
-            ${productsList || "Prodotti professionali disponibili in negozio."}`;
+                        // =========================================================================
+                                    // 🎯 RADAR PSICOLOGICO: RICONOSCIMENTO IMMEDIATO DEL CLIENTE
+                                    // =========================================================================
+                                    let isKnownClient = false;
+                                    let clientFirstName = "";
+                                    let clientFullName = "";
+                                    let clientNotesFormula = "";
+                                    let isVip = false;
+
+                                    if (!clientSnap.empty) {
+                                        // 1. TROVATO NELLA RUBRICA CIVORA (CLIENTE ABITUALE)
+                                        const cData = clientSnap.docs[0].data();
+                                        isKnownClient = true;
+                                        clientFirstName = (cData.name || "").trim();
+                                        clientFullName = `${clientFirstName} ${cData.surname || ''}`.trim();
+                                        clientNotesFormula = cData.notes || "";
+                                        isVip = Array.isArray(cData.tags) && cData.tags.includes('VIP');
+                                    } else if (pushName && pushName.length >= 2 && !pushName.includes("@")) {
+                                        // 2. NUOVO SU CIVORA, MA HA IL NOME SU WHATSAPP
+                                        clientFirstName = pushName.trim().split(" ")[0];
+                                        clientFullName = pushName.trim();
+                                    }
+
+                                    // Istruzioni psicologiche di accoglienza per l'IA
+                                    let customerRecognitionGuideline = "";
+                                    if (isKnownClient) {
+                                        customerRecognitionGuideline = `STAI PARLANDO CON UN CLIENTE ABITUALE REGISTRATO: "${clientFullName}"${isVip ? ' (CLIENTE VIP ⭐️)' : ''}.
+                        - REGOLE DI ACCOGLIENZA: Salutalo subito calorosamente per nome fin dalla prima parola (es. "Ciao ${clientFirstName}!").
+                        - NON presentare il salone come se fosse la prima volta (sa già chi siete!).
+                        - Trattalo con grande confidenza, affetto e calore da persona di casa.
+                        ${clientNotesFormula ? `- NOTE TECNICHE/FORMULE DEL CLIENTE: "${clientNotesFormula}" (Se chiede cosa ha fatto l'altra volta o vuole ripetere il servizio, fagli riferimento a questa formula).` : ''}`;
+                                    } else if (clientFirstName) {
+                                        customerRecognitionGuideline = `STAI PARLANDO CON UN NUOVO CLIENTE, MA CONOSCI IL SUO NOME DA WHATSAPP: "${clientFirstName}".
+                        - REGOLE DI ACCOGLIENZA: Dagli un caloroso benvenuto a nome del salone usando subito il suo nome di battesimo (es. "Ciao ${clientFirstName}! Benvenuto da ${storeName}!").
+                        - Mostrati felice di accoglierlo ed esplora con dolcezza cosa desidera fare.`;
+                                    } else {
+                                        customerRecognitionGuideline = `STAI PARLANDO CON UN NUMERO SCONOSCIUTO (Nessun nome registrato).
+                        - REGOLE DI ACCOGLIENZA: Dagli un caloroso benvenuto a nome del salone (es. "Ciao e benvenuto da ${storeName}! Come possiamo aiutarti oggi?").
+                        - Sii impeccabilmente gentile, accogliente e rassicurante.`;
+                                    }
+
+                                    // Storico Conversazione
+                                    let conversationHistory = [];
+                                    if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
+                                        conversationHistory = chatHistorySnap.docs.map(doc => ({
+                                            role: doc.data().role === 'assistant' ? 'assistant' : 'user',
+                                            content: doc.data().content
+                                        })).reverse();
+                                    }
+
+                                    // -------------------------------------------------------------
+                                    // 🧠 FUSIONE DEI DUE PACCHETTI NEL CERVELLO DELL'IA
+                                    // -------------------------------------------------------------
+                                    const nowRome = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+                                    const todayRome = new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
+
+                                    const systemPrompt = `Sei l'assistente virtuale ufficiale del salone "${storeName}" su WhatsApp.
+                        Oggi è ${todayRome}, ore ${nowRome}.
+
+                        ============================================================
+                        PACCHETTO 1: CHI SEI E COME DEVI PARLARE (PERSONALITÀ E ISTRUZIONI)
+                        ============================================================
+                        ${personalityDirectives}
+
+                        REGOLE FERREE DI COMUNICAZIONE:
+                        1. Rispondi SEMPRE in massimo 2 o 3 frasi brevi, naturali e facili da leggere su smartphone.
+                        2. Sii trasparente: sei l'assistente del salone con il carattere e il calore del titolare.
+                        3. Se chiedono prezzi o trattamenti, usa ESCLUSIVAMENTE quelli presenti nel listino dati qui sotto. Zero sconti inventati.
+                        4. COMPRENDI LO SLANG: Capisci al volo espressioni colloquiali o dialettali ("al volo", "un buco", "sfumatura", "fresco", "a che ora staccate") e rispondi con calore e naturalezza.
+
+                        ============================================================
+                        PROFILO DEL CLIENTE CHE TI HA SCRITTO:
+                        ============================================================
+                        ${customerRecognitionGuideline}
+
+                        ============================================================
+                        PACCHETTO 2: DATI REALI DEL NEGOZIO (FATTI VERI)
+                        ============================================================
+                        DATI ATTIVITÀ:
+                        - Nome Salone: ${storeName}
+                        - Indirizzo esatto: ${storeAddress}
+                        - Orari di apertura: ${storeHours}
+                        ${specializations ? `- Specializzazioni: ${specializations}` : ''}
+                        ${parkingInfo ? `- Info Parcheggio: ${parkingInfo}` : ''}
+                        ${directionsInfo ? `- Indicazioni stradali: ${directionsInfo}` : ''}
+
+                        MENU SERVIZI E PREZZI DISPONIBILI:
+                        ${servicesList || "Listino trattamenti disponibile in salone."}
+
+                        PRODOTTI IN VENDITA DISPONIBILI:
+                        ${productsList || "Prodotti professionali disponibili in negozio."}`;
 
             const messagesPayload = [
                 { role: "system", content: systemPrompt },
