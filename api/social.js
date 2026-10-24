@@ -522,13 +522,13 @@ module.exports = async function handler(req, res) {
                         ${productsList || "Prodotti professionali disponibili in negozio."}`;
 
                                     const todayIsoDate = new Date().toISOString().split('T')[0];
-                                    
+
                                                 const messagesPayload = [
                                                     { role: "system", content: systemPrompt },
                                                     ...conversationHistory,
                                                     { role: "user", content: activeUserPrompt }
                                                 ];
-                                    
+
                                                 // Strumento reale collegato all'agenda del salone
                                                 const salonTools = [
                                                     {
@@ -553,9 +553,9 @@ module.exports = async function handler(req, res) {
                                                         }
                                                     }
                                                 ];
-                                    
+
                                                 let aiReply = `Ciao ${clientFullName || ''}! Come posso aiutarti oggi da ${storeName}?`;
-                                    
+
                                                 const GROQ_CANDIDATES = [
                                                                                         "llama-3.3-70b-versatile",
                                                                                                         "llama-3.1-8b-instant",
@@ -566,7 +566,7 @@ module.exports = async function handler(req, res) {
                                                                                                     "qwen/qwen3.6-27b",
                                                                                                     "gemma2-9b-it"
                                                                                     ];
-                                    
+
                                                 for (const modelId of GROQ_CANDIDATES) {
                                                     try {
                                                         // Prima chiamata: l'IA legge il messaggio e decide se deve consultare l'agenda
@@ -585,23 +585,23 @@ module.exports = async function handler(req, res) {
                                                                 max_tokens: 350
                                                             })
                                                         });
-                                    
+
                                                         if (groqRes.ok) {
                                                             const groqData = await groqRes.json();
                                                             const choice = groqData.choices?.[0];
                                                             const messageObj = choice?.message;
-                                    
+
                                                             // Se il cliente ha chiesto un appuntamento, l'IA interroga l'agenda reale!
                                                             if (messageObj?.tool_calls && messageObj.tool_calls.length > 0) {
                                                                 const call = messageObj.tool_calls[0];
                                                                 let callArgs = {};
                                                                 try { callArgs = JSON.parse(call.function.arguments); } catch(e) {}
-                                    
+
                                                                 const targetDate = callArgs.dataRichiesta || todayIsoDate;
                                                                 const targetDuration = callArgs.durataMinuti || 30;
-                                    
+
                                                                 console.log(`[AutoPilot Agenda] 🔍 Controllo slot reali per ${targetDate} (${targetDuration} min)...`);
-                                    
+
                                                                 // Interrogazione diretta a getAvailableSlots
                                                                 let realSlots = [];
                                                                 try {
@@ -620,7 +620,7 @@ module.exports = async function handler(req, res) {
                                                                 } catch(slotErr) {
                                                                     console.warn("[AutoPilot Agenda] Errore lettura slot:", slotErr.message);
                                                                 }
-                                    
+
                                                                 // Consegniamo gli orari veri all'IA per fargli formulare la risposta al cliente
                                                                 messagesPayload.push(messageObj);
                                                                 messagesPayload.push({
@@ -631,7 +631,7 @@ module.exports = async function handler(req, res) {
                                                                         orariVeramenteLiberi: realSlots.length > 0 ? realSlots : "Completo / Nessun orario disponibile"
                                                                     })
                                                                 });
-                                    
+
                                                                 // Seconda risposta rapida con gli orari reali in mano
                                                                 const finalGroqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                                                                     method: "POST",
@@ -646,7 +646,7 @@ module.exports = async function handler(req, res) {
                                                                         max_tokens: 350
                                                                     })
                                                                 });
-                                    
+
                                                                 if (finalGroqRes.ok) {
                                                                     const finalData = await finalGroqRes.json();
                                                                     const finalContent = finalData.choices?.[0]?.message?.content?.trim();
