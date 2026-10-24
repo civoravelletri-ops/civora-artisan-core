@@ -266,33 +266,46 @@ module.exports = async function handler(req, res) {
                 { role: "user", content: messageText }
             ];
 
-            // Chiamata all'Intelligenza Artificiale (Groq - Llama 3.3)
-            let aiReply = `Ciao ${clientFullName}! Ti ringraziamo per averci scritto da ${storeName}. Come possiamo aiutarti oggi?`;
-
-            try {
-                const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${GROQ_API_KEY}`,
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        model: "llama-3.3-70b-versatile",
-                        messages: messagesPayload,
-                        temperature: 0.4,
-                        max_tokens: 300
-                    })
-                });
-
-                if (groqRes.ok) {
-                    const groqData = await groqRes.json();
-                    aiReply = groqData.choices?.[0]?.message?.content?.trim() || aiReply;
-                } else {
-                    console.error("[Groq Error]", await groqRes.text());
-                }
-            } catch (aiErr) {
-                console.error("[AutoPilot] Errore chiamata Groq:", aiErr.message);
-            }
+            // Chiamata all'Intelligenza Artificiale (Con Modello Universale Istantaneo e Paracadute)
+                        let aiReply = `Ciao ${clientFullName}! Ti ringraziamo per averci scritto da ${storeName}. Come possiamo aiutarti oggi?`;
+            
+                        const GROQ_CANDIDATES = [
+                            "llama-3.1-8b-instant",
+                            "llama-3.3-70b-versatile",
+                            "llama3-8b-8192"
+                        ];
+            
+                        for (const modelId of GROQ_CANDIDATES) {
+                            try {
+                                const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                                    method: "POST",
+                                    headers: {
+                                        "Authorization": `Bearer ${(GROQ_API_KEY || '').trim()}`,
+                                        "Content-Type": "application/json"
+                                    },
+                                    body: JSON.stringify({
+                                        model: modelId,
+                                        messages: messagesPayload,
+                                        temperature: 0.3,
+                                        max_tokens: 300
+                                    })
+                                });
+            
+                                if (groqRes.ok) {
+                                    const groqData = await groqRes.json();
+                                    const content = groqData.choices?.[0]?.message?.content?.trim();
+                                    if (content) {
+                                        aiReply = content;
+                                        console.log(`[AutoPilot] ✅ Risposta generata con successo da Groq (${modelId})!`);
+                                        break;
+                                    }
+                                } else {
+                                    console.warn(`[Groq Info] Modello ${modelId} non attivo sulla chiave, provo il successivo...`);
+                                }
+                            } catch (aiErr) {
+                                console.warn(`[AutoPilot] Tentativo fallito su ${modelId}:`, aiErr.message);
+                            }
+                        }
 
             // -------------------------------------------------------------
             // 💾 SALVATAGGIO MEMORIA CHAT NELLA CARTELLA DEL SALONE
