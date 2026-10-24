@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 
-// Inizializzazione diretta di Firebase con la chiave che hai su Vercel
+// 🔑 1. Inizializzazione diretta di Firebase Admin SDK
 if (!admin.apps.length) {
     try {
         const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
@@ -35,7 +35,7 @@ module.exports = async function handler(req, res) {
         }
 
         // =========================================================================
-        // 🟢 NUOVO BLOCCO WHATSAPP AUTOPILOT CON BUTTAFUORI INCORRUTTIBILE
+        // 🟢 BLOCCO WHATSAPP AUTOPILOT (BUTTAFUORI + MAGGIORDOMO INTELLIGENTE)
         // =========================================================================
         if (body.isWhatsAppAutoPilot && body.vendorId) {
             const vendorId = body.vendorId;
@@ -49,11 +49,11 @@ module.exports = async function handler(req, res) {
             }
 
             // -------------------------------------------------------------
-            // 💂‍♂️ IL BUTTAFUORI INCORRUTTIBILE (Controllo Diretto Firestore)
+            // 💂‍♂️ IL BUTTAFUORI INCORRUTTIBILE (Controllo Permessi)
             // -------------------------------------------------------------
             const vendorDoc = await db.collection('vendors').doc(vendorId).get();
             if (!vendorDoc.exists) {
-                console.log(`[Buttafuori] 🛑 Salone ${vendorId} non trovato nel database.`);
+                console.log(`[Buttafuori] 🛑 Salone ${vendorId} non trovato.`);
                 return res.status(200).json({ status: "skipped", reason: "Salone inesistente" });
             }
 
@@ -61,21 +61,141 @@ module.exports = async function handler(req, res) {
             const isWaConnected = vendorData.whatsapp_connected === true;
             const isAutoPilotOn = vendorData.whatsapp_ai_autopilot === true;
 
-            // Se anche una sola levetta è spenta, chiude la porta all'istante
             if (!isWaConnected || !isAutoPilotOn) {
-                console.log(`[Buttafuori] 🛑 Accesso Negato per ${vendorId}. Connesso: ${isWaConnected}, Pilota IA: ${isAutoPilotOn}`);
+                console.log(`[Buttafuori] 🛑 Accesso negato per ${vendorId}. Connesso: ${isWaConnected}, Pilota IA: ${isAutoPilotOn}`);
                 return res.status(200).json({ 
                     status: "skipped", 
-                    reason: "Pilota automatico o WhatsApp non attivi per questo salone" 
+                    reason: "Pilota automatico o WhatsApp disattivati dal negoziante" 
                 });
             }
 
-            console.log(`[Buttafuori] 🟢 VIA LIBERA! Salone "${vendorData.store_name || vendorId}" attivo. Elaboro messaggio...`);
-            // -------------------------------------------------------------
+            console.log(`[Buttafuori] 🟢 VIA LIBERA per "${vendorData.store_name || vendorId}". Chiamo il Maggiordomo...`);
 
-            // 1. L'Intelligenza Artificiale (Groq - Llama 3.3)
-            let aiReply = "Ciao! Ti rispondo subito.";
-            const storeName = vendorData.store_name || "il nostro salone";
+            // -------------------------------------------------------------
+            // 🤵 IL MAGGIORDOMO: RACCOLTA DATI ISTANTANEA (IN PARALLELO)
+            // -------------------------------------------------------------
+            let cleanPhone = senderPhone.replace(/\D/g, '');
+            if (!cleanPhone.startsWith('39') && cleanPhone.length === 10) cleanPhone = '39' + cleanPhone;
+
+            const phoneVariants = Array.from(new Set([
+                senderPhone,
+                cleanPhone,
+                `+${cleanPhone}`,
+                cleanPhone.startsWith('39') ? cleanPhone.substring(2) : cleanPhone
+            ].filter(Boolean)));
+
+            // Esegue tutte le letture del database in contemporanea (circa 50ms)
+            const [clientTipsDoc, servicesSnap, productsSnap, clientSnap, chatHistorySnap] = await Promise.all([
+                // 1. Consigli salone (parcheggi e indicazioni)
+                db.collection('vendors').doc(vendorId).collection('consiglicliente').doc('main').get().catch(() => ({ exists: false })),
+                
+                // 2. Menu Servizi del salone
+                db.collection('artisan_services').where('vendorId', '==', vendorId).get().catch(() => ({ docs: [] })),
+                
+                // 3. Vetrina Prodotti
+                db.collection('offers').where('vendorId', '==', vendorId).get().catch(() => ({ docs: [] })),
+                
+                // 4. Controllo Rubrica Salone
+                db.collection('vendors').doc(vendorId).collection('clients')
+                    .where('phone', 'in', phoneVariants.slice(0, 10))
+                    .limit(1).get().catch(() => ({ empty: true })),
+                
+                // 5. Memoria ultimi messaggi chat
+                db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone)
+                    .collection('messages').orderBy('timestamp', 'desc').limit(6).get().catch(() => ({ docs: [] }))
+            ]);
+
+            // Estrazione Dati Salone
+            const storeName = vendorData.store_name || vendorData.owner_name || "il nostro salone";
+            const storeAddress = vendorData.address || "in salone";
+            const storeHours = vendorData.public_opening_hours || vendorData.opening_hours || "Orari standard";
+            const specializations = (vendorData.customization_specializations || []).join(', ');
+            
+            const tipsData = clientTipsDoc.exists ? clientTipsDoc.data() : {};
+            const parkingInfo = tipsData.parkingTips || "";
+            const directionsInfo = tipsData.directions || "";
+
+            // Estrazione Servizi Reali
+            const servicesList = servicesSnap.docs
+                .map(d => d.data())
+                .filter(s => s.productName && s.isAvailable !== false)
+                .map(s => `- ${s.productName}: ${s.price}€ (${s.totalOccupiedTimeMinutes || s.serviceDuration || 30} min)`)
+                .slice(0, 20)
+                .join('\n');
+
+            // Estrazione Prodotti in Vendita
+            const productsList = productsSnap.docs
+                .map(d => d.data())
+                .filter(p => p.productName || p.name)
+                .map(p => `- ${p.productName || p.name}${p.brand ? ` (${p.brand})` : ''}: ${p.price || 0}€`)
+                .slice(0, 15)
+                .join('\n');
+
+            // Profilazione Cliente dalla Rubrica
+            let isKnownClient = false;
+            let clientFullName = pushName || "Cliente";
+            let clientNotesFormula = "";
+            let isVip = false;
+
+            if (!clientSnap.empty) {
+                const cData = clientSnap.docs[0].data();
+                isKnownClient = true;
+                clientFullName = `${cData.name || ''} ${cData.surname || ''}`.trim() || clientFullName;
+                clientNotesFormula = cData.notes || "";
+                isVip = Array.isArray(cData.tags) && cData.tags.includes('VIP');
+            }
+
+            // Storico Conversazione
+            let conversationHistory = [];
+            if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
+                conversationHistory = chatHistorySnap.docs.map(doc => ({
+                    role: doc.data().role === 'assistant' ? 'assistant' : 'user',
+                    content: doc.data().content
+                })).reverse();
+            }
+
+            // -------------------------------------------------------------
+            // 🧠 PREPARAZIONE DEL CERVELLO AI (Iniezione Contesto)
+            // -------------------------------------------------------------
+            const nowRome = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+            const todayRome = new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
+
+            const systemPrompt = `Sei l'assistente virtuale ufficiale del salone "${storeName}" su WhatsApp.
+Oggi è ${todayRome}, ore ${nowRome}.
+
+DATI DEL SALONE:
+- Nome: ${storeName}
+- Indirizzo: ${storeAddress}
+- Orari di apertura: ${storeHours}
+${specializations ? `- Specializzazioni: ${specializations}` : ''}
+${parkingInfo ? `- Info Parcheggio: ${parkingInfo}` : ''}
+${directionsInfo ? `- Indicazioni per raggiungerci: ${directionsInfo}` : ''}
+
+SCHEDA DEL CLIENTE CON CUI STAI PARLANDO:
+- Nome: "${clientFullName}"
+- Tipo cliente: ${isKnownClient ? `Cliente abituale registrato in rubrica${isVip ? ' (⭐️ CLIENTE VIP)' : ''}` : 'Nuovo cliente (non ancora in rubrica)'}
+${clientNotesFormula ? `- Note tecniche/Abitudini/Formule passate del cliente: "${clientNotesFormula}"` : ''}
+
+MENU DEI SERVIZI E PREZZI:
+${servicesList || "Listino trattamenti disponibile in salone."}
+
+PRODOTTI DISPONIBILI IN SALONE:
+${productsList || "Prodotti professionali disponibili in negozio."}
+
+REGOLE DI CONVERSAZIONE WHATSAPP:
+1. Rispondi con grande calore, cordialità ed educazione, chiamando il cliente per nome se è noto.
+2. Rispondi in MASSIMO 2 o 3 frasi brevi, naturali e facili da leggere sullo schermo di uno smartphone.
+3. Se chiedono prezzi o servizi, usa ESCLUSIVAMENTE quelli indicati nel listino sopra. Non inventare mai sconti o servizi non presenti.
+4. Se il cliente chiede dove siete o orari, fornisci con precisione i dati del salone.`;
+
+            const messagesPayload = [
+                { role: "system", content: systemPrompt },
+                ...conversationHistory,
+                { role: "user", content: messageText }
+            ];
+
+            // Chiamata all'Intelligenza Artificiale (Groq - Llama 3.3)
+            let aiReply = `Ciao ${clientFullName}! Ti ringraziamo per averci scritto da ${storeName}. Come possiamo aiutarti oggi?`;
 
             try {
                 const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -86,30 +206,54 @@ module.exports = async function handler(req, res) {
                     },
                     body: JSON.stringify({
                         model: "llama-3.3-70b-versatile",
-                        messages: [
-                            { 
-                                role: "system", 
-                                content: `Sei l'assistente virtuale del salone "${storeName}" su WhatsApp. Rispondi con grande gentilezza, naturalezza e brevità (massimo 2 frasi).` 
-                            },
-                            { 
-                                role: "user", 
-                                content: messageText 
-                            }
-                        ],
-                        temperature: 0.5,
-                        max_tokens: 250
+                        messages: messagesPayload,
+                        temperature: 0.4,
+                        max_tokens: 300
                     })
                 });
 
                 if (groqRes.ok) {
                     const groqData = await groqRes.json();
                     aiReply = groqData.choices?.[0]?.message?.content?.trim() || aiReply;
+                } else {
+                    console.error("[Groq Error]", await groqRes.text());
                 }
             } catch (aiErr) {
-                console.error("[AutoPilot] Errore risposta Groq:", aiErr.message);
+                console.error("[AutoPilot] Errore chiamata Groq:", aiErr.message);
             }
 
-            // 2. Rispedisce la risposta a Render (il Postino)
+            // -------------------------------------------------------------
+            // 💾 SALVATAGGIO MEMORIA CHAT NELLA CARTELLA DEL SALONE
+            // -------------------------------------------------------------
+            try {
+                const chatDocRef = db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone);
+                const messagesCol = chatDocRef.collection('messages');
+
+                await Promise.all([
+                    messagesCol.add({
+                        role: 'user',
+                        content: messageText,
+                        timestamp: admin.firestore.FieldValue.serverTimestamp()
+                    }),
+                    messagesCol.add({
+                        role: 'assistant',
+                        content: aiReply,
+                        timestamp: admin.firestore.FieldValue.serverTimestamp()
+                    }),
+                    chatDocRef.set({
+                        phone: cleanPhone,
+                        customerName: clientFullName,
+                        lastMessage: aiReply,
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true })
+                ]);
+            } catch (memErr) {
+                console.warn("[Memoria Chat] Errore salvataggio:", memErr.message);
+            }
+
+            // -------------------------------------------------------------
+            // 🚀 INVIO RISPOSTA AL SERVER RENDER (IL POSTINO)
+            // -------------------------------------------------------------
             const GATEWAY_BASE_URL = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
             
             try {
@@ -122,12 +266,12 @@ module.exports = async function handler(req, res) {
                         message: aiReply
                     })
                 });
-                console.log(`[AutoPilot] 🚀 Risposta inviata al cliente con successo!`);
+                console.log(`[AutoPilot] 🚀 Risposta inviata al cliente "${clientFullName}" (${cleanPhone})!`);
             } catch (sendErr) {
                 console.error("[AutoPilot] Errore invio Gateway Render:", sendErr.message);
             }
 
-            return res.status(200).json({ success: true, reply: aiReply });
+            return res.status(200).json({ success: true, client: clientFullName, reply: aiReply });
         }
 
         // =========================================================================
