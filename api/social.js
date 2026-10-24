@@ -89,16 +89,19 @@ module.exports = async function handler(req, res) {
             // -------------------------------------------------------------
             let cleanPhone = senderPhone.replace(/\D/g, '');
                         if (!cleanPhone.startsWith('39') && cleanPhone.length === 10) cleanPhone = '39' + cleanPhone;
-            
+
                         const phoneVariants = Array.from(new Set([
                             senderPhone,
                             cleanPhone,
                             `+${cleanPhone}`,
                             cleanPhone.startsWith('39') ? cleanPhone.substring(2) : cleanPhone
                         ].filter(Boolean)));
-            
+
+                        // Variabile dinamica e modificabile per il testo da passare all'IA
+                        let activeUserPrompt = messageText;
+
                         const GATEWAY_BASE_URL = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
-            
+
                         // Funzione rapida per spedire messaggi diretti tramite il server Render
                         async function sendWhatsAppMessage(replyText) {
                             try {
@@ -115,39 +118,39 @@ module.exports = async function handler(req, res) {
                                 console.error("[AutoPilot Gateway] Errore invio:", sendErr.message);
                             }
                         }
-            
+
                         // -------------------------------------------------------------
                         // 🤵 IL RAGAZZO: RACCOLTA DATI ISTANTANEA (IN PARALLELO)
                         // -------------------------------------------------------------
                         const [clientTipsDoc, servicesSnap, productsSnap, clientSnap, chatHistorySnap, trainingDoc, collaboratorsSnap, chatProfileDoc] = await Promise.all([
                             // 1. Consigli salone (parcheggi e indicazioni)
                             db.collection('vendors').doc(vendorId).collection('consiglicliente').doc('main').get().catch(() => ({ exists: false })),
-                            
+
                             // 2. Menu Servizi del salone
                             db.collection('artisan_services').where('vendorId', '==', vendorId).get().catch(() => ({ docs: [] })),
-                            
+
                             // 3. Vetrina Prodotti
                             db.collection('offers').where('vendorId', '==', vendorId).get().catch(() => ({ docs: [] })),
-                            
+
                             // 4. Controllo Rubrica Salone
                             db.collection('vendors').doc(vendorId).collection('clients')
                                 .where('phone', 'in', phoneVariants.slice(0, 10))
                                 .limit(1).get().catch(() => ({ empty: true })),
-                            
+
                             // 5. Memoria ultimi messaggi chat
                             db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone)
                                 .collection('messages').orderBy('timestamp', 'desc').limit(6).get().catch(() => ({ docs: [] })),
-            
+
                             // 6. Pacchetto Addestramento & Clone
                             db.collection('vendors').doc(vendorId).collection('personal_ai_chat').doc('Training').get().catch(() => ({ exists: false })),
-            
+
                             // 7. 👥 Squadra del Salone (Collaboratori e Staff)
                             db.collection('vendors').doc(vendorId).collection('collaborators').where('isActive', '==', true).get().catch(() => ({ docs: [] })),
-            
+
                             // 8. 📁 Fascicolo Chat Personale del Numero di Telefono
                             db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone).get().catch(() => ({ exists: false }))
                         ]);
-            
+
                         // =========================================================================
                         // 🎯 RICONOSCIMENTO IMMEDIATO NOME CLIENTE
                         // =========================================================================
@@ -156,7 +159,7 @@ module.exports = async function handler(req, res) {
                         let clientFullName = "";
                         let clientNotesFormula = "";
                         let isVip = false;
-            
+
                         if (!clientSnap.empty) {
                             const cData = clientSnap.docs[0].data();
                             isKnownClient = true;
@@ -168,17 +171,17 @@ module.exports = async function handler(req, res) {
                             clientFirstName = pushName.trim().split(" ")[0];
                             clientFullName = pushName.trim();
                         }
-            
+
                         const storeName = vendorData.store_name || vendorData.owner_name || "il nostro salone";
                         const chatDocRef = db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone);
                         const messagesCol = chatDocRef.collection('messages');
-            
+
                         // Formattatore orario leggibile per lo storico chat
                         const nowRomeStr = new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
-            
+
                         const chatData = (chatProfileDoc && chatProfileDoc.exists) ? (chatProfileDoc.data() || {}) : null;
                         const currentConsent = chatData ? chatData.aiConsentStatus : null;
-            
+
                         // =========================================================================
                         // 🚦 CASO 1: PRIMISSIMO CONTATTO (FASCICOLO NON ESISTE O NESSUN CONSENSO)
                         // =========================================================================
@@ -194,7 +197,7 @@ module.exports = async function handler(req, res) {
                                 lastMessage: messageText,
                                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
                             }, { merge: true });
-            
+
                             // Salva il messaggio ricevuto
                             await messagesCol.add({
                                 role: 'user',
@@ -202,31 +205,31 @@ module.exports = async function handler(req, res) {
                                 timestamp: admin.firestore.FieldValue.serverTimestamp(),
                                 dateTimeRome: nowRomeStr
                             });
-            
+
                             // Messaggio veloce, sintetico e trasparente
                             const greetingName = clientFirstName ? `Ciao ${clientFirstName}! 👋` : `Ciao! 👋`;
                             const firstContactMsg = `${greetingName}\nSono l'assistente virtuale con Intelligenza Artificiale di *${storeName}*, addestrata dal titolare per darti informazioni, gestire prenotazioni e ordini.\n\nPer continuare:\n1️⃣ Digita *1* per chattare con me subito\n2️⃣ Digita *2* per attendere la risposta del titolare in persona`;
-            
+
                             await sendWhatsAppMessage(firstContactMsg);
-            
+
                             await messagesCol.add({
                                 role: 'assistant',
                                 content: firstContactMsg,
                                 timestamp: admin.firestore.FieldValue.serverTimestamp(),
                                 dateTimeRome: nowRomeStr
                             });
-            
+
                             return res.status(200).json({ success: true, status: "consent_requested", phone: cleanPhone });
                         }
-            
+
                         // =========================================================================
-                        // 🚦 CASO 2: IL CLIENTE È IN ATTESA E STA DIGITANDO 1 OPPURE 2
+                        // 🚦 CASO 2: IL CLIENTE È IN ATTESA E STA RISPONDENDO 1 OPPURE 2
                         // =========================================================================
                         if (currentConsent === 'pending') {
                             const cleanedAnswer = messageText.trim().toLowerCase();
-                            const isAccept = /^(1|uno|si|sì|ok|accetto|1️⃣)$/i.test(cleanedAnswer);
-                            const isDecline = /^(2|due|no|rifiuto|2️⃣)$/i.test(cleanedAnswer);
-            
+                            const isAccept = cleanedAnswer === '1' || cleanedAnswer.startsWith('1') || /^(1|uno|si|sì|ok|accetto|1️⃣)$/i.test(cleanedAnswer);
+                            const isDecline = cleanedAnswer === '2' || cleanedAnswer.startsWith('2') || /^(2|due|no|rifiuto|2️⃣)$/i.test(cleanedAnswer);
+
                             // Salva il messaggio della risposta (es. "1" o "2")
                             await messagesCol.add({
                                 role: 'user',
@@ -234,55 +237,55 @@ module.exports = async function handler(req, res) {
                                 timestamp: admin.firestore.FieldValue.serverTimestamp(),
                                 dateTimeRome: nowRomeStr
                             });
-            
+
                             if (isDecline) {
                                 await chatDocRef.set({
                                     aiConsentStatus: 'declined',
                                     updatedAt: admin.firestore.FieldValue.serverTimestamp()
                                 }, { merge: true });
-            
+
                                 const declineMsg = `Perfetto, nessun problema! 👤 Ho avvisato il titolare: ti risponderà personalmente appena possibile. A presto!`;
                                 await sendWhatsAppMessage(declineMsg);
-            
+
                                 await messagesCol.add({
                                     role: 'assistant',
                                     content: declineMsg,
                                     timestamp: admin.firestore.FieldValue.serverTimestamp(),
                                     dateTimeRome: nowRomeStr
                                 });
-            
+
                                 return res.status(200).json({ success: true, status: "consent_declined" });
                             }
-            
+
                             if (!isAccept) {
                                 // Non ha digitato né 1 né 2: promemoria veloce
-                                const remindMsg = `Per poterti assistere, digita *1* per chattare con l'assistente IA oppure *2* per attendere il titolare. 😊`;
+                                const remindMsg = `Per poterti assistere, digita *1* per chattare subito con l'assistente IA oppure *2* per attendere il titolare. 😊`;
                                 await sendWhatsAppMessage(remindMsg);
-            
+
                                 await messagesCol.add({
                                     role: 'assistant',
                                     content: remindMsg,
                                     timestamp: admin.firestore.FieldValue.serverTimestamp(),
                                     dateTimeRome: nowRomeStr
                                 });
-            
+
                                 return res.status(200).json({ success: true, status: "consent_reminded" });
                             }
-            
-                            // Ha digitato 1 (ACCETTATO!): Sblocca il consenso e ripesca la sua domanda originaria
+
+                            // Ha digitato 1 (ACCETTATO!): Sblocca il consenso nel DB
                             await chatDocRef.set({
                                 aiConsentStatus: 'accepted',
                                 consentAcceptedAt: admin.firestore.FieldValue.serverTimestamp(),
                                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
                             }, { merge: true });
-            
-                            const originalQuestion = chatData.pendingInitialMessage || messageText;
-                            console.log(`[AutoPilot] 🟢 Consenso ACCETTATO da ${cleanPhone}! Riprendo la domanda: "${originalQuestion}"`);
-            
-                            // Istruiamo l'IA a confermare con calore l'accoglienza e rispondere subito alla domanda iniziale
-                            messageText = `[SISTEMA: Il cliente ha appena premuto 1 accettando l'assistente IA. Salutalo con calore ed entusiasmo dicendogli che sei pronta, e rispondi subito alla domanda che aveva fatto prima: "${originalQuestion}"]`;
+
+                            const originalQuestion = (chatData && chatData.pendingInitialMessage) ? chatData.pendingInitialMessage : "Ciao! Ho accettato, come puoi aiutarmi?";
+                            console.log(`[AutoPilot] 🟢 Consenso ACCETTATO da ${cleanPhone}! Domanda recuperata: "${originalQuestion}"`);
+
+                            // Formuliamo la richiesta all'IA senza bloccare le variabili
+                            activeUserPrompt = `[ISTRUZIONE SISTEMA: Il cliente ha appena premuto 1 per accettare l'assistente IA. Salutalo con calore ed entusiasmo dicendogli che sei a sua disposizione, e rispondi subito alla domanda o al saluto che ti aveva scritto prima: "${originalQuestion}"]`;
                         }
-            
+
                         // =========================================================================
                         // 🚦 CASO 3: SE IL CLIENTE AVEVA SCELTO DI PARLARE SOLO CON L'UMANO
                         // =========================================================================
@@ -290,13 +293,13 @@ module.exports = async function handler(req, res) {
                             console.log(`[AutoPilot] 🛑 Chat gestita manualmente per ${cleanPhone}. Pilota IA in pausa.`);
                             return res.status(200).json({ status: "skipped", reason: "Chat gestita manualmente dal titolare" });
                         }
-            
+
                         // =========================================================================
                         // 🚀 CASO 4: CONSENSO ATTIVO! IL CERVELLO DELL'IA ENTRA IN AZIONE
                         // =========================================================================
                         const trainingData = (trainingDoc && trainingDoc.exists) ? trainingDoc.data() : null;
                         const hasCustomTraining = trainingData && trainingData.ai_ethics_accepted === true;
-            
+
                         let personalityDirectives = "";
                         if (hasCustomTraining) {
                             if (trainingData.compiled_ai_persona) {
@@ -309,35 +312,35 @@ module.exports = async function handler(req, res) {
                         } else {
                             personalityDirectives = `Rispondi con calore, naturalezza e massima educazione come una receptionist impeccabile.`;
                         }
-            
+
                         const storeAddress = vendorData.address || "in salone";
                         const storeHours = vendorData.public_opening_hours || vendorData.opening_hours || "Orari standard";
                         const specializations = (vendorData.customization_specializations || []).join(', ');
-                        
+
                         const tipsData = clientTipsDoc.exists ? clientTipsDoc.data() : {};
                         const parkingInfo = tipsData.parkingTips || "";
                         const directionsInfo = tipsData.directions || "";
-            
+
                         const servicesNameMap = new Map();
                         servicesSnap.docs.forEach(d => {
                             const s = d.data();
                             if (s.productName) servicesNameMap.set(d.id, s.productName);
                         });
-            
+
                         const servicesList = servicesSnap.docs
                             .map(d => d.data())
                             .filter(s => s.productName && s.isAvailable !== false)
                             .map(s => `- ${s.productName}: ${s.price}€ (${s.totalOccupiedTimeMinutes || s.serviceDuration || 30} min)`)
                             .slice(0, 25)
                             .join('\n');
-            
+
                         const productsList = productsSnap.docs
                             .map(d => d.data())
                             .filter(p => p.productName || p.name)
                             .map(p => `- ${p.productName || p.name}${p.brand ? ` (${p.brand})` : ''}: ${p.price || 0}€`)
                             .slice(0, 15)
                             .join('\n');
-            
+
                         // Squadra del salone
                         const teamEntries = [];
                         const ownerName = vendorData.owner_name || vendorData.store_name || "Titolare";
@@ -345,14 +348,14 @@ module.exports = async function handler(req, res) {
                         const ownerSpecs = vendorData.owner_specialties ? `\n  - Specializzazioni: ${vendorData.owner_specialties}` : '';
                         const ownerBio = vendorData.owner_bio ? `\n  - Bio: ${vendorData.owner_bio}` : '';
                         const ownerAiNotes = vendorData.owner_ai_notes ? `\n  - Istruzioni IA: ${vendorData.owner_ai_notes}` : '';
-                        
+
                         let ownerServs = "Tutti i servizi del salone";
                         if (Array.isArray(vendorData.servicesOffered) && vendorData.servicesOffered.length > 0) {
                             const mapped = vendorData.servicesOffered.map(id => servicesNameMap.get(id)).filter(Boolean);
                             if (mapped.length > 0) ownerServs = mapped.join(', ');
                         }
                         teamEntries.push(`• 👑 ${ownerName}${ownerJob} [Titolare Principale]:\n  - Servizi che esegue: ${ownerServs}${ownerSpecs}${ownerBio}${ownerAiNotes}`);
-            
+
                         if (collaboratorsSnap.docs && collaboratorsSnap.docs.length > 0) {
                             collaboratorsSnap.docs.forEach(doc => {
                                 const c = doc.data();
@@ -361,7 +364,7 @@ module.exports = async function handler(req, res) {
                                 const cSpecs = c.specialties ? `\n  - Specializzazioni: ${c.specialties}` : '';
                                 const cBio = c.bio ? `\n  - Bio: ${c.bio}` : '';
                                 const cAiNotes = c.aiNotes ? `\n  - Istruzioni IA: ${c.aiNotes}` : '';
-            
+
                                 let cServs = "Servizi standard del salone";
                                 if (Array.isArray(c.servicesOffered) && c.servicesOffered.length > 0) {
                                     const mapped = c.servicesOffered.map(id => servicesNameMap.get(id)).filter(Boolean);
@@ -371,7 +374,7 @@ module.exports = async function handler(req, res) {
                             });
                         }
                         const teamListFormatted = teamEntries.join('\n\n');
-            
+
                         let customerRecognitionGuideline = "";
                         if (isKnownClient) {
                             customerRecognitionGuideline = `STAI PARLANDO CON UN CLIENTE ABITUALE REGISTRATO: "${clientFullName}"${isVip ? ' (CLIENTE VIP ⭐️)' : ''}.
@@ -383,7 +386,7 @@ module.exports = async function handler(req, res) {
                         } else {
                             customerRecognitionGuideline = `STAI PARLANDO CON UN CLIENTE NUOVO. Sii impeccabilmente gentile, accogliente e professionale.`;
                         }
-            
+
                         let conversationHistory = [];
                         if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
                             conversationHistory = chatHistorySnap.docs.map(doc => ({
@@ -391,30 +394,30 @@ module.exports = async function handler(req, res) {
                                 content: doc.data().content
                             })).reverse();
                         }
-            
+
                         const nowRome = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
                         const todayRome = new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
-            
+
                         const systemPrompt = `Sei l'assistente virtuale ufficiale del salone "${storeName}" su WhatsApp.
             Oggi è ${todayRome}, ore ${nowRome}.
-            
+
             ============================================================
             PACCHETTO 1: CHI SEI E COME DEVI PARLARE (PERSONALITÀ E ISTRUZIONI)
             ============================================================
             ${personalityDirectives}
-            
+
             REGOLE FERREE DI COMUNICAZIONE:
             1. Rispondi SEMPRE in massimo 2 o 3 frasi brevi, naturali e facili da leggere su smartphone.
             2. Sei l'assistente virtuale ufficiale del salone, trasparente, efficiente e con il calore del titolare.
             3. Se chiedono prezzi o trattamenti, usa ESCLUSIVAMENTE quelli presenti nel listino dati qui sotto. Zero sconti inventati.
             4. COMPRENDI LO SLANG: Capisci al volo espressioni colloquiali o dialettali ("al volo", "un buco", "sfumatura", "fresco", "a che ora staccate") e rispondi con calore e naturalezza.
             5. CONOSCI LA SQUADRA: Se chiedono chi lavora nel salone, quanti siete, chi esegue determinati servizi o chi è specializzato in cosa, rispondi con precisione usando ESCLUSIVAMENTE i dati della squadra riportati qui sotto.
-            
+
             ============================================================
             PROFILO DEL CLIENTE CHE TI HA SCRITTO:
             ============================================================
             ${customerRecognitionGuideline}
-            
+
             ============================================================
             PACCHETTO 2: DATI REALI DEL NEGOZIO E SQUADRA (FATTI VERI)
             ============================================================
@@ -425,31 +428,31 @@ module.exports = async function handler(req, res) {
             ${specializations ? `- Specializzazioni: ${specializations}` : ''}
             ${parkingInfo ? `- Info Parcheggio: ${parkingInfo}` : ''}
             ${directionsInfo ? `- Indicazioni stradali: ${directionsInfo}` : ''}
-            
+
             SQUADRA E STAFF DEL SALONE (CHI LAVORA QUI E COSA FA):
             ${teamListFormatted}
-            
+
             MENU SERVIZI E PREZZI DISPONIBILI:
             ${servicesList || "Listino trattamenti disponibile in salone."}
-            
+
             PRODOTTI IN VENDITA DISPONIBILI:
             ${productsList || "Prodotti professionali disponibili in negozio."}`;
-            
+
                         const messagesPayload = [
                             { role: "system", content: systemPrompt },
                             ...conversationHistory,
-                            { role: "user", content: messageText }
+                            { role: "user", content: activeUserPrompt }
                         ];
-            
+
                         let aiReply = `Ciao ${clientFullName || ''}! Come posso aiutarti oggi da ${storeName}?`;
-            
+
                         const GROQ_CANDIDATES = [
                             "llama-3.3-70b-versatile",
                             "llama-3.1-8b-instant",
                             "openai/gpt-oss-120b",
                             "llama3-8b-8192"
                         ];
-            
+
                         for (const modelId of GROQ_CANDIDATES) {
                             try {
                                 const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -465,7 +468,7 @@ module.exports = async function handler(req, res) {
                                         max_tokens: 300
                                     })
                                 });
-            
+
                                 if (groqRes.ok) {
                                     const groqData = await groqRes.json();
                                     const content = groqData.choices?.[0]?.message?.content?.trim();
@@ -481,13 +484,13 @@ module.exports = async function handler(req, res) {
                                 console.warn(`[AutoPilot] Tentativo fallito su ${modelId}:`, aiErr.message);
                             }
                         }
-            
+
                         // 💾 Salvataggio messaggi e aggiornamento scheda cliente con data e ora precisa
                         try {
                             await Promise.all([
                                 messagesCol.add({
                                     role: 'user',
-                                    content: (currentConsent === 'pending') ? (chatData.pendingInitialMessage || 'Accettazione IA') : messageText,
+                                    content: (currentConsent === 'pending') ? `1 (Consenso IA Accettato)` : messageText,
                                     timestamp: admin.firestore.FieldValue.serverTimestamp(),
                                     dateTimeRome: nowRomeStr
                                 }),
@@ -508,11 +511,11 @@ module.exports = async function handler(req, res) {
                         } catch (memErr) {
                             console.warn("[Memoria Chat] Errore salvataggio:", memErr.message);
                         }
-            
+
                         // 🚀 Invio risposta al Gateway WhatsApp
                         await sendWhatsAppMessage(aiReply);
                         console.log(`[AutoPilot] 🚀 Risposta inviata al cliente "${clientFullName || cleanPhone}"!`);
-            
+
                         return res.status(200).json({ success: true, client: clientFullName, reply: aiReply });
         }
 
