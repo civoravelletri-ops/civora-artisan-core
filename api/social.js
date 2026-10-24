@@ -1,3 +1,19 @@
+const admin = require('firebase-admin');
+
+// Inizializzazione diretta di Firebase con la chiave che hai su Vercel
+if (!admin.apps.length) {
+    try {
+        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount)
+        });
+        console.log('[Firebase Admin] Inizializzato con successo su social.js');
+    } catch (err) {
+        console.error('[Firebase Admin Error] Errore inizializzazione:', err.message);
+    }
+}
+const db = admin.firestore();
+
 module.exports = async function handler(req, res) {
     // Permessi CORS
     res.setHeader('Access-Control-Allow-Credentials', true);
@@ -19,7 +35,7 @@ module.exports = async function handler(req, res) {
         }
 
         // =========================================================================
-        // 🟢 NUOVO BLOCCO WHATSAPP (PUNTO ZERO: PULITO E SENZA REGOLE VECCHIE)
+        // 🟢 NUOVO BLOCCO WHATSAPP AUTOPILOT CON BUTTAFUORI INCORRUTTIBILE
         // =========================================================================
         if (body.isWhatsAppAutoPilot && body.vendorId) {
             const vendorId = body.vendorId;
@@ -32,10 +48,34 @@ module.exports = async function handler(req, res) {
                 return res.status(200).json({ status: "skipped", reason: "Messaggio vuoto" });
             }
 
-            console.log(`[Nuovo AutoPilot] 📩 Ricevuto da "${pushName}" (${senderPhone}): "${messageText}"`);
+            // -------------------------------------------------------------
+            // 💂‍♂️ IL BUTTAFUORI INCORRUTTIBILE (Controllo Diretto Firestore)
+            // -------------------------------------------------------------
+            const vendorDoc = await db.collection('vendors').doc(vendorId).get();
+            if (!vendorDoc.exists) {
+                console.log(`[Buttafuori] 🛑 Salone ${vendorId} non trovato nel database.`);
+                return res.status(200).json({ status: "skipped", reason: "Salone inesistente" });
+            }
 
-            // 1. Chiamiamo l'IA pura (Llama 3.3) con un'istruzione minima di base
-            let aiReply = "Ciao! Al momento sono in fase di aggiornamento, ti rispondo a breve.";
+            const vendorData = vendorDoc.data() || {};
+            const isWaConnected = vendorData.whatsapp_connected === true;
+            const isAutoPilotOn = vendorData.whatsapp_ai_autopilot === true;
+
+            // Se anche una sola levetta è spenta, chiude la porta all'istante
+            if (!isWaConnected || !isAutoPilotOn) {
+                console.log(`[Buttafuori] 🛑 Accesso Negato per ${vendorId}. Connesso: ${isWaConnected}, Pilota IA: ${isAutoPilotOn}`);
+                return res.status(200).json({ 
+                    status: "skipped", 
+                    reason: "Pilota automatico o WhatsApp non attivi per questo salone" 
+                });
+            }
+
+            console.log(`[Buttafuori] 🟢 VIA LIBERA! Salone "${vendorData.store_name || vendorId}" attivo. Elaboro messaggio...`);
+            // -------------------------------------------------------------
+
+            // 1. L'Intelligenza Artificiale (Groq - Llama 3.3)
+            let aiReply = "Ciao! Ti rispondo subito.";
+            const storeName = vendorData.store_name || "il nostro salone";
 
             try {
                 const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -49,7 +89,7 @@ module.exports = async function handler(req, res) {
                         messages: [
                             { 
                                 role: "system", 
-                                content: "Sei l'assistente virtuale del salone su WhatsApp. Rispondi al cliente con estrema gentilezza, naturalezza e brevità (massimo 2-3 frasi brevi)." 
+                                content: `Sei l'assistente virtuale del salone "${storeName}" su WhatsApp. Rispondi con grande gentilezza, naturalezza e brevità (massimo 2 frasi).` 
                             },
                             { 
                                 role: "user", 
@@ -57,21 +97,19 @@ module.exports = async function handler(req, res) {
                             }
                         ],
                         temperature: 0.5,
-                        max_tokens: 300
+                        max_tokens: 250
                     })
                 });
 
                 if (groqRes.ok) {
                     const groqData = await groqRes.json();
                     aiReply = groqData.choices?.[0]?.message?.content?.trim() || aiReply;
-                } else {
-                    console.error("[Groq Error]", await groqRes.text());
                 }
             } catch (aiErr) {
-                console.error("[Nuovo AutoPilot] Errore chiamata Groq:", aiErr.message);
+                console.error("[AutoPilot] Errore risposta Groq:", aiErr.message);
             }
 
-            // 2. Rispediamo la risposta al tuo server Render (il Postino)
+            // 2. Rispedisce la risposta a Render (il Postino)
             const GATEWAY_BASE_URL = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
             
             try {
@@ -84,9 +122,9 @@ module.exports = async function handler(req, res) {
                         message: aiReply
                     })
                 });
-                console.log(`[Nuovo AutoPilot] 🚀 Risposta inviata con successo al cliente!`);
+                console.log(`[AutoPilot] 🚀 Risposta inviata al cliente con successo!`);
             } catch (sendErr) {
-                console.error("[Nuovo AutoPilot] Errore invio Gateway Render:", sendErr.message);
+                console.error("[AutoPilot] Errore invio Gateway Render:", sendErr.message);
             }
 
             return res.status(200).json({ success: true, reply: aiReply });
@@ -99,10 +137,6 @@ module.exports = async function handler(req, res) {
         if (!contesto) {
             return res.status(400).json({ errore: "Dati di contesto mancanti nella richiesta." });
         }
-
-        const isLowStock = contesto.quantita > 0 && contesto.quantita <= 3;
-        const hasDiscount = contesto.originalPrice && contesto.originalPrice > (contesto.prezzo || 0);
-        const discountPercent = hasDiscount ? Math.round(((contesto.originalPrice - contesto.prezzo) / contesto.originalPrice) * 100) : 0;
 
         let systemPrompt = `Sei un Senior Social Media Copywriter da Agenzia di Marketing di Lusso. Crea post magnetici per promuovere servizi e prodotti. Rispondi solo con il testo del post.`;
         let userPromptText = `Dati: Negozio: "${contesto.store_name || 'Salone'}", Servizio: "${contesto.nome || 'Servizio'}", Prezzo: ${contesto.prezzo || '0'}€, Link: ${contesto.link_shop || 'https://www.civora.it'}`;
