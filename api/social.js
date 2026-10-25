@@ -359,9 +359,10 @@ PROFILO CLIENTE:
 
 REGOLE PER LA DISPONIBILITÀ E PRENOTAZIONI:
 - Non mostrare mai i codici ID interni dei servizi al cliente.
+- Quando ti vengono dati gli orari disponibili dallo strumento, elenca al cliente solo i primi 5 o 6 orari principali in modo pulito ed ordinato (es. 09:00, 09:30, 10:00...), senza stampare elenchi infiniti o minuti sballati.
 - Se il cliente chiede disponibilità, calcola la data esatta in formato YYYY-MM-DD partendo dal fatto che oggi è ${todayReadable} (${todayIsoDate}).
 - Chiama lo strumento 'controlla_agenda_reale' per verificare gli orari.
-- **REGOLA FONDAMENTALE:** Quando il cliente sceglie un orario definitivo e dice chiaramente che vuole confermare (es. "Sì, mi va bene alle 15:00", "Fissa pure"), **DEVI chiamare obbligatoriamente lo strumento 'conferma_e_blocca_appuntamento'**. Non dire mai "Ti ho prenotato" se prima non hai eseguito questa funzione di salvataggio!`;
+- **REGOLA FONDAMENTALE DI PRENOTAZIONE:** Quando il cliente sceglie un orario definitivo e conferma (es. "Sì, conferma", "Sì grazie"), **DEVI chiamare lo strumento 'conferma_e_blocca_appuntamento' passando l'ID_INTERNO del servizio, la data, l'ora scelta e la durata**. Non inventarti mai che l'appuntamento è confermato se prima non hai eseguito con successo questo salvataggio!`;
 
             const messagesPayload = [
                 { role: "system", content: systemPrompt },
@@ -392,16 +393,16 @@ REGOLE PER LA DISPONIBILITÀ E PRENOTAZIONI:
                     if (call.function.name === 'controlla_agenda_reale') {
                                             const targetServiceId = callArgs.serviceId || (servicesSnap.docs[0]?.id) || "default";
                                             const targetDate = callArgs.dataRichiesta || todayIsoDate;
-                                            
+
                                             let serviceDuration = 30;
                                             const sFound = servicesMap.get(targetServiceId);
                                             if (sFound) serviceDuration = sFound.totalOccupiedTimeMinutes || sFound.serviceDuration || 30;
-                    
+
                                             let realSlots = [];
                                             try {
                                                 const controller = new AbortController();
                                                 const timer = setTimeout(() => controller.abort(), 4000);
-                    
+
                                                 const slotFetch = await fetch(SLOTS_API_URL, {
                                                     method: "POST",
                                                     signal: controller.signal,
@@ -420,12 +421,15 @@ REGOLE PER LA DISPONIBILITÀ E PRENOTAZIONI:
                                             } catch (slotErr) {
                                                 console.warn("[Slot Fetch Error]:", slotErr.message);
                                             }
-                    
-                                            const toolResultPayload = {
-                                                dataVerificata: targetDate,
-                                                orariDisponibili: realSlots.length > 0 ? realSlots : "Spiacenti, siamo completi in questa data."
-                                            };
-                    
+
+                                            // Limitiamo a massimo 8 slot per evitare il loop di Vercel e non intasare la chat
+                                                                    const slotPuliti = Array.isArray(realSlots) ? realSlots.slice(0, 8) : [];
+
+                                                                    const toolResultPayload = {
+                                                                        dataVerificata: targetDate,
+                                                                        orariDisponibili: slotPuliti.length > 0 ? slotPuliti : "Spiacenti, siamo completi in questa data."
+                                                                    };
+
                                             const clonedMessages = JSON.parse(JSON.stringify(messagesPayload));
                                             clonedMessages.push(messageObj);
                                             clonedMessages.push({
@@ -433,33 +437,46 @@ REGOLE PER LA DISPONIBILITÀ E PRENOTAZIONI:
                                                 tool_call_id: call.id,
                                                 content: JSON.stringify(toolResultPayload)
                                             });
-                    
+
                                             const finalAiData = await callAiCompletion({
                                                 messages: clonedMessages,
                                                 temperature: 0.35,
                                                 max_tokens: 350
                                             });
-                    
+
                                             if (finalAiData?.choices?.[0]?.message?.content) {
                                                 aiReply = finalAiData.choices[0].message.content.trim();
                                             }
                                         }
                                         else if (call.function.name === 'conferma_e_blocca_appuntamento') {
-                                            const targetServiceId = callArgs.serviceId || (servicesSnap.docs[0]?.id) || "default";
-                                            const bookDateStr = callArgs.data || todayIsoDate;
-                                            const bookTimeStr = callArgs.ora || "10:00";
-                                            const bookDur = Number(callArgs.durataMinuti) || 30;
-                                            const bookServiceName = callArgs.nomeServizio || "Servizio Salone";
-                                            const bookPrice = Number(callArgs.prezzo) || 0;
-                    
+                                                                const targetServiceId = callArgs.serviceId || (servicesSnap.docs[0]?.id) || "default";
+                                                                const bookDateStr = callArgs.data || todayIsoDate;
+                                                                const bookTimeStr = callArgs.ora || "10:00";
+
+                                                                // Recuperiamo durata e prezzo reali dal listino del salone per evitare errori
+                                                                let bookDur = 30;
+                                                                let bookServiceName = "Servizio Salone";
+                                                                let bookPrice = 0;
+
+                                                                const sFound = servicesMap.get(targetServiceId);
+                                                                if (sFound) {
+                                                                    bookDur = sFound.totalOccupiedTimeMinutes || sFound.serviceDuration || 30;
+                                                                    bookServiceName = sFound.productName || "Servizio Salone";
+                                                                    bookPrice = parseFloat(sFound.price) || 0;
+                                                                } else {
+                                                                    bookDur = Number(callArgs.durataMinuti) || 30;
+                                                                    bookServiceName = callArgs.nomeServizio || "Servizio Salone";
+                                                                    bookPrice = Number(callArgs.prezzo) || 0;
+                                                                }
+
                                             const startDateTime = new Date(`${bookDateStr}T${bookTimeStr}:00`);
                                             const endDateTime = new Date(startDateTime.getTime() + bookDur * 60000);
-                    
+
                                             let bookingResult = { esito: "ERRORE", messaggio: "Impossibile salvare" };
                                             try {
                                                 const controller = new AbortController();
                                                 const timer = setTimeout(() => controller.abort(), 4000);
-                    
+
                                                 const saveBookingRes = await fetch(SLOTS_API_URL, {
                                                     method: "POST",
                                                     signal: controller.signal,
@@ -488,7 +505,7 @@ REGOLE PER LA DISPONIBILITÀ E PRENOTAZIONI:
                                                     })
                                                 });
                                                 clearTimeout(timer);
-                    
+
                                                 if (saveBookingRes.ok) {
                                                     bookingResult = { esito: "CONFERMATO", messaggio: "Appuntamento salvato con successo nel calendario!" };
                                                 } else {
@@ -497,7 +514,7 @@ REGOLE PER LA DISPONIBILITÀ E PRENOTAZIONI:
                                             } catch (saveErr) {
                                                 bookingResult = { esito: "ERRORE", messaggio: saveErr.message };
                                             }
-                    
+
                                             const clonedMessages = JSON.parse(JSON.stringify(messagesPayload));
                                             clonedMessages.push(messageObj);
                                             clonedMessages.push({
@@ -505,13 +522,13 @@ REGOLE PER LA DISPONIBILITÀ E PRENOTAZIONI:
                                                 tool_call_id: call.id,
                                                 content: JSON.stringify(bookingResult)
                                             });
-                    
+
                                             const finalAiData = await callAiCompletion({
                                                 messages: clonedMessages,
                                                 temperature: 0.35,
                                                 max_tokens: 350
                                             });
-                    
+
                                             if (finalAiData?.choices?.[0]?.message?.content) {
                                                 aiReply = finalAiData.choices[0].message.content.trim();
                                             }
