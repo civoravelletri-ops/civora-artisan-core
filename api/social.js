@@ -49,7 +49,7 @@ async function getVertexAuthContext() {
     }
 }
 
-// 🧠 Motore di chiamata AI: Prova Google Vertex AI (Gemini), con paracadute Groq
+// 🧠 Motore di chiamata AI
 async function callAiCompletion({ messages, tools, tool_choice, temperature, max_tokens }) {
     // 1. TENTATIVO CON GOOGLE VERTEX AI (Ufficiale Google Cloud)
     const vertex = await getVertexAuthContext();
@@ -80,9 +80,6 @@ async function callAiCompletion({ messages, tools, tool_choice, temperature, max
                     const data = await res.json();
                     console.log(`[Google Vertex AI] ✅ Risposta da ${model}!`);
                     return data;
-                } else {
-                    const errTxt = await res.text().catch(() => "");
-                    console.warn(`[Google Vertex AI] ${model} status ${res.status}:`, errTxt.slice(0, 100));
                 }
             } catch (vErr) {
                 console.warn(`[Google Vertex AI] Tentativo ${model} fallito:`, vErr.message);
@@ -120,7 +117,6 @@ async function callAiCompletion({ messages, tools, tool_choice, temperature, max
             } catch (gErr) {}
         }
     }
-
     return null;
 }
 
@@ -140,7 +136,7 @@ module.exports = async function handler(req, res) {
         const body = req.body || {};
 
         // =========================================================================
-        // 🟢 BLOCCO WHATSAPP AUTOPILOT (POWERED BY GOOGLE VERTEX AI)
+        // 🟢 BLOCCO WHATSAPP AUTOPILOT (SEMPLIFICATO - SOLO CHAT E CONSENSO)
         // =========================================================================
         if (body.isWhatsAppAutoPilot && body.vendorId) {
             const vendorId = body.vendorId;
@@ -149,36 +145,20 @@ module.exports = async function handler(req, res) {
             const messageText = (body.messageText || "").trim();
             const pushName = (body.pushName || "").trim();
 
-            if (!messageText) {
-                return res.status(200).json({ status: "skipped", reason: "Messaggio vuoto" });
-            }
+            if (!messageText) return res.status(200).json({ status: "skipped", reason: "Messaggio vuoto" });
 
             // Controllo Permessi Salone
             const vendorDoc = await db.collection('vendors').doc(vendorId).get();
-            if (!vendorDoc.exists) {
-                return res.status(200).json({ status: "skipped", reason: "Salone inesistente" });
-            }
+            if (!vendorDoc.exists) return res.status(200).json({ status: "skipped", reason: "Salone inesistente" });
 
             const vendorData = vendorDoc.data() || {};
-            const isWaConnected = vendorData.whatsapp_connected === true;
-            const isAutoPilotOn = vendorData.whatsapp_ai_autopilot === true;
-
-            if (!isWaConnected || !isAutoPilotOn) {
-                return res.status(200).json({
-                    status: "skipped",
-                    reason: "Pilota automatico o WhatsApp disattivati dal negoziante"
-                });
+            if (!vendorData.whatsapp_connected || !vendorData.whatsapp_ai_autopilot) {
+                return res.status(200).json({ status: "skipped", reason: "Pilota automatico disattivato" });
             }
 
             let cleanPhone = senderPhone.replace(/\D/g, '');
             if (!cleanPhone.startsWith('39') && cleanPhone.length === 10) cleanPhone = '39' + cleanPhone;
-
-            const phoneVariants = Array.from(new Set([
-                senderPhone,
-                cleanPhone,
-                `+${cleanPhone}`,
-                cleanPhone.startsWith('39') ? cleanPhone.substring(2) : cleanPhone
-            ].filter(Boolean)));
+            const phoneVariants = Array.from(new Set([ senderPhone, cleanPhone, `+${cleanPhone}`]));
 
             let activeUserPrompt = messageText;
             const GATEWAY_BASE_URL = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
@@ -188,42 +168,24 @@ module.exports = async function handler(req, res) {
                     await fetch(`${GATEWAY_BASE_URL}/send-message`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            vendorId: vendorId,
-                            phone: senderJid || senderPhone,
-                            message: replyText
-                        })
+                        body: JSON.stringify({ vendorId, phone: senderJid || senderPhone, message: replyText })
                     });
-                } catch (sendErr) {
-                    console.error("[AutoPilot Gateway] Errore invio:", sendErr.message);
-                }
+                } catch (sendErr) { console.error("[AutoPilot Gateway] Errore invio:", sendErr.message); }
             }
 
-            // Raccolta dati in parallelo
-            const [clientTipsDoc, servicesSnap, productsSnap, clientSnap, chatHistorySnap, trainingDoc, collaboratorsSnap, chatProfileDoc] = await Promise.all([
-                db.collection('vendors').doc(vendorId).collection('consiglicliente').doc('main').get().catch(() => ({ exists: false })),
-                db.collection('artisan_services').where('vendorId', '==', vendorId).get().catch(() => ({ docs: [] })),
-                db.collection('offers').where('vendorId', '==', vendorId).get().catch(() => ({ docs: [] })),
+            // RECUPERO DATI DI BASE (Solo Chat e Profilo Cliente)
+            const [clientSnap, chatHistorySnap, chatProfileDoc] = await Promise.all([
                 db.collection('vendors').doc(vendorId).collection('clients').where('phone', 'in', phoneVariants.slice(0, 10)).limit(1).get().catch(() => ({ empty: true })),
                 db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone).collection('messages').orderBy('timestamp', 'desc').limit(8).get().catch(() => ({ docs: [] })),
-                db.collection('vendors').doc(vendorId).collection('personal_ai_chat').doc('Training').get().catch(() => ({ exists: false })),
-                db.collection('vendors').doc(vendorId).collection('collaborators').where('isActive', '==', true).get().catch(() => ({ docs: [] })),
                 db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone).get().catch(() => ({ exists: false }))
             ]);
 
-            let isKnownClient = false;
             let clientFirstName = "";
             let clientFullName = "";
-            let clientNotesFormula = "";
-            let isVip = false;
-
             if (!clientSnap.empty) {
                 const cData = clientSnap.docs[0].data();
-                isKnownClient = true;
                 clientFirstName = (cData.name || "").trim();
                 clientFullName = `${clientFirstName} ${cData.surname || ''}`.trim();
-                clientNotesFormula = cData.notes || "";
-                isVip = Array.isArray(cData.tags) && cData.tags.includes('VIP');
             } else if (pushName && pushName.length >= 2 && !pushName.includes("@")) {
                 clientFirstName = pushName.trim().split(" ")[0];
                 clientFullName = pushName.trim();
@@ -237,6 +199,10 @@ module.exports = async function handler(req, res) {
             const chatData = (chatProfileDoc && chatProfileDoc.exists) ? (chatProfileDoc.data() || {}) : null;
             const currentConsent = chatData ? chatData.aiConsentStatus : null;
 
+            // ---------------------------------------------------------
+            // GESTIONE CONSENSO (1 per AI, 2 per Umano) - MANTENUTA
+            // ---------------------------------------------------------
+            
             // CASO 1: PRIMISSIMO CONTATTO
             if (!chatData || !currentConsent) {
                 await chatDocRef.set({
@@ -250,25 +216,13 @@ module.exports = async function handler(req, res) {
                     updatedAt: admin.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
 
-                await messagesCol.add({
-                    role: 'user',
-                    content: messageText,
-                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                    dateTimeRome: nowRomeStr
-                });
+                await messagesCol.add({ role: 'user', content: messageText, timestamp: admin.firestore.FieldValue.serverTimestamp(), dateTimeRome: nowRomeStr });
 
                 const greetingName = clientFirstName ? `Ciao ${clientFirstName}! 👋` : `Ciao! 👋`;
-                const firstContactMsg = `${greetingName}\nBenvenuto da *${storeName}*! Sono l'assistente virtuale del salone, pronta a darti informazioni e aiutarti a prenotare subito.\n\nCome preferisci procedere?\n1️⃣ Digita *1* per chattare con me subito\n2️⃣ Digita *2* per attendere il titolare di persona`;
-
+                const firstContactMsg = `${greetingName}\nBenvenuto da *${storeName}*! Sono l'assistente virtuale del salone.\n\nCome preferisci procedere?\n1️⃣ Digita *1* per chattare con me subito\n2️⃣ Digita *2* per attendere il titolare di persona`;
                 await sendWhatsAppMessage(firstContactMsg);
 
-                await messagesCol.add({
-                    role: 'assistant',
-                    content: firstContactMsg,
-                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                    dateTimeRome: nowRomeStr
-                });
-
+                await messagesCol.add({ role: 'assistant', content: firstContactMsg, timestamp: admin.firestore.FieldValue.serverTimestamp(), dateTimeRome: nowRomeStr });
                 return res.status(200).json({ success: true, status: "consent_requested" });
             }
 
@@ -278,16 +232,11 @@ module.exports = async function handler(req, res) {
                 const isAccept = /^(1|uno|si|sì|ok|accetto|1️⃣)$/i.test(cleanedAnswer) || cleanedAnswer.startsWith('1');
                 const isDecline = /^(2|due|no|rifiuto|2️⃣)$/i.test(cleanedAnswer) || cleanedAnswer.startsWith('2');
 
-                await messagesCol.add({
-                    role: 'user',
-                    content: messageText,
-                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                    dateTimeRome: nowRomeStr
-                });
+                await messagesCol.add({ role: 'user', content: messageText, timestamp: admin.firestore.FieldValue.serverTimestamp(), dateTimeRome: nowRomeStr });
 
                 if (isDecline) {
                     await chatDocRef.set({ aiConsentStatus: 'declined', updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-                    const declineMsg = `Perfetto! Ho avvisato il titolare che vuoi parlare direttamente con lui: ti risponderà non appena sarà libero dai servizi in salone! 👤\n\n(Se nel frattempo vuoi informazioni o prenotare un posto, premi *1*!)`;
+                    const declineMsg = `Perfetto! Ho avvisato il titolare. Ti risponderà non appena sarà libero! 👤\n\n(Se cambi idea e vuoi parlare con me, premi *1*)`;
                     await sendWhatsAppMessage(declineMsg);
                     return res.status(200).json({ success: true, status: "consent_declined" });
                 }
@@ -298,14 +247,9 @@ module.exports = async function handler(req, res) {
                     return res.status(200).json({ success: true, status: "consent_reminded" });
                 }
 
-                await chatDocRef.set({
-                    aiConsentStatus: 'accepted',
-                    consentAcceptedAt: admin.firestore.FieldValue.serverTimestamp(),
-                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
-
+                await chatDocRef.set({ aiConsentStatus: 'accepted', consentAcceptedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
                 const originalQuestion = (chatData && chatData.pendingInitialMessage) ? chatData.pendingInitialMessage : "Ciao! Dimmi pure come posso aiutarti.";
-                activeUserPrompt = `[ISTRUZIONE DI SISTEMA: Il cliente ha appena accettato di parlare con te. Salutalo con calore e rispondi subito alla domanda che aveva fatto prima: "${originalQuestion}"]`;
+                activeUserPrompt = `[ISTRUZIONE DI SISTEMA: Il cliente ha appena accettato di parlare con te. Salutalo e rispondi subito alla sua domanda precedente: "${originalQuestion}"]`;
             }
 
             // CASO 3: RIATTIVAZIONE
@@ -313,45 +257,16 @@ module.exports = async function handler(req, res) {
                 const wantsToReactivate = /^(1|uno|si|sì|ok|1️⃣)$/i.test(messageText.trim().toLowerCase());
                 if (wantsToReactivate) {
                     await chatDocRef.set({ aiConsentStatus: 'accepted', updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-                    activeUserPrompt = `[ISTRUZIONE: Il cliente è tornato a chattare con l'assistente. Dagli il bentornato calorosamente e chiedigli come puoi aiutarlo oggi.]`;
+                    activeUserPrompt = `[ISTRUZIONE: Il cliente è tornato a chattare con te. Dagli il bentornato.]`;
                 } else {
                     return res.status(200).json({ status: "skipped", reason: "Chat gestita manualmente dal titolare" });
                 }
             }
 
-            // DATI REALI SALONE
-            const storeAddress = vendorData.address || "in salone";
-            const storeHours = vendorData.public_opening_hours || vendorData.opening_hours || "Orari standard salone";
-
-            // Catalogo Servizi compatto
-            const servicesCatalogDetailed = (servicesSnap.docs || [])
-                .map(d => ({ id: d.id, ...d.data() }))
-                .filter(s => s.productName && s.isAvailable !== false)
-                .map(s => `• [ID: ${s.id}] ${s.productName}: ${parseFloat(s.price) || 0}€ (${s.totalOccupiedTimeMinutes || s.serviceDuration || 30}m)`);
-
-            const servicesListFormatted = servicesCatalogDetailed.join('\n');
-
-            // Prodotti principali
-            const productsListFormatted = (productsSnap.docs || [])
-                .map(d => ({ id: d.id, ...d.data() }))
-                .filter(p => p.productName || p.name)
-                .slice(0, 5)
-                .map(p => `• [ID: ${p.id}] ${p.productName || p.name}: ${p.price || 0}€`)
-                .join('\n');
-
-            // Staff
-            const teamEntries = [];
-            const ownerName = vendorData.owner_name || vendorData.store_name || "Titolare";
-            teamEntries.push(`• 👑 ${ownerName} [Titolare, ID: ${vendorId}]`);
-            if (collaboratorsSnap.docs && collaboratorsSnap.docs.length > 0) {
-                collaboratorsSnap.docs.forEach(doc => {
-                    const c = doc.data();
-                    teamEntries.push(`• ✂️ ${c.name} [ID: ${doc.id}]`);
-                });
-            }
-            const teamListFormatted = teamEntries.join('\n');
-
-            // Ultimi messaggi
+            // ---------------------------------------------------------
+            // CREAZIONE RISPOSTA AI (SEMPLIFICATA)
+            // ---------------------------------------------------------
+            
             let conversationHistory = [];
             if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
                 conversationHistory = chatHistorySnap.docs.slice(0, 4).map(doc => ({
@@ -360,41 +275,12 @@ module.exports = async function handler(req, res) {
                 })).reverse();
             }
 
-            // Calendario Reale Dinamico
-            const now = new Date();
-            const next7DaysFormatted = [];
-            for (let i = 0; i < 7; i++) {
-                const targetDay = new Date(now.getTime() + (i * 24 * 60 * 60 * 1000));
-                const isoDate = targetDay.toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
-                const readableDay = targetDay.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
-                next7DaysFormatted.push(`- ${readableDay}: ${isoDate}${i === 0 ? ' (OGGI)' : (i === 1 ? ' (DOMANI)' : '')}`);
-            }
-            const calendarDaysPrompt = next7DaysFormatted.join('\n');
-
-            const nowRome = now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
-            const todayRome = now.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
-            const todayIsoDate = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
-
-            const systemPrompt = `Sei la receptionist di "${storeName}" su WhatsApp.
-Oggi è ${todayRome}, ore ${nowRome} (${todayIsoDate}). Cliente: "${clientFullName || clientFirstName || 'Cliente'}".
-
-REGOLE ESSENZIALI:
-- Rispondi in 2 frasi cordiali su WhatsApp con prezzi in grassetto (es. *25€*).
-- Se chiedono informazioni ("che servizi fate?"), elenca brevemente i servizi con i prezzi. NON interrogare l'agenda!
-- Se chiedono disponibilità o orari ("martedì c'è posto?"), usa subito 'controlla_agenda_reale'. Se non specificano il servizio, usa il Taglio Capelli di default!
-- Se il cliente vuole più servizi insieme (es. Taglio e Barba), somma tempi e prezzi, e indica in 'serviziInclusi' l'elenco dei servizi per registrare la combo!
-- Se accettano l'orario, lancia 'conferma_e_blocca_appuntamento'.
-
-CALENDARIO:
-${calendarDaysPrompt}
-
-INFO SALONE:
-- Indirizzo: ${storeAddress} | Orari: ${storeHours}
-- Staff: ${teamListFormatted}
-
-LISTINO:
-${servicesListFormatted || "Taglio Capelli: 20€ (30m)"}
-${productsListFormatted ? `\nPRODOTTI:\n${productsListFormatted}` : ''}`;
+            // PROMPT PULITO ED ESSENZIALE (Base per i tuoi sviluppi futuri)
+            const systemPrompt = `Sei l'assistente virtuale su WhatsApp del salone "${storeName}".
+Il tuo compito per ora è essere gentile, accogliente e rispondere in modo semplice.
+Il nome del cliente è: ${clientFullName || clientFirstName || 'Cliente'}.
+ATTENZIONE: Al momento non sei ancora in grado di vedere i prezzi, controllare l'agenda o fissare appuntamenti.
+Se il cliente chiede di prenotare o chiede info specifiche, digli gentilmente che hai preso nota e che il titolare lo contatterà a breve per confermare.`;
 
             const messagesPayload = [
                 { role: "system", content: systemPrompt },
@@ -402,223 +288,28 @@ ${productsListFormatted ? `\nPRODOTTI:\n${productsListFormatted}` : ''}`;
                 { role: "user", content: activeUserPrompt }
             ];
 
-            const salonTools = [
-                {
-                    type: "function",
-                    function: {
-                        name: "controlla_agenda_reale",
-                        description: "Verifica gli orari liberi nel calendario reale del salone.",
-                        parameters: {
-                            type: "object",
-                            properties: {
-                                serviceId: { type: "string", description: "ID del servizio dal listino" },
-                                dataRichiesta: { type: "string", description: "Data YYYY-MM-DD" },
-                                durataMinuti: { type: "number", description: "Durata in minuti" }
-                            },
-                            required: ["dataRichiesta"]
-                        }
-                    }
-                },
-                {
-                    type: "function",
-                    function: {
-                        name: "conferma_e_blocca_appuntamento",
-                        description: "Registra l'appuntamento sul gestionale salone.",
-                        parameters: {
-                            type: "object",
-                            properties: {
-                                serviceId: { type: "string", description: "ID servizio" },
-                                data: { type: "string", description: "Data YYYY-MM-DD" },
-                                ora: { type: "string", description: "Orario HH:MM" },
-                                nomeServizio: { type: "string", description: "Nome servizio o combo" },
-                                prezzo: { type: "number", description: "Prezzo totale" },
-                                durataMinuti: { type: "number", description: "Minuti totali" },
-                                note: { type: "string" },
-                                serviziInclusi: {
-                                    type: "array",
-                                    description: "Elenco dei servizi inclusi per tracciare le combo",
-                                    items: {
-                                        type: "object",
-                                        properties: {
-                                            id: { type: "string" },
-                                            name: { type: "string" },
-                                            price: { type: "number" },
-                                            duration: { type: "number" }
-                                        }
-                                    }
-                                }
-                            },
-                            required: ["data", "ora", "nomeServizio", "prezzo"]
-                        }
-                    }
-                }
-            ];
-
             let aiReply = `Ciao ${clientFullName || clientFirstName || ''}! Come posso aiutarti oggi da ${storeName}?`;
 
-            const SLOTS_API_URL = "https://localmente-api.vercel.app/api/get-available-slots";
-
-            // Chiamata AI Principale
+            // Chiamata AI SENZA TOOLS (molto più veloce ed economica)
             const aiData = await callAiCompletion({
                 messages: messagesPayload,
-                tools: salonTools,
-                tool_choice: "auto",
-                temperature: 0.35,
-                max_tokens: 450
+                temperature: 0.4,
+                max_tokens: 250 // Abbassato visto che le risposte saranno più brevi
             });
 
-            if (aiData) {
-                const messageObj = aiData.choices?.[0]?.message;
-
-                // SE L'IA HA DECISO DI CHIAMARE UN TOOL
-                if (messageObj?.tool_calls && messageObj.tool_calls.length > 0) {
-                    const call = messageObj.tool_calls[0];
-                    let callArgs = {};
-                    try { callArgs = JSON.parse(call.function.arguments); } catch(e) {}
-
-                    let toolResultPayload = {};
-
-                    if (call.function.name === 'controlla_agenda_reale') {
-                        const targetServiceId = callArgs.serviceId || (servicesSnap.docs[0]?.id) || "default";
-                        const targetDate = callArgs.dataRichiesta || todayIsoDate;
-                        const targetDuration = Number(callArgs.durataMinuti) || 30;
-
-                        let realSlots = [];
-                        try {
-                            const controller = new AbortController();
-                            const timer = setTimeout(() => controller.abort(), 3500);
-
-                            const slotFetch = await fetch(SLOTS_API_URL, {
-                                method: "POST",
-                                signal: controller.signal,
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                    action: "getAvailableSlots",
-                                    vendorId: vendorId,
-                                    serviceId: targetServiceId,
-                                    date: targetDate,
-                                    totalOccupiedTimeMinutes: targetDuration
-                                })
-                            });
-                            clearTimeout(timer);
-
-                            const slotJson = await slotFetch.json();
-                            realSlots = slotJson.slots || [];
-                        } catch (slotErr) {
-                            console.warn("[Slot Fetch Error]:", slotErr.message);
-                        }
-
-                        toolResultPayload = {
-                            data: targetDate,
-                            orariLiberi: realSlots.length > 0 ? realSlots.slice(0, 5) : "Completo / Chiuso"
-                        };
-                    }
-                    else if (call.function.name === 'conferma_e_blocca_appuntamento') {
-                        const targetServiceId = callArgs.serviceId || (servicesSnap.docs[0]?.id) || "default";
-                        const bookDateStr = callArgs.data || todayIsoDate;
-                        const bookTimeStr = callArgs.ora || "10:00";
-                        const bookDur = Number(callArgs.durataMinuti) || 30;
-                        const bookServiceName = callArgs.nomeServizio || "Taglio Capelli";
-                        const bookPrice = Number(callArgs.prezzo) || 20;
-
-                        const startDateTime = new Date(`${bookDateStr}T${bookTimeStr}:00`);
-                        const endDateTime = new Date(startDateTime.getTime() + bookDur * 60000);
-
-                        try {
-                            const controller = new AbortController();
-                            const timer = setTimeout(() => controller.abort(), 4000);
-
-                            const saveBookingRes = await fetch(SLOTS_API_URL, {
-                                method: "POST",
-                                signal: controller.signal,
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                    action: "save_service_booking",
-                                    vendorId: vendorId,
-                                    serviceId: targetServiceId,
-                                    customerName: clientFullName || pushName || "Cliente WhatsApp",
-                                    customerPhone: cleanPhone,
-                                    bookedServiceName: bookServiceName,
-                                    bookedServicePrice: bookPrice,
-                                    bookedServiceDuration: bookDur,
-                                    bookedTotalOccupiedTime: bookDur,
-                                    bookedServiceItems: callArgs.serviziInclusi || [{ id: targetServiceId, name: bookServiceName, price: bookPrice, duration: bookDur }],
-                                    startDateTime: startDateTime.toISOString(),
-                                    endDateTime: endDateTime.toISOString(),
-                                    status: "confirmed",
-                                    source: "whatsapp_autopilot",
-                                    bookingOrigin: "manual",
-                                    paymentMethod: "cash_in_studio",
-                                    paymentStatus: "pending",
-                                    bookedForResourceId: vendorId,
-                                    appointmentCode: "WA_" + Date.now().toString().slice(-4),
-                                    type: "cura_persona",
-                                    notes: callArgs.note || null
-                                })
-                            });
-                            clearTimeout(timer);
-
-                            toolResultPayload = saveBookingRes.ok 
-                                ? { esito: "CONFERMATO", messaggio: "Appuntamento registrato con successo sul gestionale!" }
-                                : { esito: "NON_DISPONIBILE", messaggio: "Orario non più disponibile." };
-                        } catch (saveErr) {
-                            toolResultPayload = { esito: "ERRORE", messaggio: saveErr.message };
-                        }
-                    }
-
-                    const clonedMessages = JSON.parse(JSON.stringify(messagesPayload));
-                    clonedMessages.push(messageObj);
-                    clonedMessages.push({
-                        role: "tool",
-                        tool_call_id: call.id,
-                        content: JSON.stringify(toolResultPayload)
-                    });
-
-                    // Seconda chiamata: l'AI formula la risposta finale al cliente
-                    const finalAiData = await callAiCompletion({
-                        messages: clonedMessages,
-                        tools: salonTools,
-                        tool_choice: "none",
-                        temperature: 0.35,
-                        max_tokens: 350
-                    });
-
-                    if (finalAiData?.choices?.[0]?.message?.content) {
-                        aiReply = finalAiData.choices[0].message.content.trim();
-                    }
-                } else if (messageObj?.content) {
-                    aiReply = messageObj.content.trim();
-                }
+            if (aiData?.choices?.[0]?.message?.content) {
+                aiReply = aiData.choices[0].message.content.trim();
             }
 
-            // Salvataggio memoria chat
+            // Salvataggio in memoria e invio
             try {
                 await Promise.all([
-                    messagesCol.add({
-                        role: 'user',
-                        content: (currentConsent === 'pending') ? `1 (Consenso Accettato)` : messageText,
-                        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                        dateTimeRome: nowRomeStr
-                    }),
-                    messagesCol.add({
-                        role: 'assistant',
-                        content: aiReply,
-                        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                        dateTimeRome: nowRomeStr
-                    }),
-                    chatDocRef.set({
-                        phone: cleanPhone,
-                        customerName: clientFullName || pushName || 'Cliente',
-                        lastMessage: aiReply,
-                        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                        lastActiveDate: nowRomeStr
-                    }, { merge: true })
+                    messagesCol.add({ role: 'user', content: (currentConsent === 'pending') ? `1 (Consenso Accettato)` : messageText, timestamp: admin.firestore.FieldValue.serverTimestamp(), dateTimeRome: nowRomeStr }),
+                    messagesCol.add({ role: 'assistant', content: aiReply, timestamp: admin.firestore.FieldValue.serverTimestamp(), dateTimeRome: nowRomeStr }),
+                    chatDocRef.set({ phone: cleanPhone, customerName: clientFullName || pushName || 'Cliente', lastMessage: aiReply, updatedAt: admin.firestore.FieldValue.serverTimestamp(), lastActiveDate: nowRomeStr }, { merge: true })
                 ]);
-            } catch (memErr) {
-                console.warn("[Memoria Chat] Errore salvataggio:", memErr.message);
-            }
+            } catch (memErr) {}
 
-            // Invio risposta a WhatsApp
             await sendWhatsAppMessage(aiReply);
             return res.status(200).json({ success: true, client: clientFullName, reply: aiReply });
         }
