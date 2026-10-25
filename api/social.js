@@ -200,17 +200,17 @@ module.exports = async function handler(req, res) {
             const storeAddress = vendorData.address || "in sede";
             const storeHours = vendorData.public_opening_hours || vendorData.opening_hours || "Orari standard";
 
-            // Mappa servizi per ID e nome
-            const servicesMap = new Map();
-            const servicesFormatted = (servicesSnap.docs || [])
-                .map(d => {
-                    const data = { id: d.id, ...d.data() };
-                    servicesMap.set(d.id, data);
-                    return data;
-                })
-                .filter(s => s.productName && s.isAvailable !== false)
-                .map(s => `- [ID: ${s.id}] ${s.productName}: ${parseFloat(s.price) || 0}€ (${s.totalOccupiedTimeMinutes || s.serviceDuration || 30} min)`)
-                .join('\n');
+            // Mappa servizi per ID e nome (Nascondendo l'ID al cliente finale)
+                        const servicesMap = new Map();
+                        const servicesFormatted = (servicesSnap.docs || [])
+                            .map(d => {
+                                const data = { id: d.id, ...d.data() };
+                                servicesMap.set(d.id, data);
+                                return data;
+                            })
+                            .filter(s => s.productName && s.isAvailable !== false)
+                            .map(s => `- ${s.productName}: ${parseFloat(s.price) || 0}€ (Durata: ${s.totalOccupiedTimeMinutes || s.serviceDuration || 30} min) [ID_INTERNO:${s.id}]`)
+                            .join('\n');
 
             const teamFormatted = [];
             const ownerName = vendorData.owner_name || vendorData.store_name || "Titolare";
@@ -223,11 +223,15 @@ module.exports = async function handler(req, res) {
             const chatDocRef = db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone);
             const messagesCol = chatDocRef.collection('messages');
             
-            // Date e Orari Italiani attuali
-            const now = new Date();
-            const nowRomeStr = now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
-            const todayIsoDate = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
-            const todayReadable = now.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
+            // Date e Orari Italiani attuali forzati correttamente su Roma
+                        const now = new Date();
+                        const formatterDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' });
+                        const todayIsoDate = formatterDate.format(now); // Esempio: 2026-10-25
+
+                        const formatterReadable = new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+                        const todayReadable = formatterReadable.format(now); // Esempio: domenica 25 ottobre 2026
+
+                        const nowRomeStr = now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
 
             const chatData = (chatProfileDoc && chatProfileDoc.exists) ? (chatProfileDoc.data() || {}) : null;
             const currentConsent = chatData ? chatData.aiConsentStatus : null;
@@ -337,8 +341,10 @@ PROFILO CLIENTE:
 - VIP: ${isVip ? 'SÌ' : 'No'}
 
 REGOLE PER LA DISPONIBILITÀ E PRENOTAZIONI:
-- Se il cliente chiede la disponibilità per un giorno specifico (es. "domani", "giovedì", o una data), **devi chiamare obbligatoriamente lo strumento 'controlla_agenda_reale'** passando la data in formato YYYY-MM-DD e l'ID del servizio richiesto (se non specificato, usa il primo servizio del listino).
-- Presenta gli orari liberi in modo chiaro ed entusiasta.`;
+- Non mostrare mai i codici ID interni dei servizi al cliente. Parlagli solo del nome del servizio e del prezzo.
+- Se il cliente chiede la disponibilità per un giorno specifico (es. "domani", "giovedì", o una data), calcola la data esatta in formato YYYY-MM-DD partendo dal fatto che oggi è ${todayReadable} (${todayIsoDate}).
+- **Devi chiamare obbligatoriamente lo strumento 'controlla_agenda_reale'** passando la data corretta in formato YYYY-MM-DD e l'ID_INTERNO del servizio richiesto.
+- Presenta gli orari liberi in modo chiaro, indicando il giorno esatto della settimana.`;
 
             const messagesPayload = [
                 { role: "system", content: systemPrompt },
