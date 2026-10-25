@@ -49,9 +49,9 @@ async function getVertexAuthContext() {
     }
 }
 
-// 🧠 Motore di chiamata AI
-async function callAiCompletion({ messages, tools, tool_choice, temperature, max_tokens }) {
-    // 1. TENTATIVO CON GOOGLE VERTEX AI (Ufficiale Google Cloud)
+// 🧠 Motore di chiamata AI (Google Vertex AI con paracadute Groq)
+async function callAiCompletion({ messages, temperature, max_tokens }) {
+    // 1. TENTATIVO CON GOOGLE VERTEX AI
     const vertex = await getVertexAuthContext();
     if (vertex) {
         const { accessToken, projectId, location } = vertex;
@@ -69,9 +69,7 @@ async function callAiCompletion({ messages, tools, tool_choice, temperature, max
                     body: JSON.stringify({
                         model: model,
                         messages: messages,
-                        tools: tools,
-                        tool_choice: tool_choice || "auto",
-                        temperature: temperature || 0.35,
+                        temperature: temperature || 0.4,
                         max_tokens: max_tokens || 500
                     })
                 });
@@ -90,7 +88,7 @@ async function callAiCompletion({ messages, tools, tool_choice, temperature, max
     // 2. PARACADUTE AUTOMATICO SU GROQ
     const groqKey = (process.env.GROQ_API_KEY || '').trim();
     if (groqKey) {
-        const groqModels = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"];
+        const groqModels = ["llama3-70b-8192", "mixtral-8x7b-32768"]; // Modelli Groq per il copywriting
         for (const model of groqModels) {
             try {
                 const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -102,10 +100,8 @@ async function callAiCompletion({ messages, tools, tool_choice, temperature, max
                     body: JSON.stringify({
                         model: model,
                         messages: messages,
-                        tools: tools,
-                        tool_choice: tool_choice || "auto",
-                        temperature: temperature || 0.3,
-                        max_tokens: Math.min(max_tokens || 300, 300)
+                        temperature: temperature || 0.4,
+                        max_tokens: max_tokens || 500
                     })
                 });
 
@@ -124,7 +120,7 @@ module.exports = async function handler(req, res) {
     // Permessi CORS
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
     if (req.method === 'OPTIONS') {
@@ -134,207 +130,49 @@ module.exports = async function handler(req, res) {
 
     try {
         const body = req.body || {};
-
-        // =========================================================================
-        // 🟢 BLOCCO WHATSAPP AUTOPILOT (SEMPLIFICATO - SOLO CHAT E CONSENSO)
-        // =========================================================================
-        if (body.isWhatsAppAutoPilot && body.vendorId) {
-            const vendorId = body.vendorId;
-            const senderPhone = body.senderPhone || '';
-            const senderJid = body.senderJid || senderPhone;
-            const messageText = (body.messageText || "").trim();
-            const pushName = (body.pushName || "").trim();
-
-            if (!messageText) return res.status(200).json({ status: "skipped", reason: "Messaggio vuoto" });
-
-            // Controllo Permessi Salone
-            const vendorDoc = await db.collection('vendors').doc(vendorId).get();
-            if (!vendorDoc.exists) return res.status(200).json({ status: "skipped", reason: "Salone inesistente" });
-
-            const vendorData = vendorDoc.data() || {};
-            if (!vendorData.whatsapp_connected || !vendorData.whatsapp_ai_autopilot) {
-                return res.status(200).json({ status: "skipped", reason: "Pilota automatico disattivato" });
-            }
-
-            let cleanPhone = senderPhone.replace(/\D/g, '');
-            if (!cleanPhone.startsWith('39') && cleanPhone.length === 10) cleanPhone = '39' + cleanPhone;
-            const phoneVariants = Array.from(new Set([ senderPhone, cleanPhone, `+${cleanPhone}`]));
-
-            let activeUserPrompt = messageText;
-            const GATEWAY_BASE_URL = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
-
-            async function sendWhatsAppMessage(replyText) {
-                try {
-                    await fetch(`${GATEWAY_BASE_URL}/send-message`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ vendorId, phone: senderJid || senderPhone, message: replyText })
-                    });
-                } catch (sendErr) { console.error("[AutoPilot Gateway] Errore invio:", sendErr.message); }
-            }
-
-            // RECUPERO DATI DI BASE (Solo Chat e Profilo Cliente)
-            const [clientSnap, chatHistorySnap, chatProfileDoc] = await Promise.all([
-                db.collection('vendors').doc(vendorId).collection('clients').where('phone', 'in', phoneVariants.slice(0, 10)).limit(1).get().catch(() => ({ empty: true })),
-                db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone).collection('messages').orderBy('timestamp', 'desc').limit(8).get().catch(() => ({ docs: [] })),
-                db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone).get().catch(() => ({ exists: false }))
-            ]);
-
-            let clientFirstName = "";
-            let clientFullName = "";
-            if (!clientSnap.empty) {
-                const cData = clientSnap.docs[0].data();
-                clientFirstName = (cData.name || "").trim();
-                clientFullName = `${clientFirstName} ${cData.surname || ''}`.trim();
-            } else if (pushName && pushName.length >= 2 && !pushName.includes("@")) {
-                clientFirstName = pushName.trim().split(" ")[0];
-                clientFullName = pushName.trim();
-            }
-
-            const storeName = vendorData.store_name || vendorData.owner_name || "il nostro salone";
-            const chatDocRef = db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone);
-            const messagesCol = chatDocRef.collection('messages');
-            const nowRomeStr = new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
-
-            const chatData = (chatProfileDoc && chatProfileDoc.exists) ? (chatProfileDoc.data() || {}) : null;
-            const currentConsent = chatData ? chatData.aiConsentStatus : null;
-
-            // ---------------------------------------------------------
-            // GESTIONE CONSENSO (1 per AI, 2 per Umano) - MANTENUTA
-            // ---------------------------------------------------------
-            
-            // CASO 1: PRIMISSIMO CONTATTO
-            if (!chatData || !currentConsent) {
-                await chatDocRef.set({
-                    phone: cleanPhone,
-                    customerName: clientFullName || pushName || 'Cliente',
-                    firstContactAt: admin.firestore.FieldValue.serverTimestamp(),
-                    firstContactDate: nowRomeStr,
-                    aiConsentStatus: 'pending',
-                    pendingInitialMessage: messageText,
-                    lastMessage: messageText,
-                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
-
-                await messagesCol.add({ role: 'user', content: messageText, timestamp: admin.firestore.FieldValue.serverTimestamp(), dateTimeRome: nowRomeStr });
-
-                const greetingName = clientFirstName ? `Ciao ${clientFirstName}! 👋` : `Ciao! 👋`;
-                const firstContactMsg = `${greetingName}\nBenvenuto da *${storeName}*! Sono l'assistente virtuale del salone.\n\nCome preferisci procedere?\n1️⃣ Digita *1* per chattare con me subito\n2️⃣ Digita *2* per attendere il titolare di persona`;
-                await sendWhatsAppMessage(firstContactMsg);
-
-                await messagesCol.add({ role: 'assistant', content: firstContactMsg, timestamp: admin.firestore.FieldValue.serverTimestamp(), dateTimeRome: nowRomeStr });
-                return res.status(200).json({ success: true, status: "consent_requested" });
-            }
-
-            // CASO 2: IL CLIENTE RISPONDE 1 o 2
-            if (currentConsent === 'pending') {
-                const cleanedAnswer = messageText.trim().toLowerCase();
-                const isAccept = /^(1|uno|si|sì|ok|accetto|1️⃣)$/i.test(cleanedAnswer) || cleanedAnswer.startsWith('1');
-                const isDecline = /^(2|due|no|rifiuto|2️⃣)$/i.test(cleanedAnswer) || cleanedAnswer.startsWith('2');
-
-                await messagesCol.add({ role: 'user', content: messageText, timestamp: admin.firestore.FieldValue.serverTimestamp(), dateTimeRome: nowRomeStr });
-
-                if (isDecline) {
-                    await chatDocRef.set({ aiConsentStatus: 'declined', updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-                    const declineMsg = `Perfetto! Ho avvisato il titolare. Ti risponderà non appena sarà libero! 👤\n\n(Se cambi idea e vuoi parlare con me, premi *1*)`;
-                    await sendWhatsAppMessage(declineMsg);
-                    return res.status(200).json({ success: true, status: "consent_declined" });
-                }
-
-                if (!isAccept) {
-                    const remindMsg = `Per poterti rispondere subito, digita *1* per chattare con l'assistente virtuale oppure *2* per attendere il titolare. 😊`;
-                    await sendWhatsAppMessage(remindMsg);
-                    return res.status(200).json({ success: true, status: "consent_reminded" });
-                }
-
-                await chatDocRef.set({ aiConsentStatus: 'accepted', consentAcceptedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-                const originalQuestion = (chatData && chatData.pendingInitialMessage) ? chatData.pendingInitialMessage : "Ciao! Dimmi pure come posso aiutarti.";
-                activeUserPrompt = `[ISTRUZIONE DI SISTEMA: Il cliente ha appena accettato di parlare con te. Salutalo e rispondi subito alla sua domanda precedente: "${originalQuestion}"]`;
-            }
-
-            // CASO 3: RIATTIVAZIONE
-            if (currentConsent === 'declined') {
-                const wantsToReactivate = /^(1|uno|si|sì|ok|1️⃣)$/i.test(messageText.trim().toLowerCase());
-                if (wantsToReactivate) {
-                    await chatDocRef.set({ aiConsentStatus: 'accepted', updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-                    activeUserPrompt = `[ISTRUZIONE: Il cliente è tornato a chattare con te. Dagli il bentornato.]`;
-                } else {
-                    return res.status(200).json({ status: "skipped", reason: "Chat gestita manualmente dal titolare" });
-                }
-            }
-
-            // ---------------------------------------------------------
-            // CREAZIONE RISPOSTA AI (SEMPLIFICATA)
-            // ---------------------------------------------------------
-            
-            let conversationHistory = [];
-            if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
-                conversationHistory = chatHistorySnap.docs.slice(0, 4).map(doc => ({
-                    role: doc.data().role === 'assistant' ? 'assistant' : 'user',
-                    content: doc.data().content
-                })).reverse();
-            }
-
-            // PROMPT PULITO ED ESSENZIALE (Base per i tuoi sviluppi futuri)
-            const systemPrompt = `Sei l'assistente virtuale su WhatsApp del salone "${storeName}".
-Il tuo compito per ora è essere gentile, accogliente e rispondere in modo semplice.
-Il nome del cliente è: ${clientFullName || clientFirstName || 'Cliente'}.
-ATTENZIONE: Al momento non sei ancora in grado di vedere i prezzi, controllare l'agenda o fissare appuntamenti.
-Se il cliente chiede di prenotare o chiede info specifiche, digli gentilmente che hai preso nota e che il titolare lo contatterà a breve per confermare.`;
-
-            const messagesPayload = [
-                { role: "system", content: systemPrompt },
-                ...conversationHistory,
-                { role: "user", content: activeUserPrompt }
-            ];
-
-            let aiReply = `Ciao ${clientFullName || clientFirstName || ''}! Come posso aiutarti oggi da ${storeName}?`;
-
-            // Chiamata AI SENZA TOOLS (molto più veloce ed economica)
-            const aiData = await callAiCompletion({
-                messages: messagesPayload,
-                temperature: 0.4,
-                max_tokens: 250 // Abbassato visto che le risposte saranno più brevi
-            });
-
-            if (aiData?.choices?.[0]?.message?.content) {
-                aiReply = aiData.choices[0].message.content.trim();
-            }
-
-            // Salvataggio in memoria e invio
-            try {
-                await Promise.all([
-                    messagesCol.add({ role: 'user', content: (currentConsent === 'pending') ? `1 (Consenso Accettato)` : messageText, timestamp: admin.firestore.FieldValue.serverTimestamp(), dateTimeRome: nowRomeStr }),
-                    messagesCol.add({ role: 'assistant', content: aiReply, timestamp: admin.firestore.FieldValue.serverTimestamp(), dateTimeRome: nowRomeStr }),
-                    chatDocRef.set({ phone: cleanPhone, customerName: clientFullName || pushName || 'Cliente', lastMessage: aiReply, updatedAt: admin.firestore.FieldValue.serverTimestamp(), lastActiveDate: nowRomeStr }, { merge: true })
-                ]);
-            } catch (memErr) {}
-
-            await sendWhatsAppMessage(aiReply);
-            return res.status(200).json({ success: true, client: clientFullName, reply: aiReply });
-        }
-
-        // =========================================================
-        // 🔒 BLOCCO COPYWRITER MARKETING PER I POST (SIGILLATO)
-        // =========================================================
         const contesto = body.contesto;
+
         if (!contesto) {
             return res.status(400).json({ errore: "Dati di contesto mancanti nella richiesta." });
         }
 
-        let systemPrompt = `Sei un Senior Social Media Copywriter da Agenzia di Marketing di Lusso. Crea post magnetici per promuovere servizi e prodotti. Rispondi solo con il testo del post.`;
-        let userPromptText = `Dati: Negozio: "${contesto.store_name || 'Salone'}", Servizio: "${contesto.nome || 'Servizio'}", Prezzo: ${contesto.prezzo || '0'}€, Link: ${contesto.link_shop || 'https://www.civora.it'}`;
+        // =========================================================
+        // 🎨 COPYWRITER MARKETING PER I POST SOCIAL
+        // =========================================================
+        
+        let systemPrompt = `Sei un Senior Social Media Copywriter di un'Agenzia di Marketing di Lusso.
+Il tuo obiettivo è creare post magnetici, eleganti ed emozionali per promuovere servizi e prodotti di saloni di bellezza o barbieri.
+Usa emoji pertinenti ma senza esagerare.
+Struttura il post con:
+1. Un gancio iniziale (Hook) accattivante.
+2. Il corpo centrale che valorizza il servizio.
+3. Una Call to Action (CTA) chiara per invitare a prenotare.
+Rispondi SOLO con il testo finale del post, senza aggiungere premesse o commenti.`;
+
+        let userPromptText = `Crea un post per questo servizio:
+- Nome Salone: "${contesto.store_name || 'Il nostro Salone'}"
+- Nome Servizio: "${contesto.nome || 'Trattamento'}"
+- Descrizione Servizio: "${contesto.descrizione || ''}"
+- Prezzo: ${contesto.prezzo || '0'}€
+- Durata: ${contesto.durata || '30'} minuti
+- Link per prenotare: ${contesto.link_shop || 'https://www.civora.it'}`;
+
+        // Se l'utente ha inserito note extra o cliccato le shortcut (Promo, Regalo, ecc.) le aggiungiamo!
+        if (contesto.note_extra) {
+            userPromptText += `\n\nRICHIESTA SPECIALE DEL NEGOZIANTE: "${contesto.note_extra}". Includi questa indicazione nel post.`;
+        }
 
         const postAiData = await callAiCompletion({
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userPromptText }
             ],
-            temperature: 0.2,
+            temperature: 0.6, // Un po' di creatività per i post
             max_tokens: 500
         });
 
-        const postOutput = postAiData?.choices?.[0]?.message?.content || "";
+        const postOutput = postAiData?.choices?.[0]?.message?.content || "C'è stato un problema nella generazione del post. Riprova tra poco.";
+        
         res.status(200).json({ post: postOutput.trim() });
 
     } catch (error) {
