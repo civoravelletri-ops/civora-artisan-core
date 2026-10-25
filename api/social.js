@@ -354,6 +354,7 @@ module.exports = async function handler(req, res) {
                         let aiReply = `Ciao ${clientFullName || clientFirstName || ''}! Come posso aiutarti oggi da ${storeName}?`;
             
                         const GROQ_CANDIDATES = [
+                             "llama-3.3-70b-versatile",
                             "openai/gpt-oss-20b",
                             "openai/gpt-oss-120b"
                         ];
