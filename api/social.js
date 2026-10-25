@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 
-// Inizializzazione ultra-sicura Firebase Admin
+// Inizializzazione ultra-sicura Firebase Admin (gestisce sia JSON che Base64)
 if (!admin.apps.length) {
     try {
         let rawKey = (process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '').trim();
@@ -38,14 +38,16 @@ module.exports = async function handler(req, res) {
 
     try {
         const body = req.body || {};
-        const GROQ_API_KEY = process.env.GROQ_API_KEY;
+        
+        // Riconoscimento intelligente chiavi (Google Vertex AI / Gemini prioritario, Groq come riserva)
+        const AI_API_KEY = (process.env.VERTEX_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GROQ_API_KEY || '').trim();
 
-        if (!GROQ_API_KEY) {
-            return res.status(500).json({ errore: "Manca la chiave d'accesso GROQ_API_KEY nelle variabili d'ambiente di Vercel." });
+        if (!AI_API_KEY) {
+            return res.status(500).json({ errore: "Manca la chiave d'accesso VERTEX_API_KEY nelle variabili d'ambiente di Vercel." });
         }
 
         // =========================================================================
-        // 🟢 BLOCCO WHATSAPP AUTOPILOT (LA RECEPTIONIST PIÙ FORTE AL MONDO)
+        // 🟢 BLOCCO WHATSAPP AUTOPILOT (POWERED BY GOOGLE VERTEX AI)
         // =========================================================================
         if (body.isWhatsAppAutoPilot && body.vendorId) {
             const vendorId = body.vendorId;
@@ -58,7 +60,7 @@ module.exports = async function handler(req, res) {
                 return res.status(200).json({ status: "skipped", reason: "Messaggio vuoto" });
             }
 
-            // 💂‍♂️ Controllo Salone e Permessi Autopilot
+            // Controllo Permessi Salone
             const vendorDoc = await db.collection('vendors').doc(vendorId).get();
             if (!vendorDoc.exists) {
                 return res.status(200).json({ status: "skipped", reason: "Salone inesistente" });
@@ -75,7 +77,7 @@ module.exports = async function handler(req, res) {
                 });
             }
 
-            // Pulizia del numero telefonico
+            // Normalizzazione numero telefono
             let cleanPhone = senderPhone.replace(/\D/g, '');
             if (!cleanPhone.startsWith('39') && cleanPhone.length === 10) cleanPhone = '39' + cleanPhone;
 
@@ -105,7 +107,7 @@ module.exports = async function handler(req, res) {
                 }
             }
 
-            // 🚀 Raccolta Dati Parallela Ultra-Rapida
+            // Raccolta Dati Salone & Cliente in Parallelo
             const [clientTipsDoc, servicesSnap, productsSnap, clientSnap, chatHistorySnap, trainingDoc, collaboratorsSnap, chatProfileDoc] = await Promise.all([
                 db.collection('vendors').doc(vendorId).collection('consiglicliente').doc('main').get().catch(() => ({ exists: false })),
                 db.collection('artisan_services').where('vendorId', '==', vendorId).get().catch(() => ({ docs: [] })),
@@ -117,7 +119,7 @@ module.exports = async function handler(req, res) {
                 db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone).get().catch(() => ({ exists: false }))
             ]);
 
-            // 👤 Riconoscimento Cliente
+            // Riconoscimento Cliente
             let isKnownClient = false;
             let clientFirstName = "";
             let clientFullName = "";
@@ -144,7 +146,7 @@ module.exports = async function handler(req, res) {
             const chatData = (chatProfileDoc && chatProfileDoc.exists) ? (chatProfileDoc.data() || {}) : null;
             const currentConsent = chatData ? chatData.aiConsentStatus : null;
 
-            // 🚦 CASO 1: PRIMISSIMO CONTATTO ASSOLUTO
+            // CASO 1: PRIMISSIMO CONTATTO ASSOLUTO
             if (!chatData || !currentConsent) {
                 await chatDocRef.set({
                     phone: cleanPhone,
@@ -179,7 +181,7 @@ module.exports = async function handler(req, res) {
                 return res.status(200).json({ success: true, status: "consent_requested" });
             }
 
-            // 🚦 CASO 2: IL CLIENTE RISPONDE 1 o 2 AL PRIMO MESSAGGIO
+            // CASO 2: IL CLIENTE RISPONDE 1 o 2
             if (currentConsent === 'pending') {
                 const cleanedAnswer = messageText.trim().toLowerCase();
                 const isAccept = /^(1|uno|si|sì|ok|accetto|1️⃣)$/i.test(cleanedAnswer) || cleanedAnswer.startsWith('1');
@@ -215,7 +217,7 @@ module.exports = async function handler(req, res) {
                 activeUserPrompt = `[ISTRUZIONE DI SISTEMA: Il cliente ha appena accettato di parlare con te. Salutalo con calore e rispondi subito alla domanda che aveva fatto prima: "${originalQuestion}"]`;
             }
 
-            // 🚦 CASO 3: RIATTIVAZIONE SE AVEVA SCELTO 2
+            // CASO 3: RIATTIVAZIONE
             if (currentConsent === 'declined') {
                 const wantsToReactivate = /^(1|uno|si|sì|ok|1️⃣)$/i.test(messageText.trim().toLowerCase());
                 if (wantsToReactivate) {
@@ -226,420 +228,422 @@ module.exports = async function handler(req, res) {
                 }
             }
 
-            // =========================================================================
-            // 🧠 PREPARAZIONE DATI REALI, CATALOGO E CALENDARIO
-            // =========================================================================
-           const storeAddress = vendorData.address || "in salone";
-                       const storeHours = vendorData.public_opening_hours || vendorData.opening_hours || "Orari standard salone";
-                       const specializations = (vendorData.customization_specializations || []).join(', ');
+            // DATI REALI SALONE
+            const storeAddress = vendorData.address || "in salone";
+            const storeHours = vendorData.public_opening_hours || vendorData.opening_hours || "Orari standard salone";
+            const specializations = (vendorData.customization_specializations || []).join(', ');
 
-                       const tipsData = clientTipsDoc.exists ? clientTipsDoc.data() : {};
-                       const parkingInfo = tipsData.parkingTips || "";
-                       const directionsInfo = tipsData.directions || "";
+            const tipsData = clientTipsDoc.exists ? clientTipsDoc.data() : {};
+            const parkingInfo = tipsData.parkingTips || "";
+            const directionsInfo = tipsData.directions || "";
 
-                       // Catalogo Servizi dettagliato con ID esatto per l'AI
-                       const servicesCatalogDetailed = (servicesSnap.docs || [])
-                           .map(d => ({ id: d.id, ...d.data() }))
-                           .filter(s => s.productName && s.isAvailable !== false)
-                           .map(s => {
-                               const cat = (s.productCategory || 'Generale').trim();
-                               const dur = s.totalOccupiedTimeMinutes || s.serviceDuration || 30;
-                               const price = parseFloat(s.price) || 0;
-                               return `• [ID: ${s.id}] ${s.productName} [Categoria: ${cat}]: ${price}€ (Durata: ${dur} min)`;
-                           });
+            // Catalogo Servizi con ID esatto
+            const servicesCatalogDetailed = (servicesSnap.docs || [])
+                .map(d => ({ id: d.id, ...d.data() }))
+                .filter(s => s.productName && s.isAvailable !== false)
+                .map(s => {
+                    const cat = (s.productCategory || 'Generale').trim();
+                    const dur = s.totalOccupiedTimeMinutes || s.serviceDuration || 30;
+                    const price = parseFloat(s.price) || 0;
+                    return `• [ID: ${s.id}] ${s.productName} [Categoria: ${cat}]: ${price}€ (Durata: ${dur} min)`;
+                });
 
-                       const servicesListFormatted = servicesCatalogDetailed.join('\n');
+            const servicesListFormatted = servicesCatalogDetailed.join('\n');
 
-                       // Prodotti in vendita da banco
-                       const productsListFormatted = (productsSnap.docs || [])
-                           .map(d => ({ id: d.id, ...d.data() }))
-                           .filter(p => p.productName || p.name)
-                           .map(p => `• [ID: ${p.id}] ${p.productName || p.name}${p.brand ? ` (${p.brand})` : ''}: ${p.price || 0}€`)
-                           .slice(0, 15)
-                           .join('\n');
+            // Prodotti in vendita
+            const productsListFormatted = (productsSnap.docs || [])
+                .map(d => ({ id: d.id, ...d.data() }))
+                .filter(p => p.productName || p.name)
+                .map(p => `• [ID: ${p.id}] ${p.productName || p.name}${p.brand ? ` (${p.brand})` : ''}: ${p.price || 0}€`)
+                .slice(0, 15)
+                .join('\n');
 
-                       // Squadra e collaboratori del salone
-                       const teamEntries = [];
-                       const ownerName = vendorData.owner_name || vendorData.store_name || "Titolare";
-                       teamEntries.push(`• 👑 ${ownerName} [Titolare Principale, ID: ${vendorId}]`);
-                       if (collaboratorsSnap.docs && collaboratorsSnap.docs.length > 0) {
-                           collaboratorsSnap.docs.forEach(doc => {
-                               const c = doc.data();
-                               teamEntries.push(`• ✂️ ${c.name} (${c.jobTitle || 'Collaboratore'}, ID: ${doc.id})`);
-                           });
-                       }
-                       const teamListFormatted = teamEntries.join('\n');
+            // Staff
+            const teamEntries = [];
+            const ownerName = vendorData.owner_name || vendorData.store_name || "Titolare";
+            teamEntries.push(`• 👑 ${ownerName} [Titolare Principale, ID: ${vendorId}]`);
+            if (collaboratorsSnap.docs && collaboratorsSnap.docs.length > 0) {
+                collaboratorsSnap.docs.forEach(doc => {
+                    const c = doc.data();
+                    teamEntries.push(`• ✂️ ${c.name} (${c.jobTitle || 'Collaboratore'}, ID: ${doc.id})`);
+                });
+            }
+            const teamListFormatted = teamEntries.join('\n');
 
-                       // Storico messaggi recenti
-                       let conversationHistory = [];
-                       if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
-                           conversationHistory = chatHistorySnap.docs.map(doc => ({
-                               role: doc.data().role === 'assistant' ? 'assistant' : 'user',
-                               content: doc.data().content
-                           })).reverse();
-                       }
+            // Storico conversazione
+            let conversationHistory = [];
+            if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
+                conversationHistory = chatHistorySnap.docs.map(doc => ({
+                    role: doc.data().role === 'assistant' ? 'assistant' : 'user',
+                    content: doc.data().content
+                })).reverse();
+            }
 
-                       // Calendario Reale Dinamico dei Prossimi 7 Giorni (Zero allucinazioni)
-                       const now = new Date();
-                       const next7DaysFormatted = [];
-                       for (let i = 0; i < 7; i++) {
-                           const targetDay = new Date(now.getTime() + (i * 24 * 60 * 60 * 1000));
-                           const isoDate = targetDay.toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
-                           const readableDay = targetDay.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
-                           next7DaysFormatted.push(`- ${readableDay}: ${isoDate}${i === 0 ? ' (OGGI)' : (i === 1 ? ' (DOMANI)' : '')}`);
-                       }
-                       const calendarDaysPrompt = next7DaysFormatted.join('\n');
+            // Calendario Reale dei Prossimi 7 Giorni (Zero allucinazioni)
+            const now = new Date();
+            const next7DaysFormatted = [];
+            for (let i = 0; i < 7; i++) {
+                const targetDay = new Date(now.getTime() + (i * 24 * 60 * 60 * 1000));
+                const isoDate = targetDay.toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
+                const readableDay = targetDay.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
+                next7DaysFormatted.push(`- ${readableDay}: ${isoDate}${i === 0 ? ' (OGGI)' : (i === 1 ? ' (DOMANI)' : '')}`);
+            }
+            const calendarDaysPrompt = next7DaysFormatted.join('\n');
 
-                       const nowRome = now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
-                       const todayRome = now.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
-                       const todayIsoDate = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
+            const nowRome = now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+            const todayRome = now.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
+            const todayIsoDate = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
 
-                      const systemPrompt = `Sei la receptionist ufficiale, accogliente, solare e super professionale di "${storeName}" su WhatsApp.
-                      Oggi è ${todayRome}, ore ${nowRome} (data esatta: ${todayIsoDate}).
-                      Stai parlando con il cliente: "${clientFullName || clientFirstName || 'un nostro caro cliente'}"${isVip ? ' (Cliente VIP ⭐️)' : ''}.
-                      ${clientNotesFormula ? `Note tecniche del cliente in archivio: "${clientNotesFormula}".` : ''}
+            const systemPrompt = `Sei la receptionist ufficiale, accogliente, solare e super professionale di "${storeName}" su WhatsApp.
+Oggi è ${todayRome}, ore ${nowRome} (data esatta: ${todayIsoDate}).
+Stai parlando con il cliente: "${clientFullName || clientFirstName || 'un nostro caro cliente'}"${isVip ? ' (Cliente VIP ⭐️)' : ''}.
+${clientNotesFormula ? `Note tecniche del cliente in archivio: "${clientNotesFormula}".` : ''}
 
-                      COME COMUNICHI:
-                      - Parla come una persona reale ed educata su WhatsApp: tono caldo, amichevole e spontaneo.
-                      - Rispondi in massimo 2-4 frasi brevi e ariose, usando qualche emoji e mettendo sempre in grassetto prezzi e orari (es. *25€*, *15:30*).
-                      - ZERO MENU A NUMERI ROBOTICI: Non sembrare un centralino telefonico ("digita 1, digita 2"). Parla con naturalezza come al bancone del negozio.
-                      - DOMANDE SUI SERVIZI (es. "che servizi fate?", "cosa offrite?", "listino"): Rispondi SUBITO descrivendo con eleganza i servizi principali e i prezzi dal listino sotto. NON chiamare l'agenda quando ti chiedono solo quali servizi fate!
-                      - ASCOLTO ATTIVO: Se il cliente dice già cosa vuole (es. "vorrei tagliare i capelli"), hai già capito il servizio! Proponigli subito il Taglio e procedi verso la data e l'orario.
+COME COMUNICHI:
+- Parla come una persona reale ed educata su WhatsApp: tono caldo, amichevole e spontaneo.
+- Rispondi in massimo 2-4 frasi brevi e ariose, usando qualche emoji e mettendo sempre in grassetto prezzi e orari (es. *25€*, *15:30*).
+- ZERO MENU A NUMERI ROBOTICI: Non sembrare un centralino telefonico ("digita 1, digita 2"). Parla con naturalezza come al bancone del negozio.
+- DOMANDE SUI SERVIZI (es. "che servizi fate?", "cosa offrite?", "listino"): Rispondi SUBITO descrivendo con eleganza i servizi principali e i prezzi dal listino sotto. NON chiamare l'agenda quando ti chiedono solo quali servizi fate!
+- ASCOLTO ATTIVO: Se il cliente dice già cosa vuole (es. "vorrei tagliare i capelli"), hai già capito il servizio! Proponigli subito il Taglio e procedi verso la data e l'orario.
 
-                      REGOLE DI PRENOTAZIONE E COMBO:
-                      1. CONSULTA L'AGENDA: SOLO quando il cliente chiede giorni o orari specifici, usa lo strumento 'controlla_agenda_reale' passando il serviceId del servizio e la data in formato YYYY-MM-DD. Proponigli 2 o 3 alternative comode.
-                      2. COMBO E PIÙ SERVIZI INSIEME (es. Taglio Capelli + Barba):
-                         - Somma i tempi e i prezzi.
-                         - Nello strumento passa il 'serviceId' del primo servizio, la 'durataMinuti' totale sommata e indica in 'serviziInclusi' l'elenco dei servizi scelti.
-                      3. CONFERMA E BLOCCO: Quando il cliente accetta un orario specifico, lancia SUBITO 'conferma_e_blocca_appuntamento' per registrare la prenotazione sul calendario reale.
-                      4. VENDITA PRODOTTI: Se il cliente vuole anche un prodotto (es. cera o shampoo), puoi metterglielo da parte alla cassa compilando il campo 'note'.
+REGOLE DI PRENOTAZIONE E COMBO:
+1. CONSULTA L'AGENDA: SOLO quando il cliente chiede giorni o orari specifici, usa lo strumento 'controlla_agenda_reale' passando il serviceId del servizio e la data in formato YYYY-MM-DD. Proponigli 2 o 3 alternative comode.
+2. COMBO E PIÙ SERVIZI INSIEME (es. Taglio Capelli + Barba):
+   - Somma i tempi e i prezzi.
+   - Nello strumento passa il 'serviceId' del primo servizio, la 'durataMinuti' totale sommata e indica in 'serviziInclusi' l'elenco dei servizi scelti.
+3. CONFERMA E BLOCCO: Quando il cliente accetta un orario specifico, lancia SUBITO 'conferma_e_blocca_appuntamento' per registrare la prenotazione sul calendario reale.
+4. VENDITA PRODOTTI: Se il cliente vuole anche un prodotto (es. cera o shampoo), puoi metterglielo da parte alla cassa compilando il campo 'note'.
 
-                      CALENDARIO DEI PROSSIMI GIORNI:
-                      ${calendarDaysPrompt}
+CALENDARIO DEI PROSSIMI GIORNI:
+${calendarDaysPrompt}
 
-                      INFO SALONE:
-                      - Salone: ${storeName}
-                      - Indirizzo: ${storeAddress}
-                      - Orari di apertura: ${storeHours}
-                      ${specializations ? `- Specialità: ${specializations}` : ''}
-                      ${parkingInfo ? `- Info Parcheggio: ${parkingInfo}` : ''}
-                      ${directionsInfo ? `- Indicazioni stradali: ${directionsInfo}` : ''}
+INFO SALONE:
+- Salone: ${storeName}
+- Indirizzo: ${storeAddress}
+- Orari di apertura: ${storeHours}
+${specializations ? `- Specialità: ${specializations}` : ''}
+${parkingInfo ? `- Info Parcheggio: ${parkingInfo}` : ''}
+${directionsInfo ? `- Indicazioni stradali: ${directionsInfo}` : ''}
 
-                      STAFF:
-                      ${teamListFormatted}
+STAFF:
+${teamListFormatted}
 
-                      LISTINO SERVIZI DISPONIBILI:
-                      ${servicesListFormatted || "Servizi disponibili in sede."}
+LISTINO SERVIZI DISPONIBILI:
+${servicesListFormatted || "Servizi disponibili in sede."}
 
-                      PRODOTTI IN VENDITA:
-                      ${productsListFormatted || "Prodotti professionali disponibili in negozio."}`;
+PRODOTTI IN VENDITA:
+${productsListFormatted || "Prodotti professionali disponibili in negozio."}`;
 
-                                  const messagesPayload = [
-                                      { role: "system", content: systemPrompt },
-                                      ...conversationHistory,
-                                      { role: "user", content: activeUserPrompt }
-                                  ];
+            const messagesPayload = [
+                { role: "system", content: systemPrompt },
+                ...conversationHistory,
+                { role: "user", content: activeUserPrompt }
+            ];
 
-                                  const salonTools = [
-                                      {
-                                          type: "function",
-                                          function: {
-                                              name: "controlla_agenda_reale",
-                                              description: "Interroga l'agenda in tempo reale per verificare quali orari sono liberi per un servizio o combo. Da usare SOLO quando il cliente chiede quando venire o che orari ci sono.",
-                                              parameters: {
-                                                  type: "object",
-                                                  properties: {
-                                                      serviceId: {
-                                                          type: "string",
-                                                          description: "L'ID del servizio presente nel listino tra [ID: ...]."
-                                                      },
-                                                      dataRichiesta: {
-                                                          type: "string",
-                                                          description: `Data in formato YYYY-MM-DD (es. ${todayIsoDate}).`
-                                                      },
-                                                      durataMinuti: {
-                                                          type: "number",
-                                                          description: "Durata totale in minuti (somma se sono più trattamenti)."
-                                                      },
-                                                      operatoreId: {
-                                                          type: "string",
-                                                          description: "ID dell'operatore o del titolare se richiesto."
-                                                      }
-                                                  },
-                                                  required: ["serviceId", "dataRichiesta"]
-                                              }
-                                          }
-                                      },
-                                      {
-                                          type: "function",
-                                          function: {
-                                              name: "conferma_e_blocca_appuntamento",
-                                              description: "Blocca e registra definitivamente l'appuntamento sul calendario reale del salone quando il cliente accetta l'orario.",
-                                              parameters: {
-                                                  type: "object",
-                                                  properties: {
-                                                      serviceId: {
-                                                          type: "string",
-                                                          description: "L'ID del servizio principale dal listino [ID: ...]."
-                                                      },
-                                                      data: { type: "string", description: "Data YYYY-MM-DD" },
-                                                      ora: { type: "string", description: "Orario HH:MM (es. 15:30)" },
-                                                      nomeServizio: { type: "string", description: "Nome esatto del servizio o della combo (es. Taglio Capelli + Barba)" },
-                                                      prezzo: { type: "number", description: "Prezzo totale (somma se combo)" },
-                                                      durataMinuti: { type: "number", description: "Durata totale in minuti (somma se combo)" },
-                                                      operatoreId: { type: "string", description: "ID operatore scelto se presente" },
-                                                      note: { type: "string", description: "Eventuali prodotti da banco riservati o note cliente" },
-                                                      serviziInclusi: {
-                                                          type: "array",
-                                                          description: "Elenco analitico dei servizi che compongono la combo (per statistiche).",
-                                                          items: {
-                                                              type: "object",
-                                                              properties: {
-                                                                  id: { type: "string" },
-                                                                  name: { type: "string" },
-                                                                  price: { type: "number" },
-                                                                  duration: { type: "number" }
-                                                              }
-                                                          }
-                                                      }
-                                                  },
-                                                  required: ["serviceId", "data", "ora", "nomeServizio", "prezzo", "durataMinuti"]
-                                              }
-                                          }
-                                      }
-                                  ];
+            const salonTools = [
+                {
+                    type: "function",
+                    function: {
+                        name: "controlla_agenda_reale",
+                        description: "Interroga l'agenda in tempo reale per verificare quali orari sono liberi per un servizio o combo. Da usare SOLO quando il cliente chiede quando venire o che orari ci sono.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                serviceId: {
+                                    type: "string",
+                                    description: "L'ID del servizio presente nel listino tra [ID: ...]."
+                                },
+                                dataRichiesta: {
+                                    type: "string",
+                                    description: `Data in formato YYYY-MM-DD (es. ${todayIsoDate}).`
+                                },
+                                durataMinuti: {
+                                    type: "number",
+                                    description: "Durata totale in minuti (somma se sono più trattamenti)."
+                                },
+                                operatoreId: {
+                                    type: "string",
+                                    description: "ID dell'operatore o del titolare se richiesto."
+                                }
+                            },
+                            required: ["serviceId", "dataRichiesta"]
+                        }
+                    }
+                },
+                {
+                    type: "function",
+                    function: {
+                        name: "conferma_e_blocca_appuntamento",
+                        description: "Blocca e registra definitivamente l'appuntamento sul calendario reale del salone quando il cliente accetta l'orario.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                serviceId: {
+                                    type: "string",
+                                    description: "L'ID del servizio principale dal listino [ID: ...]."
+                                },
+                                data: { type: "string", description: "Data YYYY-MM-DD" },
+                                ora: { type: "string", description: "Orario HH:MM (es. 15:30)" },
+                                nomeServizio: { type: "string", description: "Nome esatto del servizio o della combo (es. Taglio Capelli + Barba)" },
+                                prezzo: { type: "number", description: "Prezzo totale (somma se combo)" },
+                                durataMinuti: { type: "number", description: "Durata totale in minuti (somma se combo)" },
+                                operatoreId: { type: "string", description: "ID operatore scelto se presente" },
+                                note: { type: "string", description: "Eventuali prodotti da banco riservati o note cliente" },
+                                serviziInclusi: {
+                                    type: "array",
+                                    description: "Elenco analitico dei servizi che compongono la combo (per statistiche).",
+                                    items: {
+                                        type: "object",
+                                        properties: {
+                                            id: { type: "string" },
+                                            name: { type: "string" },
+                                            price: { type: "number" },
+                                            duration: { type: "number" }
+                                        }
+                                    }
+                                }
+                            },
+                            required: ["serviceId", "data", "ora", "nomeServizio", "prezzo", "durataMinuti"]
+                        }
+                    }
+                }
+            ];
 
-                                  let aiReply = `Ciao ${clientFullName || clientFirstName || ''}! Come posso aiutarti oggi da ${storeName}?`;
+            let aiReply = `Ciao ${clientFullName || clientFirstName || ''}! Come posso aiutarti oggi da ${storeName}?`;
 
-                                  // I MODELLI UFFICIALI E VELOCI DELLA TUA DASHBOARD GROQ
-                                  const GROQ_CANDIDATES = [
-                                      "openai/gpt-oss-20b",
-                                      "openai/gpt-oss-120b",
-                                      "qwen/qwen3.8-27b"
-                                  ];
+            // Configurazione Motore AI (Google Gemini via Vertex API Key, con fallback Groq)
+            const isGoogleGemini = !!(process.env.VERTEX_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+            const AI_ENDPOINT = isGoogleGemini 
+                ? `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions?key=${AI_API_KEY}`
+                : "https://api.groq.com/openai/v1/chat/completions";
 
-                                  const SLOTS_API_URL = "https://localmente-api.vercel.app/api/get-available-slots";
+            const AI_CANDIDATES = isGoogleGemini 
+                ? ["gemini-2.0-flash", "gemini-1.5-flash"] 
+                : ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"];
 
-                                  for (const modelId of GROQ_CANDIDATES) {
-                                      try {
-                                          const clonedMessages = JSON.parse(JSON.stringify(messagesPayload));
+            const SLOTS_API_URL = "https://localmente-api.vercel.app/api/get-available-slots";
 
-                                          const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                                              method: "POST",
-                                              headers: {
-                                                  "Authorization": `Bearer ${(GROQ_API_KEY || '').trim()}`,
-                                                  "Content-Type": "application/json"
-                                              },
-                                              body: JSON.stringify({
-                                                  model: modelId,
-                                                  messages: clonedMessages,
-                                                  tools: salonTools,
-                                                  tool_choice: "auto",
-                                                  temperature: 0.35,
-                                                  max_tokens: 650
-                                              })
-                                          });
+            for (const modelId of AI_CANDIDATES) {
+                try {
+                    const clonedMessages = JSON.parse(JSON.stringify(messagesPayload));
 
-                                          if (groqRes.ok) {
-                                              const groqData = await groqRes.json();
-                                              const choice = groqData.choices?.[0];
-                                              const messageObj = choice?.message;
+                    const aiRes = await fetch(AI_ENDPOINT, {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${AI_API_KEY}`,
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            model: modelId,
+                            messages: clonedMessages,
+                            tools: salonTools,
+                            tool_choice: "auto",
+                            temperature: 0.35,
+                            max_tokens: 650
+                        })
+                    });
 
-                                              if (messageObj?.tool_calls && messageObj.tool_calls.length > 0) {
-                                                  const call = messageObj.tool_calls[0];
-                                                  let callArgs = {};
-                                                  try { callArgs = JSON.parse(call.function.arguments); } catch(e) {}
+                    if (aiRes.ok) {
+                        const aiData = await aiRes.json();
+                        const choice = aiData.choices?.[0];
+                        const messageObj = choice?.message;
 
-                                                  let toolResultPayload = {};
+                        if (messageObj?.tool_calls && messageObj.tool_calls.length > 0) {
+                            const call = messageObj.tool_calls[0];
+                            let callArgs = {};
+                            try { callArgs = JSON.parse(call.function.arguments); } catch(e) {}
 
-                                                  // CASO 1: CONTROLLO AGENDA REALE CON PARACADUTE TIMEOUT
-                                                  if (call.function.name === 'controlla_agenda_reale') {
-                                                      const targetServiceId = callArgs.serviceId || (servicesSnap.docs[0]?.id) || "default";
-                                                      const targetDate = callArgs.dataRichiesta || todayIsoDate;
-                                                      const targetDuration = Number(callArgs.durataMinuti) || 30;
+                            let toolResultPayload = {};
 
-                                                      let realSlots = [];
-                                                      try {
-                                                          const slotPayload = {
-                                                              action: "getAvailableSlots",
-                                                              vendorId: vendorId,
-                                                              serviceId: targetServiceId,
-                                                              date: targetDate,
-                                                              totalOccupiedTimeMinutes: targetDuration
-                                                          };
-                                                          if (callArgs.operatoreId) {
-                                                              slotPayload.bookedForResourceId = callArgs.operatoreId;
-                                                          }
+                            // CASO 1: CONTROLLO AGENDA REALE CON PARACADUTE TIMEOUT
+                            if (call.function.name === 'controlla_agenda_reale') {
+                                const targetServiceId = callArgs.serviceId || (servicesSnap.docs[0]?.id) || "default";
+                                const targetDate = callArgs.dataRichiesta || todayIsoDate;
+                                const targetDuration = Number(callArgs.durataMinuti) || 30;
 
-                                                          const controller = new AbortController();
-                                                          const timer = setTimeout(() => controller.abort(), 3500);
+                                let realSlots = [];
+                                try {
+                                    const slotPayload = {
+                                        action: "getAvailableSlots",
+                                        vendorId: vendorId,
+                                        serviceId: targetServiceId,
+                                        date: targetDate,
+                                        totalOccupiedTimeMinutes: targetDuration
+                                    };
+                                    if (callArgs.operatoreId) {
+                                        slotPayload.bookedForResourceId = callArgs.operatoreId;
+                                    }
 
-                                                          const slotFetch = await fetch(SLOTS_API_URL, {
-                                                              method: "POST",
-                                                              signal: controller.signal,
-                                                              headers: { "Content-Type": "application/json" },
-                                                              body: JSON.stringify(slotPayload)
-                                                          });
-                                                          clearTimeout(timer);
+                                    const controller = new AbortController();
+                                    const timer = setTimeout(() => controller.abort(), 3500);
 
-                                                          const slotJson = await slotFetch.json();
-                                                          realSlots = slotJson.slots || [];
-                                                      } catch (slotErr) {
-                                                          console.warn("[AutoPilot Tool] Errore slot:", slotErr.message);
-                                                      }
+                                    const slotFetch = await fetch(SLOTS_API_URL, {
+                                        method: "POST",
+                                        signal: controller.signal,
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify(slotPayload)
+                                    });
+                                    clearTimeout(timer);
 
-                                                      toolResultPayload = {
-                                                          dataRichiesta: targetDate,
-                                                          orariVeramenteLiberi: realSlots.length > 0 ? realSlots : "Completo / Nessuno slot disponibile per questo giorno"
-                                                      };
-                                                  }
+                                    const slotJson = await slotFetch.json();
+                                    realSlots = slotJson.slots || [];
+                                } catch (slotErr) {
+                                    console.warn("[AutoPilot Tool] Errore slot:", slotErr.message);
+                                }
 
-                                                  // CASO 2: CONFERMA E BLOCCO APPUNTAMENTO SUL GESTIONALE
-                                                  else if (call.function.name === 'conferma_e_blocca_appuntamento') {
-                                                      const targetServiceId = callArgs.serviceId || (servicesSnap.docs[0]?.id) || "default";
-                                                      const bookDateStr = callArgs.data || todayIsoDate;
-                                                      const bookTimeStr = callArgs.ora || "10:00";
-                                                      const bookDur = Number(callArgs.durataMinuti) || 30;
-                                                      const bookServiceName = callArgs.nomeServizio || "Servizio Salone";
-                                                      const bookPrice = Number(callArgs.prezzo) || 0;
-                                                      const assignedResource = callArgs.operatoreId || vendorId;
-                                                      const isOwner = (assignedResource === vendorId);
+                                toolResultPayload = {
+                                    dataRichiesta: targetDate,
+                                    orariVeramenteLiberi: realSlots.length > 0 ? realSlots : "Completo / Nessuno slot disponibile per questo giorno"
+                                };
+                            }
 
-                                                      const startDateTime = new Date(`${bookDateStr}T${bookTimeStr}:00`);
-                                                      const endDateTime = new Date(startDateTime.getTime() + bookDur * 60000);
+                            // CASO 2: CONFERMA E BLOCCO APPUNTAMENTO SUL GESTIONALE
+                            else if (call.function.name === 'conferma_e_blocca_appuntamento') {
+                                const targetServiceId = callArgs.serviceId || (servicesSnap.docs[0]?.id) || "default";
+                                const bookDateStr = callArgs.data || todayIsoDate;
+                                const bookTimeStr = callArgs.ora || "10:00";
+                                const bookDur = Number(callArgs.durataMinuti) || 30;
+                                const bookServiceName = callArgs.nomeServizio || "Servizio Salone";
+                                const bookPrice = Number(callArgs.prezzo) || 0;
+                                const assignedResource = callArgs.operatoreId || vendorId;
+                                const isOwner = (assignedResource === vendorId);
 
-                                                      try {
-                                                          const controller = new AbortController();
-                                                          const timer = setTimeout(() => controller.abort(), 4000);
+                                const startDateTime = new Date(`${bookDateStr}T${bookTimeStr}:00`);
+                                const endDateTime = new Date(startDateTime.getTime() + bookDur * 60000);
 
-                                                          const saveBookingRes = await fetch(SLOTS_API_URL, {
-                                                              method: "POST",
-                                                              signal: controller.signal,
-                                                              headers: { "Content-Type": "application/json" },
-                                                              body: JSON.stringify({
-                                                                  action: "save_service_booking",
-                                                                  vendorId: vendorId,
-                                                                  serviceId: targetServiceId,
-                                                                  customerName: clientFullName || pushName || "Cliente WhatsApp",
-                                                                  customerPhone: cleanPhone,
-                                                                  bookedServiceName: bookServiceName,
-                                                                  bookedServicePrice: bookPrice,
-                                                                  bookedServiceDuration: bookDur,
-                                                                  bookedTotalOccupiedTime: bookDur,
-                                                                  bookedServiceItems: callArgs.serviziInclusi || [{ id: targetServiceId, name: bookServiceName, price: bookPrice, duration: bookDur }],
-                                                                  startDateTime: startDateTime.toISOString(),
-                                                                  endDateTime: endDateTime.toISOString(),
-                                                                  status: "confirmed",
-                                                                  source: "whatsapp_autopilot",
-                                                                  bookingOrigin: "manual",
-                                                                  paymentMethod: "cash_in_studio",
-                                                                  paymentStatus: "pending",
-                                                                  bookedForResourceId: assignedResource,
-                                                                  collaboratorId: isOwner ? null : assignedResource,
-                                                                  appointmentCode: "WA_" + Date.now().toString().slice(-4),
-                                                                  type: "cura_persona",
-                                                                  notes: callArgs.note || null
-                                                              })
-                                                          });
-                                                          clearTimeout(timer);
+                                try {
+                                    const controller = new AbortController();
+                                    const timer = setTimeout(() => controller.abort(), 4000);
 
-                                                          if (saveBookingRes.ok) {
-                                                              const bookJson = await saveBookingRes.json().catch(() => ({}));
-                                                              toolResultPayload = {
-                                                                  esito: "SUCCESSO_APPUNTAMENTO_BLOCCATO",
-                                                                  bookingId: bookJson.bookingId,
-                                                                  servizio: bookServiceName,
-                                                                  data: bookDateStr,
-                                                                  ora: bookTimeStr,
-                                                                  prezzo: bookPrice,
-                                                                  messaggio: "Appuntamento inserito con successo nel calendario del salone! Posto bloccato."
-                                                              };
-                                                          } else {
-                                                              const errJson = await saveBookingRes.json().catch(() => ({}));
-                                                              toolResultPayload = {
-                                                                  esito: "ERRORE",
-                                                                  motivo: errJson.error || "Orario non disponibile o già occupato"
-                                                              };
-                                                          }
-                                                      } catch (saveErr) {
-                                                          toolResultPayload = { esito: "ERRORE", motivo: saveErr.message };
-                                                      }
-                                                  }
+                                    const saveBookingRes = await fetch(SLOTS_API_URL, {
+                                        method: "POST",
+                                        signal: controller.signal,
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({
+                                            action: "save_service_booking",
+                                            vendorId: vendorId,
+                                            serviceId: targetServiceId,
+                                            customerName: clientFullName || pushName || "Cliente WhatsApp",
+                                            customerPhone: cleanPhone,
+                                            bookedServiceName: bookServiceName,
+                                            bookedServicePrice: bookPrice,
+                                            bookedServiceDuration: bookDur,
+                                            bookedTotalOccupiedTime: bookDur,
+                                            bookedServiceItems: callArgs.serviziInclusi || [{ id: targetServiceId, name: bookServiceName, price: bookPrice, duration: bookDur }],
+                                            startDateTime: startDateTime.toISOString(),
+                                            endDateTime: endDateTime.toISOString(),
+                                            status: "confirmed",
+                                            source: "whatsapp_autopilot",
+                                            bookingOrigin: "manual",
+                                            paymentMethod: "cash_in_studio",
+                                            paymentStatus: "pending",
+                                            bookedForResourceId: assignedResource,
+                                            collaboratorId: isOwner ? null : assignedResource,
+                                            appointmentCode: "WA_" + Date.now().toString().slice(-4),
+                                            type: "cura_persona",
+                                            notes: callArgs.note || null
+                                        })
+                                    });
+                                    clearTimeout(timer);
 
-                                                  clonedMessages.push(messageObj);
-                                                  clonedMessages.push({
-                                                      role: "tool",
-                                                      tool_call_id: call.id,
-                                                      content: JSON.stringify(toolResultPayload)
-                                                  });
+                                    if (saveBookingRes.ok) {
+                                        const bookJson = await saveBookingRes.json().catch(() => ({}));
+                                        toolResultPayload = {
+                                            esito: "SUCCESSO_APPUNTAMENTO_BLOCCATO",
+                                            bookingId: bookJson.bookingId,
+                                            servizio: bookServiceName,
+                                            data: bookDateStr,
+                                            ora: bookTimeStr,
+                                            prezzo: bookPrice,
+                                            messaggio: "Appuntamento inserito con successo nel calendario del salone! Posto bloccato."
+                                        };
+                                    } else {
+                                        const errJson = await saveBookingRes.json().catch(() => ({}));
+                                        toolResultPayload = {
+                                            esito: "ERRORE",
+                                            motivo: errJson.error || "Orario non disponibile o già occupato"
+                                        };
+                                    }
+                                } catch (saveErr) {
+                                    toolResultPayload = { esito: "ERRORE", motivo: saveErr.message };
+                                }
+                            }
 
-                                                  const finalGroqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                                                      method: "POST",
-                                                      headers: {
-                                                          "Authorization": `Bearer ${(GROQ_API_KEY || '').trim()}`,
-                                                          "Content-Type": "application/json"
-                                                      },
-                                                      body: JSON.stringify({
-                                                          model: modelId,
-                                                          messages: clonedMessages,
-                                                          tools: salonTools,
-                                                          temperature: 0.35,
-                                                          max_tokens: 650
-                                                      })
-                                                  });
+                            clonedMessages.push(messageObj);
+                            clonedMessages.push({
+                                role: "tool",
+                                tool_call_id: call.id,
+                                content: JSON.stringify(toolResultPayload)
+                            });
 
-                                                  if (finalGroqRes.ok) {
-                                                      const finalData = await finalGroqRes.json();
-                                                      const finalContent = finalData.choices?.[0]?.message?.content?.trim();
-                                                      if (finalContent) {
-                                                          aiReply = finalContent;
-                                                          break;
-                                                      }
-                                                  }
-                                              } else if (messageObj?.content) {
-                                                  aiReply = messageObj.content.trim();
-                                                  break;
-                                              }
-                                          }
-                                      } catch (aiErr) {
-                                          console.warn(`[AutoPilot] Tentativo fallito su ${modelId}:`, aiErr.message);
-                                      }
-                                  }
+                            const finalAiRes = await fetch(AI_ENDPOINT, {
+                                method: "POST",
+                                headers: {
+                                    "Authorization": `Bearer ${AI_API_KEY}`,
+                                    "Content-Type": "application/json"
+                                },
+                                body: JSON.stringify({
+                                    model: modelId,
+                                    messages: clonedMessages,
+                                    tools: salonTools,
+                                    temperature: 0.35,
+                                    max_tokens: 650
+                                })
+                            });
 
-                                  // Salvataggio Storico Conversazione su Firestore
-                                  try {
-                                      await Promise.all([
-                                          messagesCol.add({
-                                              role: 'user',
-                                              content: (currentConsent === 'pending') ? `1 (Consenso Accettato)` : messageText,
-                                              timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                                              dateTimeRome: nowRomeStr
-                                          }),
-                                          messagesCol.add({
-                                              role: 'assistant',
-                                              content: aiReply,
-                                              timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                                              dateTimeRome: nowRomeStr
-                                          }),
-                                          chatDocRef.set({
-                                              phone: cleanPhone,
-                                              customerName: clientFullName || pushName || 'Cliente',
-                                              lastMessage: aiReply,
-                                              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                                              lastActiveDate: nowRomeStr
-                                          }, { merge: true })
-                                      ]);
-                                  } catch (memErr) {
-                                      console.warn("[Memoria Chat] Errore salvataggio:", memErr.message);
-                                  }
+                            if (finalAiRes.ok) {
+                                const finalData = await finalAiRes.json();
+                                const finalContent = finalData.choices?.[0]?.message?.content?.trim();
+                                if (finalContent) {
+                                    aiReply = finalContent;
+                                    break;
+                                }
+                            }
+                        } else if (messageObj?.content) {
+                            aiReply = messageObj.content.trim();
+                            break;
+                        }
+                    }
+                } catch (aiErr) {
+                    console.warn(`[AutoPilot] Tentativo fallito su ${modelId}:`, aiErr.message);
+                }
+            }
 
-                                  // Invio messaggio finale su WhatsApp tramite Gateway Render
-                                  await sendWhatsAppMessage(aiReply);
-                                  return res.status(200).json({ success: true, client: clientFullName, reply: aiReply });
+            // Salvataggio Storico Conversazione su Firestore
+            try {
+                await Promise.all([
+                    messagesCol.add({
+                        role: 'user',
+                        content: (currentConsent === 'pending') ? `1 (Consenso Accettato)` : messageText,
+                        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                        dateTimeRome: nowRomeStr
+                    }),
+                    messagesCol.add({
+                        role: 'assistant',
+                        content: aiReply,
+                        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                        dateTimeRome: nowRomeStr
+                    }),
+                    chatDocRef.set({
+                        phone: cleanPhone,
+                        customerName: clientFullName || pushName || 'Cliente',
+                        lastMessage: aiReply,
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        lastActiveDate: nowRomeStr
+                    }, { merge: true })
+                ]);
+            } catch (memErr) {
+                console.warn("[Memoria Chat] Errore salvataggio:", memErr.message);
+            }
 
-        // =========================================================================
-        // 🔒 BLOCCO COPYWRITER MARKETING PER I POST SOCIAL (SIGILLATO AL 100%)
-        // =========================================================================
+            // Invio messaggio finale su WhatsApp tramite Gateway Render
+            await sendWhatsAppMessage(aiReply);
+            return res.status(200).json({ success: true, client: clientFullName, reply: aiReply });
+        }
+
+        // =========================================================
+        // 🔒 BLOCCO COPYWRITER MARKETING PER I POST (POWERED BY GOOGLE)
+        // =========================================================
         const contesto = body.contesto;
         if (!contesto) {
             return res.status(400).json({ errore: "Dati di contesto mancanti nella richiesta." });
@@ -648,14 +652,20 @@ module.exports = async function handler(req, res) {
         let systemPrompt = `Sei un Senior Social Media Copywriter da Agenzia di Marketing di Lusso. Crea post magnetici per promuovere servizi e prodotti. Rispondi solo con il testo del post.`;
         let userPromptText = `Dati: Negozio: "${contesto.store_name || 'Salone'}", Servizio: "${contesto.nome || 'Servizio'}", Prezzo: ${contesto.prezzo || '0'}€, Link: ${contesto.link_shop || 'https://www.civora.it'}`;
 
-        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        const isGoogleForMarketing = !!(process.env.VERTEX_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+        const marketingEndpoint = isGoogleForMarketing
+            ? `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions?key=${AI_API_KEY}`
+            : "https://api.groq.com/openai/v1/chat/completions";
+        const marketingModel = isGoogleForMarketing ? "gemini-1.5-flash" : "openai/gpt-oss-20b";
+
+        const response = await fetch(marketingEndpoint, {
             method: "POST",
             headers: {
-                "Authorization": `Bearer ${GROQ_API_KEY}`,
+                "Authorization": `Bearer ${AI_API_KEY}`,
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "llama-3.3-70b-versatile",
+                model: marketingModel,
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPromptText }
