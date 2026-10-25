@@ -412,6 +412,7 @@ module.exports = async function handler(req, res) {
 
                        const GROQ_CANDIDATES = [
                            "meta-llama/Llama-3.1-8B-Instruct",
+                           "openai/gpt-oss-120b"
                            
                        ];
 
