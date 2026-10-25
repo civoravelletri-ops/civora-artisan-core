@@ -411,10 +411,9 @@ module.exports = async function handler(req, res) {
                        let aiReply = `Ciao ${clientFullName || clientFirstName || ''}! Come posso aiutarti oggi da ${storeName}?`;
 
                        const GROQ_CANDIDATES = [
-                           "meta-llama/Llama-3.1-8B-Instruct",
-                           "openai/gpt-oss-120b"
-                           
-                       ];
+                "llama-3.3-70b-versatile",
+                "llama-3.1-8b-instant"
+            ];
 
                        const SLOTS_API_URL = "https://localmente-api.vercel.app/api/get-available-slots";
 
