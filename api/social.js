@@ -475,12 +475,14 @@ Rispondi ESCLUSIVAMENTE con un JSON valido in questo formato esatto:
 
            // 5. INVIA LA RISPOSTA SU WHATSAPP TRAMITE IL GATEWAY
            try {
+               const targetRecipient = body.senderJid || senderPhone; // 👈 PRENDE L'INDIRIZZO REALE (@lid o @s.whatsapp.net)!
+           
                const sendRes = await fetch(`${GATEWAY_BASE_URL}/send-message`, {
                    method: 'POST',
                    headers: { 'Content-Type': 'application/json' },
                    body: JSON.stringify({
                        vendorId: vendorId,
-                       phone: senderPhone,
+                       phone: targetRecipient, // ✅ ORA LO MANDA ALLA CHAT ESATTA!
                        message: finalReply
                    })
                });
