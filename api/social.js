@@ -207,7 +207,7 @@ REGOLE TASSATIVE DI COMPORTAMENTO:
                                 "Content-Type": "application/json"
                             },
                             body: JSON.stringify({
-                                model: "llama3-70b-8192",
+                                model: "llama-3.1-70b-versatile",
                                 messages: messagesForAi,
                                 tools: tools,
                                 tool_choice: "auto",
@@ -342,7 +342,7 @@ REGOLE TASSATIVE DI COMPORTAMENTO:
                                                 "Content-Type": "application/json"
                                             },
                                             body: JSON.stringify({
-                                                model: "llama3-70b-8192",
+                                                model: "llama-3.1-70b-versatile",
                                                 messages: messagesForAi,
                                                 temperature: 0.6
                                             })
@@ -541,7 +541,7 @@ REGOLE TASSATIVE DI COMPORTAMENTO:
         }
 
         const GROQ_TEXT_MODELS = dynamicModelsList.length > 0 ? dynamicModelsList : [
-                    "llama3-70b-8192",
+                    "llama-3.1-70b-versatile",
                     "llama-3.1-8b-instant"
                 ];
 
