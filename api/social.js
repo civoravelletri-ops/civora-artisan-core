@@ -569,28 +569,32 @@ ${productsListFormatted || "Prodotti professionali disponibili in negozio."}`;
                             });
 
                             const finalGroqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                                method: "POST",
-                                headers: {
-                                    "Authorization": `Bearer ${GROQ_API_KEY}`,
-                                    "Content-Type": "application/json"
-                                },
-                                body: JSON.stringify({
-                                    model: modelId,
-                                    messages: clonedMessages,
-                                    tools: salonTools,
-                                    temperature: 0.35,
-                                    max_tokens: 650
-                                })
-                            });
-
-                            if (finalGroqRes.ok) {
-                                const finalData = await finalGroqRes.json();
-                                const finalContent = finalData.choices?.[0]?.message?.content?.trim();
-                                if (finalContent) {
-                                    aiReply = finalContent;
-                                    break;
-                                }
-                            }
+                                                            method: "POST",
+                                                            headers: {
+                                                                "Authorization": `Bearer ${GROQ_API_KEY}`,
+                                                                "Content-Type": "application/json"
+                                                            },
+                                                            body: JSON.stringify({
+                                                                model: modelId,
+                                                                messages: clonedMessages,
+                                                                tools: salonTools,
+                                                                tool_choice: "none",
+                                                                temperature: 0.35,
+                                                                max_tokens: 650
+                                                            })
+                                                        });
+                            
+                                                        if (finalGroqRes.ok) {
+                                                            const finalData = await finalGroqRes.json();
+                                                            const finalContent = finalData.choices?.[0]?.message?.content?.trim();
+                                                            if (finalContent) {
+                                                                aiReply = finalContent;
+                                                                break;
+                                                            }
+                                                        } else {
+                                                            const errTxt = await finalGroqRes.text().catch(() => "");
+                                                            console.warn("[AutoPilot Final Groq Error]:", finalGroqRes.status, errTxt);
+                                                        }
                         } else if (messageObj?.content) {
                             aiReply = messageObj.content.trim();
                             break;
