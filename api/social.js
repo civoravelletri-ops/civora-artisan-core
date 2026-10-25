@@ -49,8 +49,8 @@ async function getVertexAuthContext() {
     }
 }
 
-// 🧠 Motore di chiamata AI unificato (Vertex AI con paracadute Groq)
-async function callAiCompletion({ messages, temperature, max_tokens }) {
+// 🧠 Motore di chiamata AI con supporto ai Tools (Function Calling)
+async function callAiCompletion({ messages, tools, tool_choice, temperature, max_tokens }) {
     // 1. TENTATIVO CON GOOGLE VERTEX AI
     const vertex = await getVertexAuthContext();
     if (vertex) {
@@ -69,7 +69,9 @@ async function callAiCompletion({ messages, temperature, max_tokens }) {
                     body: JSON.stringify({
                         model: model,
                         messages: messages,
-                        temperature: temperature || 0.4,
+                        tools: tools,
+                        tool_choice: tool_choice || "auto",
+                        temperature: temperature || 0.35,
                         max_tokens: max_tokens || 500
                     })
                 });
@@ -97,6 +99,8 @@ async function callAiCompletion({ messages, temperature, max_tokens }) {
                     body: JSON.stringify({
                         model: model,
                         messages: messages,
+                        tools: tools,
+                        tool_choice: tool_choice || "auto",
                         temperature: temperature || 0.3,
                         max_tokens: max_tokens || 300
                     })
@@ -131,7 +135,7 @@ module.exports = async function handler(req, res) {
         }
 
         // =========================================================================
-        // 🟢 BLOCCO 1: WHATSAPP CONCIERGE (La tua nuova visione)
+        // 🟢 BLOCCO 1: WHATSAPP CONCIERGE & AGENDA REALE
         // =========================================================================
         if (body.isWhatsAppAutoPilot && body.vendorId) {
             const vendorId = body.vendorId;
@@ -157,6 +161,7 @@ module.exports = async function handler(req, res) {
 
             let activeUserPrompt = messageText;
             const GATEWAY_BASE_URL = (process.env.CIVORA_WHATSAPP_GATEWAY_URL || 'https://civora-whatsapp-gateway.onrender.com').replace(/\/+$/, '');
+            const SLOTS_API_URL = "https://localmente-api.vercel.app/api/get-available-slots";
 
             async function sendWhatsAppMessage(replyText) {
                 try {
@@ -168,7 +173,7 @@ module.exports = async function handler(req, res) {
                 } catch (sendErr) { console.error("[AutoPilot Gateway] Errore invio:", sendErr.message); }
             }
 
-            // RACCOLTA DATI: Cliente, Storico Chat, Profilo Consenso, Servizi e Staff del salone
+            // RACCOLTA DATI: Cliente, Chat, Servizi e Staff
             const [clientSnap, chatHistorySnap, chatProfileDoc, servicesSnap, collaboratorsSnap] = await Promise.all([
                 db.collection('vendors').doc(vendorId).collection('clients').where('phone', 'in', phoneVariants.slice(0, 10)).limit(1).get().catch(() => ({ empty: true })),
                 db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone).collection('messages').orderBy('timestamp', 'desc').limit(6).get().catch(() => ({ docs: [] })),
@@ -195,11 +200,16 @@ module.exports = async function handler(req, res) {
             const storeAddress = vendorData.address || "in sede";
             const storeHours = vendorData.public_opening_hours || vendorData.opening_hours || "Orari standard";
 
-            // Formattazione leggera del listino e dello staff per darli in pasto all'AI in modo pulito
+            // Mappa servizi per ID e nome
+            const servicesMap = new Map();
             const servicesFormatted = (servicesSnap.docs || [])
-                .map(d => d.data())
+                .map(d => {
+                    const data = { id: d.id, ...d.data() };
+                    servicesMap.set(d.id, data);
+                    return data;
+                })
                 .filter(s => s.productName && s.isAvailable !== false)
-                .map(s => `- ${s.productName}: ${parseFloat(s.price) || 0}€ (${s.serviceDuration || 30} min)${s.productDescription ? ' - ' + s.productDescription : ''}`)
+                .map(s => `- [ID: ${s.id}] ${s.productName}: ${parseFloat(s.price) || 0}€ (${s.totalOccupiedTimeMinutes || s.serviceDuration || 30} min)`)
                 .join('\n');
 
             const teamFormatted = [];
@@ -207,18 +217,23 @@ module.exports = async function handler(req, res) {
             teamFormatted.push(`- ${ownerName} (Titolare)`);
             (collaboratorsSnap.docs || []).forEach(doc => {
                 const c = doc.data();
-                teamFormatted.push(`- ${c.name} (${c.role || 'Stilista/Operatore'})`);
+                teamFormatted.push(`- ${c.name} (${c.role || 'Stilista'})`);
             });
 
             const chatDocRef = db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone);
             const messagesCol = chatDocRef.collection('messages');
-            const nowRomeStr = new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
+            
+            // Date e Orari Italiani attuali
+            const now = new Date();
+            const nowRomeStr = now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
+            const todayIsoDate = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
+            const todayReadable = now.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Rome' });
 
             const chatData = (chatProfileDoc && chatProfileDoc.exists) ? (chatProfileDoc.data() || {}) : null;
             const currentConsent = chatData ? chatData.aiConsentStatus : null;
 
             // ---------------------------------------------------------
-            // GESTIONE CONSENSO INIZIALE (1 o 2)
+            // CONSENSO INIZIALE (1 o 2)
             // ---------------------------------------------------------
             if (!chatData || !currentConsent) {
                 await chatDocRef.set({
@@ -277,8 +292,27 @@ module.exports = async function handler(req, res) {
             }
 
             // ---------------------------------------------------------
-            // IL CERVELLO DELLA TUA NUOVA VISIONE (CONCIERGE & RECEPTIONIST)
+            // STRUMENTO DI AGENDA (TOOL): Per leggere gli slot liberi reali
             // ---------------------------------------------------------
+            const salonTools = [
+                {
+                    type: "function",
+                    function: {
+                        name: "controlla_agenda_reale",
+                        description: "Verifica gli orari liberi nel calendario del salone per una data specifica.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                serviceId: { type: "string", description: "ID esatto del servizio scelto dal listino" },
+                                dataRichiesta: { type: "string", description: "Data nel formato YYYY-MM-DD" },
+                                durataMinuti: { type: "number", description: "Durata in minuti del servizio" }
+                            },
+                            required: ["dataRichiesta"]
+                        }
+                    }
+                }
+            ];
+
             let conversationHistory = [];
             if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
                 conversationHistory = chatHistorySnap.docs.slice(0, 4).map(doc => ({
@@ -288,26 +322,23 @@ module.exports = async function handler(req, res) {
             }
 
             const systemPrompt = `Tu sei l'eccellente e cordiale receptionist e concierge di "${storeName}". 
-Il tuo obiettivo è accogliere i clienti, rispondere in modo naturale, caloroso ed umano, e aiutarli a scoprire i servizi, i prodotti, lo staff o a prenotare un trattamento.
+Oggi è ${todayReadable} (${todayIsoDate}).
+Il tuo obiettivo è accogliere i clienti, rispondere in modo naturale, e aiutarli a scoprire i servizi, i prodotti, lo staff o a prenotare.
 
 INFORMAZIONI SULL'ATTIVITÀ:
-- Indirizzo: ${storeAddress}
-- Orari: ${storeHours}
-- Staff del salone:
-${teamFormatted.join('\n') || '- Lo staff del salone'}
+- Indirizzo: ${storeAddress} | Orari: ${storeHours}
+- Staff: ${teamFormatted.join(', ') || 'Team Salone'}
 
 LISTINO SERVIZI E PREZZI DISPONIBILI:
-${servicesFormatted || "Nessun servizio inserito al momento."}
+${servicesFormatted || "Nessun servizio inserito."}
 
-PROFILO DEL CLIENTE CON CUI STAI PARLANDO:
+PROFILO CLIENTE:
 - Nome: ${clientFullName || clientFirstName || 'Cliente'}
-- Cliente VIP: ${isVip ? 'SÌ (trattalo con i massimi riguardi)' : 'No'}
+- VIP: ${isVip ? 'SÌ' : 'No'}
 
-REGOLE DI COMPORTAMENTO:
-1. Sii estremamente naturale, come una vera persona al banco di un salone di lusso. Evita risposte fredde o da robot.
-2. Usa le informazioni qui sopra sui servizi e lo staff per rispondere con precisione a qualsiasi domanda (prezzi, tempi, chi fa cosa).
-3. Se vogliono prenotare o comprare un prodotto, incoraggiali con entusiasmo e di' loro che puoi aiutarli a bloccare l'appuntamento o l'ordine confermando giorno e orario desiderato.
-4. Se ti fanno domande che esulano totalmente dal salone, svicola con eleganza riconducendo la conversazione sul benessere o sui vostri servizi.`;
+REGOLE PER LA DISPONIBILITÀ E PRENOTAZIONI:
+- Se il cliente chiede la disponibilità per un giorno specifico (es. "domani", "giovedì", o una data), **devi chiamare obbligatoriamente lo strumento 'controlla_agenda_reale'** passando la data in formato YYYY-MM-DD e l'ID del servizio richiesto (se non specificato, usa il primo servizio del listino).
+- Presenta gli orari liberi in modo chiaro ed entusiasta.`;
 
             const messagesPayload = [
                 { role: "system", content: systemPrompt },
@@ -315,16 +346,85 @@ REGOLE DI COMPORTAMENTO:
                 { role: "user", content: activeUserPrompt }
             ];
 
-            let aiReply = `Ciao ${clientFirstName || ''}! Benvenuto da ${storeName}. Come posso prendermi cura di te oggi?`;
+            let aiReply = `Ciao ${clientFirstName || ''}! Benvenuto da ${storeName}. Come posso aiutarti oggi?`;
 
+            // Prima chiamata all'AI con supporto ai Tool
             const aiData = await callAiCompletion({
                 messages: messagesPayload,
-                temperature: 0.5, // Leggermente più creativo e discorsivo
-                max_tokens: 400
+                tools: salonTools,
+                tool_choice: "auto",
+                temperature: 0.4,
+                max_tokens: 450
             });
 
-            if (aiData?.choices?.[0]?.message?.content) {
-                aiReply = aiData.choices[0].message.content.trim();
+            if (aiData) {
+                const messageObj = aiData.choices?.[0]?.message;
+
+                // SE L'AI VUOLE CONTROLLARE L'AGENDA
+                if (messageObj?.tool_calls && messageObj.tool_calls.length > 0) {
+                    const call = messageObj.tool_calls[0];
+                    let callArgs = {};
+                    try { callArgs = JSON.parse(call.function.arguments); } catch(e) {}
+
+                    if (call.function.name === 'controlla_agenda_reale') {
+                        const targetServiceId = callArgs.serviceId || (servicesSnap.docs[0]?.id) || "default";
+                        const targetDate = callArgs.dataRichiesta || todayIsoDate;
+                        
+                        let serviceDuration = 30;
+                        const sFound = servicesMap.get(targetServiceId);
+                        if (sFound) serviceDuration = sFound.totalOccupiedTimeMinutes || sFound.serviceDuration || 30;
+
+                        let realSlots = [];
+                        try {
+                            const controller = new AbortController();
+                            const timer = setTimeout(() => controller.abort(), 4000);
+
+                            const slotFetch = await fetch(SLOTS_API_URL, {
+                                method: "POST",
+                                signal: controller.signal,
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    action: "getAvailableSlots",
+                                    vendorId: vendorId,
+                                    serviceId: targetServiceId,
+                                    date: targetDate,
+                                    totalOccupiedTimeMinutes: serviceDuration
+                                })
+                            });
+                            clearTimeout(timer);
+                            const slotJson = await slotFetch.json();
+                            realSlots = slotJson.slots || [];
+                        } catch (slotErr) {
+                            console.warn("[Slot Fetch Error]:", slotErr.message);
+                        }
+
+                        const toolResultPayload = {
+                            dataVerificata: targetDate,
+                            orariDisponibili: realSlots.length > 0 ? realSlots : "Spiacenti, siamo completi in questa data."
+                        };
+
+                        const clonedMessages = JSON.parse(JSON.stringify(messagesPayload));
+                        clonedMessages.push(messageObj);
+                        clonedMessages.push({
+                            role: "tool",
+                            tool_call_id: call.id,
+                            content: JSON.stringify(toolResultPayload)
+                        });
+
+                        // Seconda chiamata all'AI per formulare la risposta finale col risultato dell'agenda
+                        const finalAiData = await callAiCompletion({
+                            messages: clonedMessages,
+                            temperature: 0.35,
+                            max_tokens: 350
+                        });
+
+                        if (finalAiData?.choices?.[0]?.message?.content) {
+                            aiReply = finalAiData.choices[0].message.content.trim();
+                        }
+                    }
+                } else if (messageObj?.content) {
+                    aiReply = messageObj.content.trim();
+                }
             }
 
             // Salvataggio memoria e invio
