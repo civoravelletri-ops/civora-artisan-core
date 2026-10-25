@@ -49,7 +49,7 @@ async function getVertexAuthContext() {
     }
 }
 
-// 🧠 Motore di chiamata AI (Google Vertex AI con paracadute Groq)
+// 🧠 Motore di chiamata AI (ESATTAMENTE COME IL TUO ORIGINALE)
 async function callAiCompletion({ messages, temperature, max_tokens }) {
     // 1. TENTATIVO CON GOOGLE VERTEX AI
     const vertex = await getVertexAuthContext();
@@ -69,26 +69,23 @@ async function callAiCompletion({ messages, temperature, max_tokens }) {
                     body: JSON.stringify({
                         model: model,
                         messages: messages,
-                        temperature: temperature || 0.4,
+                        temperature: temperature || 0.35,
                         max_tokens: max_tokens || 500
                     })
                 });
 
                 if (res.ok) {
                     const data = await res.json();
-                    console.log(`[Google Vertex AI] ✅ Risposta da ${model}!`);
                     return data;
                 }
-            } catch (vErr) {
-                console.warn(`[Google Vertex AI] Tentativo ${model} fallito:`, vErr.message);
-            }
+            } catch (vErr) {}
         }
     }
 
-    // 2. PARACADUTE AUTOMATICO SU GROQ
+    // 2. PARACADUTE SU GROQ (Ripristinati i tuoi modelli originali)
     const groqKey = (process.env.GROQ_API_KEY || '').trim();
     if (groqKey) {
-        const groqModels = ["llama3-70b-8192", "mixtral-8x7b-32768"]; // Modelli Groq per il copywriting
+        const groqModels = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"];
         for (const model of groqModels) {
             try {
                 const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -100,14 +97,13 @@ async function callAiCompletion({ messages, temperature, max_tokens }) {
                     body: JSON.stringify({
                         model: model,
                         messages: messages,
-                        temperature: temperature || 0.4,
-                        max_tokens: max_tokens || 500
+                        temperature: temperature || 0.3,
+                        max_tokens: Math.min(max_tokens || 300, 300)
                     })
                 });
 
                 if (res.ok) {
                     const data = await res.json();
-                    console.log(`[Groq Fallback] ✅ Risposta da ${model}!`);
                     return data;
                 }
             } catch (gErr) {}
@@ -117,10 +113,10 @@ async function callAiCompletion({ messages, temperature, max_tokens }) {
 }
 
 module.exports = async function handler(req, res) {
-    // Permessi CORS
+    // Permessi CORS originali
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
     if (req.method === 'OPTIONS') {
@@ -129,37 +125,28 @@ module.exports = async function handler(req, res) {
     }
 
     try {
-        const body = req.body || {};
-        const contesto = body.contesto;
+        // Controllo di sicurezza sul body
+        let body = req.body || {};
+        if (typeof body === 'string') {
+            try { body = JSON.parse(body); } catch (e) { body = {}; }
+        }
 
+        const contesto = body.contesto;
         if (!contesto) {
             return res.status(400).json({ errore: "Dati di contesto mancanti nella richiesta." });
         }
 
         // =========================================================
-        // 🎨 COPYWRITER MARKETING PER I POST SOCIAL
+        // 🔒 BLOCCO COPYWRITER MARKETING PER I POST (ORIGINALE)
         // =========================================================
         
-        let systemPrompt = `Sei un Senior Social Media Copywriter di un'Agenzia di Marketing di Lusso.
-Il tuo obiettivo è creare post magnetici, eleganti ed emozionali per promuovere servizi e prodotti di saloni di bellezza o barbieri.
-Usa emoji pertinenti ma senza esagerare.
-Struttura il post con:
-1. Un gancio iniziale (Hook) accattivante.
-2. Il corpo centrale che valorizza il servizio.
-3. Una Call to Action (CTA) chiara per invitare a prenotare.
-Rispondi SOLO con il testo finale del post, senza aggiungere premesse o commenti.`;
-
-        let userPromptText = `Crea un post per questo servizio:
-- Nome Salone: "${contesto.store_name || 'Il nostro Salone'}"
-- Nome Servizio: "${contesto.nome || 'Trattamento'}"
-- Descrizione Servizio: "${contesto.descrizione || ''}"
-- Prezzo: ${contesto.prezzo || '0'}€
-- Durata: ${contesto.durata || '30'} minuti
-- Link per prenotare: ${contesto.link_shop || 'https://www.civora.it'}`;
-
-        // Se l'utente ha inserito note extra o cliccato le shortcut (Promo, Regalo, ecc.) le aggiungiamo!
+        let systemPrompt = `Sei un Senior Social Media Copywriter da Agenzia di Marketing di Lusso. Crea post magnetici per promuovere servizi e prodotti. Rispondi solo con il testo del post.`;
+        
+        let userPromptText = `Dati: Negozio: "${contesto.store_name || 'Salone'}", Servizio: "${contesto.nome || 'Servizio'}", Prezzo: ${contesto.prezzo || '0'}€, Link: ${contesto.link_shop || 'https://www.civora.it'}`;
+        
+        // Aggiungo il pezzettino per i bottoni "Regalo/Promo" che hai sul gestionale
         if (contesto.note_extra) {
-            userPromptText += `\n\nRICHIESTA SPECIALE DEL NEGOZIANTE: "${contesto.note_extra}". Includi questa indicazione nel post.`;
+            userPromptText += `, Note extra: ${contesto.note_extra}`;
         }
 
         const postAiData = await callAiCompletion({
@@ -167,12 +154,16 @@ Rispondi SOLO con il testo finale del post, senza aggiungere premesse o commenti
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userPromptText }
             ],
-            temperature: 0.6, // Un po' di creatività per i post
+            temperature: 0.2,
             max_tokens: 500
         });
 
-        const postOutput = postAiData?.choices?.[0]?.message?.content || "C'è stato un problema nella generazione del post. Riprova tra poco.";
+        const postOutput = postAiData?.choices?.[0]?.message?.content || "";
         
+        if (!postOutput) {
+            throw new Error("L'Intelligenza Artificiale non ha restituito alcun testo.");
+        }
+
         res.status(200).json({ post: postOutput.trim() });
 
     } catch (error) {
