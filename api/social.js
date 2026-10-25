@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 
-// Inizializzazione ultra-sicura Firebase Admin (gestisce sia JSON che Base64)
+// Inizializzazione Firebase Admin
 if (!admin.apps.length) {
     try {
         let rawKey = (process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '').trim();
@@ -25,7 +25,7 @@ try {
 }
 
 module.exports = async function handler(req, res) {
-    // Permessi CORS universali
+    // Permessi CORS
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -38,16 +38,14 @@ module.exports = async function handler(req, res) {
 
     try {
         const body = req.body || {};
-        
-        // Riconoscimento intelligente chiavi (Google Vertex AI / Gemini prioritario, Groq come riserva)
-        const AI_API_KEY = (process.env.VERTEX_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GROQ_API_KEY || '').trim();
+        const GROQ_API_KEY = (process.env.GROQ_API_KEY || '').trim();
 
-        if (!AI_API_KEY) {
-            return res.status(500).json({ errore: "Manca la chiave d'accesso VERTEX_API_KEY nelle variabili d'ambiente di Vercel." });
+        if (!GROQ_API_KEY) {
+            return res.status(500).json({ errore: "Manca la chiave d'accesso GROQ_API_KEY nelle variabili d'ambiente di Vercel." });
         }
 
         // =========================================================================
-        // 🟢 BLOCCO WHATSAPP AUTOPILOT (POWERED BY GOOGLE VERTEX AI)
+        // 🟢 BLOCCO WHATSAPP AUTOPILOT (RECEPTIONIST PROFESSIONALE)
         // =========================================================================
         if (body.isWhatsAppAutoPilot && body.vendorId) {
             const vendorId = body.vendorId;
@@ -77,7 +75,6 @@ module.exports = async function handler(req, res) {
                 });
             }
 
-            // Normalizzazione numero telefono
             let cleanPhone = senderPhone.replace(/\D/g, '');
             if (!cleanPhone.startsWith('39') && cleanPhone.length === 10) cleanPhone = '39' + cleanPhone;
 
@@ -107,7 +104,7 @@ module.exports = async function handler(req, res) {
                 }
             }
 
-            // Raccolta Dati Salone & Cliente in Parallelo
+            // Raccolta dati da Firestore
             const [clientTipsDoc, servicesSnap, productsSnap, clientSnap, chatHistorySnap, trainingDoc, collaboratorsSnap, chatProfileDoc] = await Promise.all([
                 db.collection('vendors').doc(vendorId).collection('consiglicliente').doc('main').get().catch(() => ({ exists: false })),
                 db.collection('artisan_services').where('vendorId', '==', vendorId).get().catch(() => ({ docs: [] })),
@@ -119,7 +116,6 @@ module.exports = async function handler(req, res) {
                 db.collection('vendors').doc(vendorId).collection('whatsapp_chats').doc(cleanPhone).get().catch(() => ({ exists: false }))
             ]);
 
-            // Riconoscimento Cliente
             let isKnownClient = false;
             let clientFirstName = "";
             let clientFullName = "";
@@ -146,7 +142,7 @@ module.exports = async function handler(req, res) {
             const chatData = (chatProfileDoc && chatProfileDoc.exists) ? (chatProfileDoc.data() || {}) : null;
             const currentConsent = chatData ? chatData.aiConsentStatus : null;
 
-            // CASO 1: PRIMISSIMO CONTATTO ASSOLUTO
+            // CASO 1: PRIMISSIMO CONTATTO
             if (!chatData || !currentConsent) {
                 await chatDocRef.set({
                     phone: cleanPhone,
@@ -228,7 +224,7 @@ module.exports = async function handler(req, res) {
                 }
             }
 
-            // DATI REALI SALONE
+            // DATI SALONE
             const storeAddress = vendorData.address || "in salone";
             const storeHours = vendorData.public_opening_hours || vendorData.opening_hours || "Orari standard salone";
             const specializations = (vendorData.customization_specializations || []).join(', ');
@@ -237,7 +233,7 @@ module.exports = async function handler(req, res) {
             const parkingInfo = tipsData.parkingTips || "";
             const directionsInfo = tipsData.directions || "";
 
-            // Catalogo Servizi con ID esatto
+            // Catalogo Servizi con ID in chiaro
             const servicesCatalogDetailed = (servicesSnap.docs || [])
                 .map(d => ({ id: d.id, ...d.data() }))
                 .filter(s => s.productName && s.isAvailable !== false)
@@ -270,7 +266,7 @@ module.exports = async function handler(req, res) {
             }
             const teamListFormatted = teamEntries.join('\n');
 
-            // Storico conversazione
+            // Storico conversazione recente
             let conversationHistory = [];
             if (chatHistorySnap.docs && chatHistorySnap.docs.length > 0) {
                 conversationHistory = chatHistorySnap.docs.map(doc => ({
@@ -279,7 +275,7 @@ module.exports = async function handler(req, res) {
                 })).reverse();
             }
 
-            // Calendario Reale dei Prossimi 7 Giorni (Zero allucinazioni)
+            // Calendario Reale dei Prossimi 7 Giorni
             const now = new Date();
             const next7DaysFormatted = [];
             for (let i = 0; i < 7; i++) {
@@ -411,26 +407,22 @@ ${productsListFormatted || "Prodotti professionali disponibili in negozio."}`;
 
             let aiReply = `Ciao ${clientFullName || clientFirstName || ''}! Come posso aiutarti oggi da ${storeName}?`;
 
-            // Configurazione Motore AI (Google Gemini via Vertex API Key, con fallback Groq)
-            const isGoogleGemini = !!(process.env.VERTEX_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-            const AI_ENDPOINT = isGoogleGemini 
-                ? `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions?key=${AI_API_KEY}`
-                : "https://api.groq.com/openai/v1/chat/completions";
-
-            const AI_CANDIDATES = isGoogleGemini 
-                ? ["gemini-2.0-flash", "gemini-1.5-flash"] 
-                : ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"];
+            // I MODELLI UFFICIALI E VELOCI DELLA TUA DASHBOARD GROQ
+            const GROQ_CANDIDATES = [
+                "openai/gpt-oss-20b",
+                "openai/gpt-oss-120b"
+            ];
 
             const SLOTS_API_URL = "https://localmente-api.vercel.app/api/get-available-slots";
 
-            for (const modelId of AI_CANDIDATES) {
+            for (const modelId of GROQ_CANDIDATES) {
                 try {
                     const clonedMessages = JSON.parse(JSON.stringify(messagesPayload));
 
-                    const aiRes = await fetch(AI_ENDPOINT, {
+                    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                         method: "POST",
                         headers: {
-                            "Authorization": `Bearer ${AI_API_KEY}`,
+                            "Authorization": `Bearer ${GROQ_API_KEY}`,
                             "Content-Type": "application/json"
                         },
                         body: JSON.stringify({
@@ -443,9 +435,9 @@ ${productsListFormatted || "Prodotti professionali disponibili in negozio."}`;
                         })
                     });
 
-                    if (aiRes.ok) {
-                        const aiData = await aiRes.json();
-                        const choice = aiData.choices?.[0];
+                    if (groqRes.ok) {
+                        const groqData = await groqRes.json();
+                        const choice = groqData.choices?.[0];
                         const messageObj = choice?.message;
 
                         if (messageObj?.tool_calls && messageObj.tool_calls.length > 0) {
@@ -576,10 +568,10 @@ ${productsListFormatted || "Prodotti professionali disponibili in negozio."}`;
                                 content: JSON.stringify(toolResultPayload)
                             });
 
-                            const finalAiRes = await fetch(AI_ENDPOINT, {
+                            const finalGroqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                                 method: "POST",
                                 headers: {
-                                    "Authorization": `Bearer ${AI_API_KEY}`,
+                                    "Authorization": `Bearer ${GROQ_API_KEY}`,
                                     "Content-Type": "application/json"
                                 },
                                 body: JSON.stringify({
@@ -591,8 +583,8 @@ ${productsListFormatted || "Prodotti professionali disponibili in negozio."}`;
                                 })
                             });
 
-                            if (finalAiRes.ok) {
-                                const finalData = await finalAiRes.json();
+                            if (finalGroqRes.ok) {
+                                const finalData = await finalGroqRes.json();
                                 const finalContent = finalData.choices?.[0]?.message?.content?.trim();
                                 if (finalContent) {
                                     aiReply = finalContent;
@@ -642,7 +634,7 @@ ${productsListFormatted || "Prodotti professionali disponibili in negozio."}`;
         }
 
         // =========================================================
-        // 🔒 BLOCCO COPYWRITER MARKETING PER I POST (POWERED BY GOOGLE)
+        // 🔒 BLOCCO COPYWRITER MARKETING PER I POST (SIGILLATO)
         // =========================================================
         const contesto = body.contesto;
         if (!contesto) {
@@ -652,20 +644,14 @@ ${productsListFormatted || "Prodotti professionali disponibili in negozio."}`;
         let systemPrompt = `Sei un Senior Social Media Copywriter da Agenzia di Marketing di Lusso. Crea post magnetici per promuovere servizi e prodotti. Rispondi solo con il testo del post.`;
         let userPromptText = `Dati: Negozio: "${contesto.store_name || 'Salone'}", Servizio: "${contesto.nome || 'Servizio'}", Prezzo: ${contesto.prezzo || '0'}€, Link: ${contesto.link_shop || 'https://www.civora.it'}`;
 
-        const isGoogleForMarketing = !!(process.env.VERTEX_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-        const marketingEndpoint = isGoogleForMarketing
-            ? `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions?key=${AI_API_KEY}`
-            : "https://api.groq.com/openai/v1/chat/completions";
-        const marketingModel = isGoogleForMarketing ? "gemini-1.5-flash" : "openai/gpt-oss-20b";
-
-        const response = await fetch(marketingEndpoint, {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
             headers: {
-                "Authorization": `Bearer ${AI_API_KEY}`,
+                "Authorization": `Bearer ${GROQ_API_KEY}`,
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: marketingModel,
+                model: "openai/gpt-oss-20b",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPromptText }
