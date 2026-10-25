@@ -226,13 +226,13 @@ module.exports = async function handler(req, res) {
                weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
            });
 
-           const recognizedClientName = contextData.client?.name || '';
-           const salonName = contextData.storeInfo?.name || 'Salone';
-           const salonAddress = contextData.storeInfo?.address || '';
-           const salonPhone = contextData.storeInfo?.phone || '';
-           const servicesListText = contextData.services.length > 0
-               ? contextData.services.map(s => `- ${s.name} (ID: "${s.id}", Prezzo: ${s.price}€, Durata: ${s.duration} min)`).join('\n')
-               : '- Servizio Standard (ID: "default", Prezzo: 0€, Durata: 30 min)';
+           const recognizedClientName = contextData.client?.name || (body.pushName || '').trim();
+                              const salonName = contextData.storeInfo?.name || 'Salone';
+                              const salonAddress = contextData.storeInfo?.address || '';
+                              const salonPhone = contextData.storeInfo?.phone || '';
+                              const servicesListText = contextData.services.length > 0
+                                  ? contextData.services.map(s => `- ${s.name} (ID: "${s.id}", Prezzo: ${s.price}€, Durata: ${s.duration} min)`).join('\n')
+                                  : '- Servizio Standard (ID: "default", Prezzo: 0€, Durata: 30 min)';
 
            // 2. ISTRUZIONI INTELLIGENZA ARTIFICIALE E STORICO CHAT
            let historyText = "";
