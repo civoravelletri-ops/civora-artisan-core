@@ -199,21 +199,21 @@ REGOLE TASSATIVE DI COMPORTAMENTO:
                 { role: "user", content: messageText }
             ];
 
-            // 4. CHIAMATA A GROQ CON LLAMA 3.3 70B (RISPOSTA IN 800 MILLISECONDI)
-            const aiCall = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${GROQ_API_KEY}`,
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    model: "llama-3.3-70b-versatile",
-                    messages: messagesForAi,
-                    tools: tools,
-                    tool_choice: "auto",
-                    temperature: 0.6
-                })
-            });
+            // 4. CHIAMATA A GROQ (MODELLO STABILE CORAZZATO)
+                        const aiCall = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                            method: "POST",
+                            headers: {
+                                "Authorization": `Bearer ${GROQ_API_KEY}`,
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                                model: "llama3-70b-8192",
+                                messages: messagesForAi,
+                                tools: tools,
+                                tool_choice: "auto",
+                                temperature: 0.6
+                            })
+                        });
 
             if (!aiCall.ok) {
                 const errTxt = await aiCall.text();
@@ -336,17 +336,17 @@ REGOLE TASSATIVE DI COMPORTAMENTO:
                     });
 
                     const finalCall = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                        method: "POST",
-                        headers: {
-                            "Authorization": `Bearer ${GROQ_API_KEY}`,
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({
-                            model: "llama-3.3-70b-versatile",
-                            messages: messagesForAi,
-                            temperature: 0.6
-                        })
-                    });
+                                            method: "POST",
+                                            headers: {
+                                                "Authorization": `Bearer ${GROQ_API_KEY}`,
+                                                "Content-Type": "application/json"
+                                            },
+                                            body: JSON.stringify({
+                                                model: "llama3-70b-8192",
+                                                messages: messagesForAi,
+                                                temperature: 0.6
+                                            })
+                                        });
 
                     const finalData = await finalCall.json();
                     finalReplyText = finalData.choices?.[0]?.message?.content || finalReplyText;
@@ -541,9 +541,9 @@ REGOLE TASSATIVE DI COMPORTAMENTO:
         }
 
         const GROQ_TEXT_MODELS = dynamicModelsList.length > 0 ? dynamicModelsList : [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant"
-        ];
+                    "llama3-70b-8192",
+                    "llama-3.1-8b-instant"
+                ];
 
         let postGenerato = null;
         let lastChatError = null;
