@@ -356,7 +356,11 @@ module.exports = async function handler(req, res) {
                         const GROQ_CANDIDATES = [
                              "llama-3.3-70b-versatile",
                             "openai/gpt-oss-20b",
-                            "openai/gpt-oss-120b"
+                            "openai/gpt-oss-120b",
+            "llama-3.1-8b-instant",
+            "qwen/qwen3.6-27b",
+            "gemma2-9b-it"
+
                         ];
             
                         const SLOTS_API_URL = "https://localmente-api.vercel.app/api/get-available-slots";
