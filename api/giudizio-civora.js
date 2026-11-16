@@ -22,7 +22,7 @@ export default async function handler(req, res) {
             throw new Error("GROQ_API_KEY mancante nelle variabili d'ambiente di Vercel");
         }
 
-        const AI_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+        const AI_MODEL = 'qwen/qwen3.8-27b';
 
         // --- SISTEMA DI SMISTAMENTO (ROUTER CHE RISPETTA LA TUA PRIORITÀ) ---
         // La tua funzione originale è la priorità (se non c'è una "action" specifica)
