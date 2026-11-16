@@ -44,25 +44,25 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                 const isAgendaVisionTask = (task === "importazione_agenda_ia" || campo === "importazione_agenda_ia");
                 const isProductAutoFillTask = (task === "compila_prodotto_ia" || campo === "compila_prodotto_ia");
                 const isSimpleProductVisionTask = (task === "visione_immagine" || campo === "visione_immagine");
-        
+
                 const rawImageUrl = contesto.imageUrl || contesto.imageBase64 || "";
                 const imageUrlsList = Array.isArray(contesto.imageUrls)
                     ? contesto.imageUrls.filter(Boolean).slice(0, 3)
                     : (rawImageUrl ? [rawImageUrl] : []);
-        
+
                 const hasImages = imageUrlsList.length > 0;
                 const isVisionCall = isAgendaVisionTask || ((isProductAutoFillTask || isSimpleProductVisionTask) && hasImages);
                 const isJsonOutput = (task === "estimate_shipping_attributes" || isAgendaVisionTask || isProductAutoFillTask || isSimpleProductVisionTask);
-        
+
                 let messages = [];
-        
+
                 // 📸 GESTIONE SPECIALE VISION: IMPORTAZIONE VISIVA AGENDA DA FOTO
                 if (isAgendaVisionTask) {
                     const currentYear = contesto.currentYear || new Date().getFullYear();
-        
+
                     systemPrompt = `Sei un assistente esperto di OCR e decifratura di agende e calendari per saloni di bellezza e barbieri.
         L'anno corrente di riferimento da usare è il ${currentYear}.
-        
+
         REGOLE CRUCIALI:
         1. Estrai TUTTI gli appuntamenti visibili nell'immagine dall'inizio alla fine, SENZA OMETTERNE NESSUNO e senza fermarti a metà lista. Controlla ogni colonna, giorno o sezione.
         2. Se sull'agenda è indicata una settimana (es. "Settimana dal 28 Ottobre al 3 Novembre"), calcola con precisione il giorno progressivo per ogni riga della tabella:
@@ -74,7 +74,7 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
            - Sabato = 02 Novembre -> ${currentYear}-11-02
         3. Usa SEMPRE il formato data "YYYY-MM-DD" e l'ora "HH:MM" a 24 ore.
         4. Se per un appuntamento non è scritto il nome del cliente ma solo il servizio/lettera, lascia "cliente": "".
-        
+
         Rispondi ESCLUSIVAMENTE con un oggetto JSON valido contenente la chiave "prenotazioni", strutturato esattamente così:
         {
           "prenotazioni": [
@@ -88,7 +88,7 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
             }
           ]
         }`;
-        
+
                     messages = [
                         { role: "system", content: systemPrompt },
                         {
@@ -114,7 +114,7 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                     const categorieTesto = categorieList.length > 0
                         ? categorieList.map(c => `- "${c.name}" (Sottocategorie: ${(c.subcategories || []).join(', ') || 'nessuna'})`).join('\n')
                         : 'Nessuna lista fornita';
-        
+
                     const weightOptions = [
                         "Busta / Ultraleggero (Fino a 250g)",
                         "Pacco Piccolo (250g - 1kg)",
@@ -123,10 +123,10 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                         "Ingombrante (Oltre 5kg)",
                         "Fuori Misura / Consegna Dedicata (es. Bici, TV)"
                     ];
-        
+
                     systemPrompt = `Sei l'assistente esperto per i negozianti di Civora (Centro Commerciale locale).
         Il tuo compito è osservare le immagini del prodotto (se presenti) e/o leggere gli appunti dettati a voce dal negoziante, e compilare in italiano tutti i campi della scheda prodotto in modo preciso, reale e onesto.
-        
+
         REGOLE FONDAMENTALI:
         1. NON inventare marche, prezzi o caratteristiche che non vedi nelle foto e che il negoziante non ha detto. Se non sai il prezzo metti null. Se non sai la quantità metti null.
         2. Per "productCategory" e "subCategory", scegli ESATTAMENTE uno dei nomi presenti nella lista delle categorie abilitate del negozio (se nessuna è adatta, scegli la più vicina tra quelle disponibili).
@@ -161,23 +161,23 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
           "productColors": "",
           "productSizes": ""
         }`;
-        
+
                     const noteUtente = (contesto.noteUtente || contesto.testoVoce || "").trim();
                     const infoGiaInserite = [
                         contesto.nome ? `Nome già scritto: ${contesto.nome}` : '',
                         contesto.marca ? `Marca già scritta: ${contesto.marca}` : '',
                         contesto.prezzo ? `Prezzo già scritto: €${contesto.prezzo}` : ''
                     ].filter(Boolean).join(' | ');
-        
+
                     const textPrompt = `APPUNTI / VOCE DEL NEGOZIANTE:
         ${noteUtente || "Nessun appunto vocale fornito, basati sulle immagini."}
-        
+
         ${infoGiaInserite ? `DATI GIÀ PRESENTI NEL MODULO:\n${infoGiaInserite}\n` : ''}
         CATEGORIE ABILITATE DEL NEGOZIO (SCEGLI SOLO DA QUI):
         ${categorieTesto}
-        
+
         Analizza tutto e restituisci SOLO il JSON completo.`;
-        
+
                     if (hasImages) {
                         const contentArray = [{ type: "text", text: textPrompt }];
                         imageUrlsList.forEach(url => {
@@ -202,7 +202,7 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
           "titolo": "Nome prodotto chiaro e preciso",
           "descrizione": "Descrizione commerciale chiara e fedele a ciò che si vede nell'immagine (max 600 caratteri)"
         }`;
-        
+
                     const contentArray = [{ type: "text", text: "Analizza questa immagine del prodotto e restituisci titolo e descrizione in JSON." }];
                     imageUrlsList.forEach(url => {
                         contentArray.push({ type: "image_url", image_url: { url: url } });
@@ -217,7 +217,7 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                     const entityType = isProfile ? (contesto.myTypeStore || "salone di bellezza") : "cura della persona";
                     const baseInfo = `Attività: "${entityName}" (${entityType}).`;
                     const currentText = (contesto.currentFieldValue || "").trim();
-        
+
                     if (campo === "short_description_profile") {
                         userPromptContent = `${baseInfo}\nCrea un breve slogan ad effetto (massimo 120 caratteri) che catturi l'attenzione. Rispondi solo con lo slogan.`;
                     } else if (campo === "description_profile") {
@@ -229,7 +229,7 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                     } else {
                         userPromptContent = `${baseInfo}\nGenera il contenuto per "${campo}". Testo base: "${currentText}"`;
                     }
-        
+
                     messages = [
                         { role: "system", content: systemPrompt },
                         { role: "user", content: userPromptContent }
@@ -245,7 +245,7 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                     } else {
                         userPromptContent = `Genera il contenuto per "${campo}".`;
                     }
-        
+
                     messages = [
                         { role: "system", content: systemPrompt },
                         { role: "user", content: userPromptContent }
@@ -270,13 +270,13 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                     const marca = contesto.marca || contesto.brand || "";
                     const prezzo = contesto.prezzo || contesto.price || "";
                     const descrizioneAttuale = contesto.descrizione || contesto.shortDescription || "";
-        
+
                     systemPrompt = `Sei un copywriter esperto di e-commerce per negozi locali su Civora.
         Scrivi in italiano chiaro, naturale e convincente.
         Rispondi DIRETTAMENTE solo con il testo richiesto, senza virgolette, senza introduzioni (es. non scrivere "Ecco il titolo:") e senza spiegazioni.`;
-        
+
                     const schedaInfo = `Prodotto: "${nome}" | Categoria: "${categoria}"${marca ? ` | Marca: "${marca}"` : ''}${prezzo ? ` | Prezzo: €${prezzo}` : ''}${descrizioneAttuale ? ` | Note: "${descrizioneAttuale}"` : ''}`;
-        
+
                     if (task === "titolo") {
                         userPromptContent = `${schedaInfo}\nMigliora e rendi chiaro, professionale e appetibile il Titolo di questo prodotto (massimo 70 caratteri). Rispondi solo con il nuovo titolo.`;
                     } else if (task === "descrizione_breve") {
@@ -290,32 +290,31 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                     } else {
                         userPromptContent = `${schedaInfo}\nGenera un contenuto conciso e utile per "${task}".`;
                     }
-        
+
                     messages = [
                         { role: "system", content: systemPrompt },
                         { role: "user", content: userPromptContent }
                     ];
                 }
-        
+
                 let responseFormat = null;
                 if (isJsonOutput) {
                     responseFormat = { "type": "json_object" };
                 }
-        
+
                 const candidateModels = isVisionCall
-                    ? [
-                        "qwen/qwen3.6-27b",
-                        "meta-llama/llama-4-scout-17b-16e-instruct"
-                      ]
-                    : [
-                        "qwen/qwen3.6-27b",
-                        "openai/gpt-oss-20b",
-                        "openai/gpt-oss-120b"
-                      ];
-        
+                            ? [
+                                "qwen/qwen3.8-27b"
+                              ]
+                            : [
+                                "qwen/qwen3.8-27b",
+                                "openai/gpt-oss-20b",
+                                "openai/gpt-oss-120b"
+                              ];
+
                 let testoGenerato = null;
                 let lastError = null;
-        
+
                 for (const modelCandidate of candidateModels) {
                     try {
                         const bodyRequest = {
@@ -324,18 +323,18 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                             temperature: (isAgendaVisionTask || isProductAutoFillTask) ? 0.15 : 0.7,
                             max_tokens: (isAgendaVisionTask || isProductAutoFillTask) ? 4096 : 800
                         };
-        
+
                         // Disattiva il ragionamento su Qwen per evitare consumo inutile di token
                         if (modelCandidate.includes("qwen")) {
                             bodyRequest.reasoning_effort = "none";
                         } else if (modelCandidate.includes("gpt-oss")) {
                             bodyRequest.include_reasoning = false;
                         }
-        
+
                         if (responseFormat) {
                             bodyRequest.response_format = responseFormat;
                         }
-        
+
                         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                             method: "POST",
                             headers: {
@@ -344,9 +343,9 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                             },
                             body: JSON.stringify(bodyRequest)
                         });
-        
+
                         const data = await response.json();
-        
+
                         if (response.ok && data.choices && data.choices.length > 0) {
                             const choice = data.choices[0];
                             testoGenerato = (choice.message?.content || "").trim();
@@ -363,25 +362,25 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                         lastError = callErr;
                     }
                 }
-        
+
                 if (!testoGenerato) {
                     return res.status(500).json({ errore: "Errore durante la generazione: " + (lastError?.message || "Servizio non disponibile") });
                 }
-        
+
                 // === PULIZIA FINALE SICURA ===
                 testoGenerato = testoGenerato.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
                 testoGenerato = testoGenerato.replace(/<\/?think>/gi, "").trim();
-        
+
                 if (/Draft Generation|Mental Refinement|thinking process/i.test(testoGenerato)) {
                     const splitDraft = testoGenerato.split(/(?:Draft Generation[^\n]*\n|Mental Refinement[^\n]*\n|thinking process[^\n]*\n)/i);
                     if (splitDraft.length > 1) {
                         testoGenerato = splitDraft[splitDraft.length - 1].trim();
                     }
                 }
-        
+
                 testoGenerato = testoGenerato.replace(/^\s*\d+\.\s+\*\*[^*]+\*\*[\s\S]*?\n\n/gim, "").trim();
                 testoGenerato = testoGenerato.replace(/^["']+|["']+$/g, "").trim();
-        
+
                 // Risposte JSON strutturate
                 if (isJsonOutput) {
                     try {
@@ -396,7 +395,7 @@ Rispondi DIRETTAMENTE con il contenuto richiesto senza introduzioni, senza virgo
                         return res.status(200).json({ risultato: testoGenerato });
                     }
                 }
-        
+
                 return res.status(200).json({ risultato: testoGenerato });
 
     } catch (error) {
