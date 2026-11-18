@@ -27,10 +27,23 @@ const VERTEX_FALLBACK_MODELS = [
     'gemini-1.5-pro'
 ];
 
+const ALLOWED_ORIGINS = [
+    'https://localmente-v3-core.web.app',
+    'https://localmente-v3-core.firebaseapp.com',
+    'https://localmente-site.web.app',
+    'https://localmente-site.firebaseapp.com',
+    'https://www.civora.it',
+    'https://civora.it'
+];
+
 module.exports = async function handler(req, res) {
-    // Permetti al tuo sito di chiamare questa funzione (CORS)
+    const origin = req.headers.origin;
+    if (ALLOWED_ORIGINS.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else if (req.headers.host && (req.headers.host.includes('localhost') || req.headers.host.includes('127.0.0.1'))) {
+        res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    }
     res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
 
@@ -237,44 +250,44 @@ module.exports = async function handler(req, res) {
            // 2. ISTRUZIONI INTELLIGENZA ARTIFICIALE E STORICO CHAT
            let historyText = "";
            if (contextData.chatHistory && Array.isArray(contextData.chatHistory) && contextData.chatHistory.length > 0) {
-               historyText = "\nSTORICO CHAT RECENTE CON QUESTO CLIENTE:\n" + 
+               historyText = "\nSTORICO CHAT RECENTE CON QUESTO CLIENTE:\n" +
                    contextData.chatHistory.map(m => m.role === 'assistant' ? `Tu (Salone): ${m.content}` : `Cliente: ${m.content}`).join('\n') + "\n";
            }
 
            const autoPilotSystemPrompt = `Sei l'assistente virtuale WhatsApp del salone "${salonName}".
            Oggi è esattamente ${todayReadable} (Data di riferimento: ${todayRome}).
-           
+
            DATI ATTIVITÀ:
            - Nome Salone: ${salonName}
            - Indirizzo esatto: ${salonAddress || 'in salone'}
            - Telefono: ${salonPhone || ''}
            ${recognizedClientName ? `- Nome Cliente: "${recognizedClientName}". Salutalo per nome!` : '- Nome Cliente: Non noto.'}
-           
+
            LISTINO SERVIZI:
            ${servicesListText}
            ${historyText}
-           
+
            REGOLE CRUCIALI SULLE DATE E ORARI (ATTENZIONE MASSIMA):
            1. CALCOLO DATE:
               - Se il cliente dice "oggi", la data è ${todayRome}.
               - Se dice "domani" o "dopodomani", calcola la data esatta successiva nel formato AAAA-MM-GG.
               - Se dice un giorno della settimana (es. "martedì", "mercoledì"), calcola il primo giorno utile corrispondente futuro in formato AAAA-MM-GG.
               - Metti SEMPRE la data calcolata nel campo "date". Non mettere mai ${todayRome} se ha chiesto un altro giorno!
-           
+
            2. FORMATO ORA (24h HH:MM):
               - Metti sempre l'ora nel formato esatto a due cifre "HH:MM" (es: "12:00", "15:30"). Se dice "a mezzogiorno", scrivi "12:00". Se dice "alle 4", scrivi "16:00".
-           
+
            3. RECUPERO DALLO STORICO QUANDO DICE "LO PRENOTO" / "CONFERMO" / "SÌ":
               - Se il cliente conferma (es: "lo prenoto", "ok per quell'ora", "sì"), guarda SUBITO lo STORICO CHAT RECENTE sopra!
               - Recupera da lì la data, l'ora e il servizio di cui stavate parlando.
               - Inserisci nel JSON "date", "time", "serviceId" e "serviceName" recuperandoli dall'ultimo orario concordato!
-           
+
            4. INTENTI:
               - "confirm_booking": se accetta, conferma o dice sì/ok a un orario concordato o proposto.
               - "ask_availability": se chiede se c'è posto, orari liberi o propone data/ora.
               - "info_question": se chiede dove siete, prezzi, durata o info generali.
               - "general_greeting": se saluta e basta.
-           
+
            Rispondi ESCLUSIVAMENTE con un JSON valido in questo formato esatto:
            {
             "intent": "ask_availability",
@@ -320,7 +333,7 @@ module.exports = async function handler(req, res) {
                        body: JSON.stringify({
                            model: modelId,
                            messages: groqMessages,
-                           temperature: 0.1, 
+                           temperature: 0.1,
                            max_tokens: 800
                        })
                    });
@@ -486,7 +499,7 @@ module.exports = async function handler(req, res) {
            // 5. INVIA LA RISPOSTA SU WHATSAPP TRAMITE IL GATEWAY
            try {
                const targetRecipient = body.senderJid || senderPhone; // 👈 PRENDE L'INDIRIZZO REALE (@lid o @s.whatsapp.net)!
-           
+
                const sendRes = await fetch(`${GATEWAY_BASE_URL}/send-message`, {
                    method: 'POST',
                    headers: { 'Content-Type': 'application/json' },
