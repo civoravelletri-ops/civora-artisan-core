@@ -37,7 +37,25 @@ async function imageToGeminiPart(urlOrBase64) {
     }
 
     if (urlOrBase64.startsWith('http://') || urlOrBase64.startsWith('https://')) {
-        const imgRes = await fetch(urlOrBase64, { signal: AbortSignal.timeout(12000) });
+            let host = '';
+            try {
+                host = new URL(urlOrBase64).hostname.toLowerCase();
+            } catch (e) {
+                return null;
+            }
+            if (
+                host === 'localhost' ||
+                host.startsWith('127.') ||
+                host.startsWith('10.') ||
+                host.startsWith('192.168.') ||
+                host.startsWith('169.254.') ||
+                /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+                host === '::1' ||
+                host.endsWith('.local')
+            ) {
+                return null;
+            }
+            const imgRes = await fetch(urlOrBase64, { signal: AbortSignal.timeout(12000) });
         if (!imgRes.ok) {
             throw new Error(`Impossibile scaricare immagine (${imgRes.status})`);
         }
@@ -121,11 +139,25 @@ async function callGeminiMagia({ systemPrompt, userText, imageUrls = [], tempera
     return (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
 }
 
+const ALLOWED_ORIGINS = [
+    'https://localmente-v3-core.web.app',
+    'https://localmente-v3-core.firebaseapp.com',
+    'https://localmente-site.web.app',
+    'https://localmente-site.firebaseapp.com',
+    'https://www.civora.it',
+    'https://civora.it'
+];
+
 module.exports = async function handler(req, res) {
+    const origin = req.headers.origin;
+    if (ALLOWED_ORIGINS.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else if (req.headers.host && (req.headers.host.includes('localhost') || req.headers.host.includes('127.0.0.1'))) {
+        res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    }
     res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
 
     if (req.method === 'OPTIONS') {
         res.status(200).end();
