@@ -1,8 +1,22 @@
+const ALLOWED_ORIGINS = [
+    'https://localmente-v3-core.web.app',
+    'https://localmente-v3-core.firebaseapp.com',
+    'https://localmente-site.web.app',
+    'https://localmente-site.firebaseapp.com',
+    'https://www.civora.it',
+    'https://civora.it'
+];
+
 module.exports = async function handler(req, res) {
+    const origin = req.headers.origin;
+    if (ALLOWED_ORIGINS.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else if (req.headers.host && (req.headers.host.includes('localhost') || req.headers.host.includes('127.0.0.1'))) {
+        res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    }
     res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
 
     if (req.method === 'OPTIONS') {
         res.status(200).end();
