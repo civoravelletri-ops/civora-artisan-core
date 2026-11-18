@@ -189,9 +189,10 @@ module.exports = async function handler(req, res) {
        // 🤖 PILOTA AUTOMATICO WHATSAPP 24/7 (INGEGNERIA CIVORA BUSINESS: MEMORIA + AGENDA REALE)
        // =========================================================================
        if (body.isWhatsAppAutoPilot && body.vendorId && body.senderPhone) {
-           const vendorId = body.vendorId;
-           const senderPhone = body.senderPhone;
-           const messageText = (body.messageText || "").trim();
+                  return res.status(410).json({ error: 'Funzione spostata su civora-ai-core.' });
+                  const vendorId = body.vendorId;
+                  const senderPhone = body.senderPhone;
+                  const messageText = (body.messageText || "").trim();
 
            if (!messageText) {
                return res.status(200).json({ status: "skipped", reason: "Messaggio vuoto" });
