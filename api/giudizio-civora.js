@@ -314,76 +314,9 @@ ${logisticInstructions}
                                         // =====================================================================================
                                                 // AZIONE 4: INVIO SMS OTP TRAMITE MACRODROID (PONTE SMARTPHONE) - AGGIORNATO CON IL TUO URL
                                                 // =====================================================================================
-                                                else if (action === 'invia-sms-negoziante') {
-                                                    const { phone, otp, vendorName } = payload;
-
-                                                    // Messaggio che riceverà il cliente sul suo cellulare
-                                                    const messaggioSms = `Civora: Il tuo codice di conferma per ${vendorName} e' ${otp}`;
-
-                                                    // RECUPERO IL TUO INDIRIZZO MACRODROID DALLE VARIABILI D'AMBIENTE
-                                                    const MACRODROID_WEBHOOK_URL = process.env.SMS_GATEWAY_URL;
-
-                                                    if (!MACRODROID_WEBHOOK_URL) {
-                                                        console.error("SMS_GATEWAY_URL non configurato nelle variabili d'ambiente di Vercel.");
-                                                        return res.status(500).json({ error: 'Configurazione SMS MacroDroid mancante. Controlla le variabili d\'ambiente di Vercel.' });
-                                                    }
-
-                                                    try {
-                                                        // CHIAMIAMO IL TUO WEBHOOK DI MACRODROID CON I PARAMETRI CORRETTI
-                                                        const finalMacroDroidUrl = `${MACRODROID_WEBHOOK_URL}?phone=${encodeURIComponent(phone)}&message=${encodeURIComponent(messaggioSms)}`;
-
-                                                        // Per il debug, possiamo stampare l'URL che viene chiamato (verrà visualizzato nei log di Vercel)
-                                                        console.log("Chiamando MacroDroid Webhook:", finalMacroDroidUrl);
-
-                                                        const macroDroidResponse = await fetch(finalMacroDroidUrl);
-
-                                                        if (!macroDroidResponse.ok) {
-                                                            // Se MacroDroid non risponde "OK", catturiamo più dettagli sull'errore
-                                                            const responseText = await macroDroidResponse.text();
-                                                            console.error("MacroDroid Webhook non ha risposto OK:", macroDroidResponse.status, responseText);
-                                                            throw new Error(`MacroDroid ha risposto con errore: ${responseText || macroDroidResponse.statusText}`);
-                                                        }
-
-                                                        return res.status(200).json({ success: true, message: 'Segnale SMS inviato allo smartphone tramite MacroDroid.' });
-                                                    } catch (error) {
-                                                        console.error("Errore invio SMS tramite MacroDroid:", error);
-                                                        // Dettagliamo l'errore per il frontend
-                                                        return res.status(500).json({ error: `Errore invio SMS: ${error.message}` });
-                                                    }
-                                                }
-
-                                        // =====================================================================================
-                                                // AZIONE 5: SALVATAGGIO PRENOTAZIONE NEL PROFILO NEGOZIANTE - AGGIUSTATO PER ERRORE 500
-                                                // =====================================================================================
-                                                else if (action === 'salva-prenotazione-ai') {
-                                                    // Estraiamo solo i dati che vogliamo salvare nel documento di Firebase
-                                                    const { vendorId, chatTranscript, serviceId, serviceName, customerPhone, totalPrice } = payload;
-
-                                                    try {
-                                                        // USIAMO IL METODO PIÙ ROBUSTO PER SALVARE SU FIREBASE CON L'ADMIN SDK
-                                                        // Questo dovrebbe risolvere l'errore 500 che stavi vedendo.
-                                                        const bookingsCollectionRef = db.collection('vendors').doc(vendorId).collection('bookings');
-
-                                                        await bookingsCollectionRef.add({
-                                                            serviceId: serviceId,
-                                                            serviceName: serviceName,
-                                                            customerPhone: customerPhone,
-                                                            totalPrice: totalPrice, // Assicurati che totalPrice sia un numero
-                                                            chatTranscript: JSON.stringify(chatTranscript), // Salva la chat completa come stringa JSON
-                                                            createdAt: admin.firestore.FieldValue.serverTimestamp(), // Usa il timestamp del server
-                                                            status: 'pending-ai-quote', // Nuovo status per le prenotazioni generate da AI
-                                                            type: 'ai_concierge_booking', // Tipo specifico per identificare questa prenotazione AI
-                                                            vendorId: vendorId // Aggiungiamo vendorId anche nel documento di booking per facilitare le query
-                                                            // Puoi aggiungere altri campi qui se necessario, es. customerEmail, customerName se li passi nel payload
-                                                        });
-
-                                                        return res.status(200).json({ success: true, message: 'Prenotazione AI salvata con successo.' });
-                                                    } catch (error) {
-                                                        console.error("Errore salvataggio prenotazione AI in Firebase:", error);
-                                                        // Dettagliamo l'errore per il debug
-                                                        return res.status(500).json({ error: 'Errore salvataggio prenotazione AI', details: error.message });
-                                                    }
-                                                }
+                                                else if (action === 'invia-sms-negoziante' || action === 'salva-prenotazione-ai') {
+                                                                                            return res.status(410).json({ error: 'Funzione dismessa.' });
+                                                                                        }
 
                                         // Se l'azione non è riconosciuta
                                         else {
