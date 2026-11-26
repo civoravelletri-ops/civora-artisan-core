@@ -27,7 +27,6 @@ if (!admin.apps.length) {
 
 // ==================================================================
 // 2. MOTORE CORE API: GOOGLE VERTEX AI (Gemini 3.5 Flash-Lite)
-//    Zero dipendenze esterne, usa la variabile GOOGLE_CREDENTIALS
 // ==================================================================
 let cachedGoogleToken = null;
 let cachedTokenExpiry = 0;
@@ -454,7 +453,7 @@ async function handleSyncInventory(req, res) {
 }
 
 // ==================================================================
-// 8. LOGICA PERSONAL SHOPPER (CARRELLI) - CHEF & MACELLAIO (CATALOGO COMPLETO)
+// 8. LOGICA PERSONAL SHOPPER (CARRELLI) - CHEF & MACELLAIO (CATALOGO COMPLETO + PESI ESATTI)
 // ==================================================================
 async function handlePersonalShopperCarrelli(req, res) {
     const { contesto } = req.body;
@@ -468,7 +467,6 @@ async function handlePersonalShopperCarrelli(req, res) {
         return null;
     }
 
-    // Invia TUTTI i prodotti disponibili (nessun taglio/slice!), tenendo solo i campi essenziali
     const prodottiLeggeri = (contesto.prodotti || []).map(p => {
         const rawVars = Array.isArray(p.variants) ? p.variants : [];
         const availableVars = rawVars
@@ -520,33 +518,34 @@ async function handlePersonalShopperCarrelli(req, res) {
 
     REGOLE FONDAMENTALI SULLE QUANTITÀ E SUL PESO (NON SBAGLIARE MAI):
     1. CALCOLA IN GRAMMI A PERSONA, NON A "PEZZI":
-       - Carne o Pesce: calcola circa 200g - 300g TOTALI a persona (massimo 350g se è l'unico piatto forte).
+       - Carne o Pesce: cerca di avvicinarti a circa 200g - 350g a persona, ma se i formati minimi in negozio partono da 400g o 500g scegli comunque il formato più piccolo disponibile con "qty": 1.
        - Contorni / Frutta / Verdura: circa 150g - 250g a persona.
        - Salumi / Formaggi: circa 80g - 120g a persona.
     2. CONTROLLA SEMPRE "formati" E "peso_grammi" PRIMA DI DECIDERE "qty":
-       - Se un formato pesa già 500g (0.5 kg) o 1000g (1 kg), NON mettere mai "qty": 2 per 1 o 2 persone!
-       - Esempio pratico: se siamo in 2 persone e la confezione pesa 500g, metti "qty": 1 (500g bastano per 2!). Se nel negozio esiste un formato più piccolo (es. 250g o 300g) e ti serve una porzione per 1 sola persona, scegli quel "variantId" piccolo e metti "qty": 1!
-       - Se il nome o la nota del prodotto indica già il peso (es. "confezione 500g", "da mezzo kg") e non ha formati piccoli, metti "qty": 1 (MAI "qty": 2 per 1 persona!).
+       - Se un formato pesa già 400g, 500g (0.5 kg) o 1000g (1 kg), NON mettere mai "qty": 2 per 1 o 2 persone!
+       - Se il nome o la nota del prodotto indica già il peso (es. "confezione 500g", "da mezzo kg") e non ha formati piccoli, metti "qty": 1.
     3. DIVISIONE GUSTI TRA PERSONE (ES. UNO VUOLE POLLO, UNO CARNE ROSSA):
-       - Se 2 persone hanno preferenze diverse (es. uno pollo/carne bianca, l'altro carne rossa), scegli 1 porzione da ~250g-350g di pollo per lui e 1 porzione da ~250g-350g di carne rossa per lei. NON raddoppiare entrambi!
-       - Se proponi una grigliata mista con 3 tagli diversi per 2 persone, fai in modo che la SOMMA di tutte le carni sia circa 500g - 700g totali, scegliendo i formati più piccoli (200g-300g ciascuno).
-    4. RISPETTO DI DIETE, ALLERGENI E RICHIESTE:
+       - Se 2 persone hanno preferenze diverse (es. uno pollo/carne bianca, l'altro carne rossa), scegli 1 solo formato più piccolo disponibile di carne bianca per lui e 1 solo formato più piccolo disponibile di carne rossa per lei. NON raddoppiare!
+       - Se proponi una grigliata mista con 3 tagli diversi, scegli i formati più piccoli disponibili (es. 200g-300g ciascuno) in modo che il peso totale non sia esagerato.
+    4. REGOLA D'ORO DI MATEMATICA E COERENZA (FONDAMENTALE!):
+       - Fai SEMPRE la SOMMA ESATTA dei "peso_grammi" * "qty" dei prodotti che hai inserito in ogni carrello!
+       - Esempio: se hai scelto un formato da 500g (0.5 kg) + un formato da 300g (0.3 kg), la somma esatta è **800g** (circa 400g a persona). NON scrivere MAI "circa 500g" o "circa 600g" se i prodotti sommati pesano 700g o 800g! Scrivi sempre il peso totale REALE esatto (es. "Totale: 800g di carne").
+       - In "descrizione" e "messaggioConversazione", nomina ESATTAMENTE gli stessi prodotti che hai inserito dentro "prodotti" (es. non scrivere "petto di pollo" se dentro al carrello hai messo "Ali di pollo").
+    5. RISPETTO DI DIETE, ALLERGENI E RICHIESTE:
        - Controlla i campi "famiglia", "categoria", "note" e "allergeni". Se il cliente dice "senza maiale", escludi Suino/Salsiccia/Pancetta/Norcineria suina. Se chiede carne bianca, guarda "famiglia": "Carni Bianche".
-    5. USA SOLO PRODOTTI REALI DELLA LISTA:
+    6. USA SOLO PRODOTTI REALI DELLA LISTA:
        - Usa ESATTAMENTE gli "id" e i "variantId" (se il prodotto ha "formati") presenti nella lista "Prodotti Negozio". Non inventare ID o prezzi.
 
     ANALIZZA LA RICHIESTA DELL'UTENTE:
     - Se l'utente scrive solo un saluto generico (es. "ciao", "salve", "buongiorno") lascia l'array "carrelli" completamente VUOTO [].
-    - Altrimenti, crea esattamente 3 diverse proposte di carrelli (1. Classico/Equilibrato, 2. Selezione Gourmet/Pregiata, 3. Pratico/Leggero o Conveniente) spiegando brevemente le dosi pensate per le persone indicate.
+    - Altrimenti, crea esattamente 3 diverse proposte di carrelli (1. Classico/Equilibrato, 2. Selezione Gourmet/Pregiata, 3. Pratico/Leggero o Conveniente).
 
     REQUISITI DI RISPOSTA:
-    Rispondi SOLO ed ESCLUSIVAMENTE con un JSON valido con questa struttura:
+    Rispondi SOLO ed ESCLUSIVAMENTE con un JSON valido seguendo ESATTAMENTE questo ordine di campi (prima compili i carrelli con i prodotti e poi calcoli le descrizioni e il messaggio finale coerenti con il peso reale):
     {
-      "messaggioConversazione": "Testo caloroso e amichevole dove spieghi i 3 menu pensati con le dosi giuste per le persone.",
       "carrelli": [
         {
           "nome": "Nome proposta (es. Grigliata Equilibrata)",
-          "descrizione": "Breve spiegazione del menu e del peso totale stimato a persona",
           "prodotti": [
             {
               "productId": "ID esatto del prodotto",
@@ -555,13 +554,15 @@ async function handlePersonalShopperCarrelli(req, res) {
               "qty": 1,
               "price": 3.50
             }
-          ]
+          ],
+          "descrizione": "Breve spiegazione del menu citando i tagli scelti e la somma REALE esatta dei grammi totali (es. Totale reale: 800g di carne)."
         }
-      ]
+      ],
+      "messaggioConversazione": "Testo caloroso e amichevole dove riassumi le 3 proposte citando ESATTAMENTE i tagli inseriti nei carrelli e i pesi reali sommati."
     }`;
 
     const promptUtente = `Richiesta Utente: "${contesto.richiestaUtente}". Prodotti Negozio: ${JSON.stringify(prodottiLeggeri)}`;
-    const aiResponse = await callGeminiAPI(systemPrompt, promptUtente, 0.3, true);
+    const aiResponse = await callGeminiAPI(systemPrompt, promptUtente, 0.2, true);
 
     try {
         return res.status(200).json(parseJsonSafe(aiResponse));
