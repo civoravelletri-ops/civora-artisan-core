@@ -50,11 +50,8 @@ async function getActiveGroqModel(groqApiKey) {
                     .filter(id => !id.includes("whisper") && !id.includes("guard") && !id.includes("embed"));
 
                 if (chatModels.length > 0) {
-                                    // Preferisce i modelli più intelligenti (70B / 3.3) per fare i calcoli giusti su grammi e porzioni
-                                    const chosen = chatModels.find(id => id.includes("llama-3.3-70b"))
-                                        || chatModels.find(id => id.includes("70b") || id.includes("120b"))
-                                        || chatModels.find(id => id.includes("20b") || id.includes("8b") || id.includes("oss"))
-                                        || chatModels[0];
+                                    // Cerca preferibilmente modelli veloci e attivi (come gpt-oss o altri), altrimenti prende il primo disponibile
+                                    const chosen = chatModels.find(id => id.includes("20b") || id.includes("8b") || id.includes("oss")) || chatModels[0];
                                     cachedGroqModel = chosen;
                                     lastModelCheckTime = now;
                                     console.log("[Groq Auto-Detect] Modello attivo rilevato e impostato:", cachedGroqModel);
