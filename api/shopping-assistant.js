@@ -409,38 +409,100 @@ async function handleSyncInventory(req, res, groqApiKey) {
 }
 
 // ==================================================================
-// 8. LOGICA PERSONAL SHOPPER (CARRELLI)
+// 8. LOGICA PERSONAL SHOPPER (CARRELLI) - VERSIONE CHEF & MACELLAIO
 // ==================================================================
 async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
     const { contesto } = req.body;
 
-    // Filtra e alleggerisce i prodotti: invia all'AI solo ID, nome e prezzo senza link di immagini o descrizioni pesanti
-    const prodottiLeggeri = (contesto.prodotti || []).map(p => ({
-        id: p.id || p.productId,
-        nome: p.name || p.productName || p.title,
-        prezzo: p.price,
-        categoria: p.category || p.productCategory || ''
-    })).slice(0, 35); // Limita a 35 prodotti per stare sempre sotto il limite di memoria
+    function convertUnitToGrams(qty, unit) {
+        const q = parseFloat(qty) || 0;
+        const u = String(unit || '').toLowerCase().trim();
+        if (u === 'kg') return Math.round(q * 1000);
+        if (u === 'hg') return Math.round(q * 100);
+        if (u === 'g') return Math.round(q);
+        return null;
+    }
 
-    const systemPrompt = `Sei un Personal Shopper intelligente ed amichevole per il negozio "${contesto.store_name}".
-    Il tuo obiettivo è consigliare il cliente e guidarlo nella spesa.
+    const prodottiLeggeri = (contesto.prodotti || []).map(p => {
+        const rawVars = Array.isArray(p.variants) ? p.variants : [];
+        const availableVars = rawVars
+            .filter(v => v.stock === undefined || v.stock === null || Number(v.stock) > 0)
+            .map(v => {
+                const grams = convertUnitToGrams(v.quantity, v.unit);
+                return {
+                    variantId: v.id,
+                    formato: `${v.quantity || ''} ${v.unit || ''}`.trim() + (grams ? ` (${grams}g)` : ''),
+                    peso_grammi: grams,
+                    prezzo: parseFloat(v.price || 0)
+                };
+            });
+
+        if (rawVars.length > 0 && availableVars.length === 0) {
+            return null;
+        }
+
+        const itemObj = {
+            id: p.id || p.productId,
+            nome: p.name || p.productName || p.title,
+            categoria: p.category || p.productCategory || ''
+        };
+
+        if (p.famigliaCarne) itemObj.famiglia = p.famigliaCarne;
+        if (p.taglio) itemObj.taglio = p.taglio;
+        if (p.frollatura) itemObj.frollatura_giorni = p.frollatura;
+        if (p.coltivazione) itemObj.coltivazione = p.coltivazione;
+        if (p.certificazioni) itemObj.certificazioni = p.certificazioni;
+        if (p.preparazionePesce) itemObj.preparazione = p.preparazionePesce;
+        if (p.shortDesc) itemObj.note = String(p.shortDesc).slice(0, 90);
+        if (p.allergeni) itemObj.allergeni = p.allergeni;
+
+        if (availableVars.length > 0) {
+            itemObj.formati = availableVars;
+        } else {
+            itemObj.formato = p.unit || 'pz';
+            itemObj.prezzo = parseFloat(p.price || 0);
+        }
+
+        return itemObj;
+    }).filter(Boolean).slice(0, 80);
+
+    const systemPrompt = `Sei un Personal Shopper esperto di gastronomia, macelleria, pescheria e mercato fresco per il negozio "${contesto.store_name}".
+    Il tuo obiettivo è consigliare il cliente e comporre spese REALISTICHE, EQUILIBRATE e SENSATE basate sulle porzioni vere.
+
+    REGOLE FONDAMENTALI SULLE QUANTITÀ E SUL PESO (NON SBAGLIARE MAI):
+    1. CALCOLA IN GRAMMI A PERSONA, NON A "PEZZI":
+       - Carne o Pesce: calcola circa 200g - 300g TOTALI a persona (massimo 350g se è l'unico piatto forte).
+       - Contorni / Frutta / Verdura: circa 150g - 250g a persona.
+       - Salumi / Formaggi: circa 80g - 120g a persona.
+    2. CONTROLLA SEMPRE "formati" E "peso_grammi" PRIMA DI DECIDERE "qty":
+       - Se un formato pesa già 500g (0.5 kg) o 1000g (1 kg), NON mettere mai "qty": 2 per 1 o 2 persone!
+       - Esempio pratico: se siamo in 2 persone e la confezione pesa 500g, metti "qty": 1 (500g bastano per 2!). Se nel negozio esiste un formato più piccolo (es. 250g o 300g) e ti serve una porzione per 1 sola persona, scegli quel "variantId" piccolo e metti "qty": 1!
+       - Se il nome o la nota del prodotto indica già il peso (es. "confezione 500g", "da mezzo kg") e non ha formati piccoli, metti "qty": 1 (MAI "qty": 2 per 1 persona!).
+    3. DIVISIONE GUSTI TRA PERSONE (ES. UNO VUOLE POLLO, UNO CARNE ROSSA):
+       - Se 2 persone hanno preferenze diverse (es. uno pollo/carne bianca, l'altro carne rossa), scegli 1 porzione da ~250g-350g di pollo per lui e 1 porzione da ~250g-350g di carne rossa per lei. NON raddoppiare entrambi!
+       - Se proponi una grigliata mista con 3 tagli diversi per 2 persone, fai in modo che la SOMMA di tutte le carni sia circa 500g - 700g totali, scegliendo i formati più piccoli (200g-300g ciascuno).
+    4. RISPETTO DI DIETE, ALLERGENI E RICHIESTE:
+       - Controlla i campi "famiglia", "categoria", "note" e "allergeni". Se il cliente dice "senza maiale", escludi Suino/Salsiccia/Pancetta/Norcineria suina. Se chiede carne bianca, guarda "famiglia": "Carni Bianche".
+    5. USA SOLO PRODOTTI REALI DELLA LISTA:
+       - Usa ESATTAMENTE gli "id" e i "variantId" (se il prodotto ha "formati") presenti nella lista "Prodotti Negozio". Non inventare ID o prezzi.
 
     ANALIZZA LA RICHIESTA DELL'UTENTE:
     - Se l'utente scrive solo un saluto generico (es. "ciao", "salve", "buongiorno") lascia l'array "carrelli" completamente VUOTO [].
-    - Se l'utente esprime un'esigenza reale di spesa (es. "cena per due", "carne per stasera"), crea esattamente 3 diverse proposte di carrelli basandoti sui prodotti disponibili.
+    - Altrimenti, crea esattamente 3 diverse proposte di carrelli (1. Classico/Equilibrato, 2. Selezione Gourmet/Pregiata, 3. Pratico/Leggero o Conveniente) spiegando brevemente le dosi pensate per le persone indicate.
 
     REQUISITI DI RISPOSTA:
     Rispondi SOLO ed ESCLUSIVAMENTE con un JSON valido con questa struttura:
     {
-      "messaggioConversazione": "Testo caloroso e amichevole dove spieghi i carrelli o saluti se non ci sono richieste specifiche.",
+      "messaggioConversazione": "Testo caloroso e amichevole dove spieghi i 3 menu pensati con le dosi giuste per le persone.",
       "carrelli": [
         {
-          "nome": "Nome proposta (es. Cena Rustica)",
-          "descrizione": "Breve spiegazione del perché consigli questi prodotti",
+          "nome": "Nome proposta (es. Grigliata Equilibrata)",
+          "descrizione": "Breve spiegazione del menu e del peso totale stimato a persona",
           "prodotti": [
             {
-              "productId": "ID del prodotto",
-              "productName": "Nome del prodotto",
+              "productId": "ID esatto del prodotto",
+              "variantId": "variantId esatto scelto da formati (oppure null se non ha formati)",
+              "productName": "Nome esatto del prodotto",
               "qty": 1,
               "price": 3.50
             }
@@ -450,7 +512,7 @@ async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
     }`;
 
     const promptUtente = `Richiesta Utente: "${contesto.richiestaUtente}". Prodotti Negozio: ${JSON.stringify(prodottiLeggeri)}`;
-    const aiResponse = await callGroqAPI(systemPrompt, promptUtente, groqApiKey, 0.4, true);
+    const aiResponse = await callGroqAPI(systemPrompt, promptUtente, groqApiKey, 0.3, true);
 
     try {
         return res.status(200).json(JSON.parse(aiResponse));
@@ -523,15 +585,62 @@ REGOLE FONDAMENTALI:
 }
 
 // ==================================================================
-// 10. HANDLER PRINCIPALE (ESPOSTO A VERCEL)
+// 10. HANDLER PRINCIPALE + PROTEZIONE CREDITI AI (ESPOSTO A VERCEL)
 // ==================================================================
+const ALLOWED_ORIGINS = [
+    'https://localmente-v3-core.web.app',
+    'https://localmente-v3-core.firebaseapp.com',
+    'https://localmente-site.web.app',
+    'https://localmente-site.firebaseapp.com',
+    'https://www.civora.it',
+    'https://civora.it',
+    'capacitor://localhost',
+    'ionic://localhost'
+];
+
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 15;
+
+function checkRateLimit(req) {
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket?.remoteAddress) || 'unknown';
+    const now = Date.now();
+    const entry = rateLimitMap.get(ip);
+
+    if (!entry || (now - entry.startTime) > RATE_LIMIT_WINDOW_MS) {
+        rateLimitMap.set(ip, { count: 1, startTime: now });
+        return true;
+    }
+    if (entry.count >= RATE_LIMIT_MAX_REQUESTS) {
+        return false;
+    }
+    entry.count += 1;
+    return true;
+}
+
 export default async function handler(req, res) {
+    const origin = req.headers.origin;
+    const host = req.headers.host || '';
+    const isLocal = host.includes('localhost') || host.includes('127.0.0.1') || (origin && (origin.includes('localhost') || origin.includes('127.0.0.1')));
+
+    if (ALLOWED_ORIGINS.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else if (isLocal) {
+        res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    } else if (origin && origin !== 'null') {
+        return res.status(403).json({ error: 'Accesso non autorizzato da questo dominio.' });
+    }
+
     res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
 
     if (req.method === 'OPTIONS') return res.status(200).send('OK');
+
+    if (!checkRateLimit(req)) {
+        return res.status(429).json({ error: 'Troppe richieste. Attendi qualche secondo prima di riprovare.' });
+    }
 
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
     if (!GROQ_API_KEY) return res.status(500).json({ error: "API Key mancante" });
