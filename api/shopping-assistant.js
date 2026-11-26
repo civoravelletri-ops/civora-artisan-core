@@ -1,6 +1,7 @@
 // api/shopping-assistant.js
 
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 const SUPPORTED_LANGUAGES = ['en', 'fr', 'de', 'es', 'ru', 'ro', 'sq', 'hi', 'ar', 'zh'];
 
 // ==================================================================
@@ -11,7 +12,9 @@ if (!admin.apps.length) {
     const firebaseServiceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
     if (firebaseServiceAccountKey) {
         try {
-            const firebaseConfig = JSON.parse(Buffer.from(firebaseServiceAccountKey, 'base64').toString('utf8'));
+            const firebaseConfig = firebaseServiceAccountKey.trim().startsWith('{')
+                ? JSON.parse(firebaseServiceAccountKey)
+                : JSON.parse(Buffer.from(firebaseServiceAccountKey, 'base64').toString('utf8'));
             admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
             db = admin.firestore();
         } catch (e) {
@@ -23,126 +26,199 @@ if (!admin.apps.length) {
 }
 
 // ==================================================================
-// 2. FUNZIONE CORE API (Groq con Rilevamento Automatico Modello Attivo)
+// 2. MOTORE CORE API: GOOGLE VERTEX AI (Gemini 3.5 Flash-Lite)
+//    Zero dipendenze esterne, usa la variabile GOOGLE_CREDENTIALS
 // ==================================================================
-let cachedGroqModel = null;
-let lastModelCheckTime = 0;
+let cachedGoogleToken = null;
+let cachedTokenExpiry = 0;
+let cachedProjectId = null;
 
-async function getActiveGroqModel(groqApiKey) {
-    const now = Date.now();
-    // Riutilizza il modello per 1 ora per essere istantaneo senza rifare la richiesta ogni secondo
-    if (cachedGroqModel && (now - lastModelCheckTime < 1000 * 60 * 60)) {
-        return cachedGroqModel;
-    }
-
-    try {
-        const res = await fetch("https://api.groq.com/openai/v1/models", {
-            method: "GET",
-            headers: { "Authorization": `Bearer ${groqApiKey}` }
-        });
-
-        if (res.ok) {
-            const data = await res.json();
-            if (data && Array.isArray(data.data) && data.data.length > 0) {
-                // Esclude modelli vocali o di protezione per prendere solo modelli di testo/chat attivi
-                const chatModels = data.data
-                    .map(m => m.id)
-                    .filter(id => !id.includes("whisper") && !id.includes("guard") && !id.includes("embed"));
-
-                if (chatModels.length > 0) {
-                    // Cerca preferibilmente modelli veloci e attivi (come gpt-oss o altri), altrimenti prende il primo disponibile
-                    const chosen = chatModels.find(id => id.includes("20b") || id.includes("8b") || id.includes("oss")) || chatModels[0];
-                    cachedGroqModel = chosen;
-                    lastModelCheckTime = now;
-                    console.log("[Groq Auto-Detect] Modello attivo rilevato e impostato:", cachedGroqModel);
-                    return cachedGroqModel;
-                }
-            }
-        }
-    } catch (err) {
-        console.warn("[Groq Auto-Detect] Errore richiesta modelli, uso fallback:", err);
-    }
-
-    // Fallback di riserva
-    return "openai/gpt-oss-20b";
+function base64UrlEncode(input) {
+    const buf = Buffer.isBuffer(input) ? input : Buffer.from(JSON.stringify(input));
+    return buf.toString('base64')
+        .replace(/=/g, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
 }
 
-async function callGroqAPI(systemPrompt, userPromptText, groqApiKey, temperature = 0.1, isJson = false) {
-    let modelToUse = await getActiveGroqModel(groqApiKey);
+async function getGoogleAccessToken() {
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (cachedGoogleToken && cachedProjectId && nowSec < (cachedTokenExpiry - 300)) {
+        return { token: cachedGoogleToken, projectId: cachedProjectId };
+    }
 
-    let response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-            model: modelToUse,
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPromptText }
-            ],
-            temperature: temperature,
-            response_format: isJson ? { type: "json_object" } : { type: "text" }
-        })
+    const rawCreds = process.env.GOOGLE_CREDENTIALS;
+    if (!rawCreds) throw new Error('GOOGLE_CREDENTIALS mancante nelle variabili d\'ambiente.');
+
+    const credentials = typeof rawCreds === 'string' && rawCreds.trim().startsWith('{')
+        ? JSON.parse(rawCreds)
+        : JSON.parse(Buffer.from(rawCreds, 'base64').toString('utf8'));
+
+    const header = base64UrlEncode({ alg: 'RS256', typ: 'JWT' });
+    const claimSet = base64UrlEncode({
+        iss: credentials.client_email,
+        scope: 'https://www.googleapis.com/auth/cloud-platform',
+        aud: 'https://oauth2.googleapis.com/token',
+        exp: nowSec + 3600,
+        iat: nowSec
     });
 
-    // Se il modello restituisce errore di accesso o scadenza, resetta la cache e riprova al volo con un altro modello attivo
-    if (!response.ok) {
-        cachedGroqModel = null;
-        const retryModel = await getActiveGroqModel(groqApiKey);
-        if (retryModel !== modelToUse) {
-            response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    model: retryModel,
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        { role: "user", content: userPromptText }
-                    ],
-                    temperature: temperature,
-                    response_format: isJson ? { type: "json_object" } : { type: "text" }
-                })
-            });
+    const unsignedJwt = `${header}.${claimSet}`;
+    const privateKey = String(credentials.private_key || '').replace(/\\n/g, '\n');
+    const signer = crypto.createSign('RSA-SHA256');
+    signer.update(unsignedJwt);
+    const signature = base64UrlEncode(signer.sign(privateKey));
+    const jwt = `${unsignedJwt}.${signature}`;
+
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+            grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            assertion: jwt
+        }).toString()
+    });
+
+    if (!tokenRes.ok) {
+        const errText = await tokenRes.text();
+        throw new Error(`Errore OAuth Google (${tokenRes.status}): ${errText}`);
+    }
+
+    const tokenData = await tokenRes.json();
+    cachedGoogleToken = tokenData.access_token;
+    cachedTokenExpiry = nowSec + (tokenData.expires_in || 3600);
+    cachedProjectId = credentials.project_id;
+
+    return { token: cachedGoogleToken, projectId: cachedProjectId };
+}
+
+async function buildImagePart(imageUrl) {
+    if (!imageUrl || typeof imageUrl !== 'string') return null;
+
+    if (imageUrl.startsWith('data:image')) {
+        const match = imageUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+        if (match) {
+            return { inlineData: { mimeType: match[1], data: match[2] } };
+        }
+        return null;
+    }
+
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+        try {
+            const imgRes = await fetch(imageUrl);
+            if (!imgRes.ok) return null;
+            const mimeType = (imgRes.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+            const buffer = Buffer.from(await imgRes.arrayBuffer());
+            return { inlineData: { mimeType, data: buffer.toString('base64') } };
+        } catch (e) {
+            console.warn('[Gemini Vision] Impossibile scaricare immagine:', e.message);
+            return null;
         }
     }
 
-    if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error?.message || "Errore API Groq");
+    return null;
+}
+
+function parseJsonSafe(rawText) {
+    const cleaned = String(rawText || '')
+        .trim()
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+    return JSON.parse(cleaned);
+}
+
+async function callGeminiAPI(systemPrompt, userPromptText, temperature = 0.2, isJson = false, imageUrl = null, retryAttempt = 0) {
+    const { token, projectId } = await getGoogleAccessToken();
+    const location = 'us-central1';
+    const modelId = 'gemini-3.5-flash-lite';
+    const url = `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
+
+    const parts = [{ text: String(userPromptText || '') }];
+    if (imageUrl) {
+        const imgPart = await buildImagePart(imageUrl);
+        if (imgPart) parts.push(imgPart);
     }
+
+    const payload = {
+        contents: [{ role: 'user', parts }],
+        generationConfig: {
+            temperature: temperature,
+            maxOutputTokens: 8192
+        },
+        safetySettings: [
+            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }
+        ]
+    };
+
+    if (isJson) {
+        payload.generationConfig.responseMimeType = 'application/json';
+    }
+
+    if (systemPrompt) {
+        payload.systemInstruction = {
+            parts: [{ text: systemPrompt }]
+        };
+    }
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+
+    if (response.status === 429 && retryAttempt < 2) {
+        console.warn(`[Gemini 429 Auto-Retry] Attendo 2s e riprovo (Tentativo ${retryAttempt + 1})...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return callGeminiAPI(systemPrompt, userPromptText, temperature, isJson, imageUrl, retryAttempt + 1);
+    }
+
+    if (!response.ok) {
+        const details = await response.text();
+        throw new Error(`Gemini API Error (${response.status}): ${details}`);
+    }
+
     const data = await response.json();
-    return data.choices[0].message.content.trim();
+    return (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
 }
 
 // ==================================================================
 // 3. LOGICA ADDESTRAMENTO (Teach AI)
 // ==================================================================
-async function handleTeachAICollaborator(req, res, groqApiKey) {
+async function handleTeachAICollaborator(req, res) {
     const { rawInstructions, currentMemory } = req.body;
 
     const itPrompt = "Sei un traduttore. Traduci il testo in italiano perfetto. Rispondi SOLO con la traduzione.";
-    const instructionsInItalian = await callGroqAPI(itPrompt, rawInstructions, groqApiKey);
+    const instructionsInItalian = await callGeminiAPI(itPrompt, rawInstructions, 0.1, false);
 
     const structPrompt = `Sei un analista dati. Estrai un oggetto JSON dal testo. REGOLE: Rispondi SOLO con JSON.
         Campi: anno_fondazione, specialita_vivaio (array), filosofia_generale, regole_sconti_quantita (array oggetti), personale (array), orari_speciali, tono_di_voce_ai, discount_strategy_rules (array), customer_psychology_rules (array), forbidden_words (array), preferred_words (array), descrizione_generale_vivaio, range_prezzi_display, comprensione_percentuale.`;
 
     const structUser = `TESTO NUOVO: "${instructionsInItalian}"\nMEMORIA VECCHIA: "${currentMemory || ''}"`;
-    const structResp = await callGroqAPI(structPrompt, structUser, groqApiKey, 0.1, true);
+    const structResp = await callGeminiAPI(structPrompt, structUser, 0.1, true);
 
     let structuredMemory;
     try {
-        structuredMemory = JSON.parse(structResp);
+        structuredMemory = parseJsonSafe(structResp);
     } catch (e) {
         throw new Error("L'AI non ha risposto con un JSON valido durante l'estrazione dati.");
     }
 
     const summaryPrompt = "Crea un testo fluido in italiano che riassuma la memoria dell'AI. Inizia con 'Ho imparato che...'";
-    const newMemory_it = await callGroqAPI(summaryPrompt, JSON.stringify(structuredMemory), groqApiKey, 0.3);
+    const newMemory_it = await callGeminiAPI(summaryPrompt, JSON.stringify(structuredMemory), 0.3, false);
 
     const translatePrompt = `Traduci in queste lingue: ${SUPPORTED_LANGUAGES.join(', ')}. REGOLE: Rispondi SOLO con un oggetto JSON dove le chiavi sono i codici lingua.`;
-    const translateResp = await callGroqAPI(translatePrompt, newMemory_it, groqApiKey, 0.1, true);
+    const translateResp = await callGeminiAPI(translatePrompt, newMemory_it, 0.1, true);
 
     let translations = {};
-    try { translations = JSON.parse(translateResp); } catch(e) {}
+    try { translations = parseJsonSafe(translateResp); } catch (e) {}
 
     return res.status(200).json({
         newInstructions_it: newMemory_it,
@@ -154,13 +230,13 @@ async function handleTeachAICollaborator(req, res, groqApiKey) {
 // ==================================================================
 // 4. LOGICA CLIENTE (Il tuo Vivaista / Specchio del Titolare)
 // ==================================================================
-async function handleBotanicoClient(req, res, groqApiKey) {
+async function handleBotanicoClient(req, res) {
     const { contesto } = req.body;
     let structuredMemory = {};
     let generalInstructions = "";
 
     const vid = contesto.vendorId || contesto.id;
-    if (vid) {
+    if (vid && db) {
         try {
             const aiMemoryDoc = await db.collection('vendors').doc(vid).collection('ai_assistant').doc('memory').get();
             if (aiMemoryDoc.exists) {
@@ -240,51 +316,23 @@ async function handleBotanicoClient(req, res, groqApiKey) {
            - Formato JSON: {"action": "risposta_normale"|"chiedi_contatto"|"conferma_contatto", "message": "...", "customer_name": "...", "customer_phone": "...", "conversation_summary_for_owner": "..."}
         `;
 
+    const hasImage = Boolean(contesto.imageUrl && (contesto.imageUrl.startsWith("data:image") || contesto.imageUrl.startsWith("http")));
+    const userPrompt = contesto.query || (hasImage ? "Ciao, guarda la foto del mio balcone o giardino." : "Ciao!");
+
     let aiResponse;
-
-    if (contesto.imageUrl && (contesto.imageUrl.startsWith("data:image") || contesto.imageUrl.startsWith("http"))) {
-        // Se l'utente ha inviato un'immagine, usiamo il nuovo e potentissimo Llama 4 Scout di Groq con supporto Vision
-        try {
-            // Per evitare errori 400 di Groq, uniamo le istruzioni di sistema direttamente nel testo dell'utente!
-            const promptUnito = `${systemPrompt}\n\nDOMANDA CLIENTE DA RISPONDERE: ${contesto.query || "Ciao, guarda la foto del mio balcone o giardino."}`;
-
-            const visionResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: { "Authorization": `Bearer ${groqApiKey}`, "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    model: "meta-llama/llama-4-scout-17b-16e-instruct",
-                    messages: [
-                        {
-                            role: "user",
-                            content: [
-                                { type: "text", text: promptUnito },
-                                { type: "image_url", image_url: { url: contesto.imageUrl } }
-                            ]
-                        }
-                    ],
-                    temperature: 0.5,
-                    response_format: { type: "json_object" }
-                })
-            });
-
-            if (!visionResponse.ok) {
-                const err = await visionResponse.json();
-                throw new Error(err.error?.message || "Errore Vision API");
-            }
-            const visionData = await visionResponse.json();
-            aiResponse = visionData.choices[0].message.content.trim();
-        } catch (visionError) {
-            console.error("Errore chiamata Vision, eseguo il fallback a testo standard:", visionError);
-            // Fallback su testo standard con Llama-3.3-70b se la chiamata immagine fallisce per sicurezza
-            aiResponse = await callGroqAPI(systemPrompt, contesto.query || "Ciao, ti ho mandato una foto ma c'è stato un problema di caricamento.", groqApiKey, 0.7, true);
+    try {
+        aiResponse = await callGeminiAPI(systemPrompt, userPrompt, hasImage ? 0.5 : 0.7, true, hasImage ? contesto.imageUrl : null);
+    } catch (visionErr) {
+        if (hasImage) {
+            console.error("Errore chiamata Vision Gemini, fallback solo testo:", visionErr);
+            aiResponse = await callGeminiAPI(systemPrompt, contesto.query || "Ciao, ti ho mandato una foto ma c'è stato un problema di caricamento.", 0.7, true, null);
+        } else {
+            throw visionErr;
         }
-    } else {
-        // Chiamata testo standard classica (Llama-3.3-70b)
-        aiResponse = await callGroqAPI(systemPrompt, contesto.query, groqApiKey, 0.7, true);
     }
 
     try {
-        return res.status(200).json(JSON.parse(aiResponse));
+        return res.status(200).json(parseJsonSafe(aiResponse));
     } catch (e) {
         console.error("Errore parsing AI response in handleBotanicoClient:", e, "Raw AI Response:", aiResponse);
         return res.status(200).json({ action: "risposta_normale", message: "Scusami, ho avuto un piccolo problema tecnico nel caricare l'immagine o il testo. Puoi ripetere?", conversation_summary_for_owner: contesto.previousConversationSummary });
@@ -294,12 +342,12 @@ async function handleBotanicoClient(req, res, groqApiKey) {
 // ==================================================================
 // 5. LOGICA PROPOSTA SCONTO (Il Guardiano)
 // ==================================================================
-async function handleProposeDiscountOffer(req, res, groqApiKey) {
-    const { vendorId, customerUserId, cartItems, customerQuery, lang = 'it' } = req.body;
+async function handleProposeDiscountOffer(req, res) {
+    const { vendorId, customerUserId, cartItems, customerQuery } = req.body;
     let structuredMemory = {};
     let vendorProducts = [];
 
-    if (vendorId) {
+    if (vendorId && db) {
         try {
             const aiMemoryDoc = await db.collection('vendors').doc(vendorId).collection('ai_assistant').doc('memory').get();
             if (aiMemoryDoc.exists) structuredMemory = aiMemoryDoc.data().structured_memory || {};
@@ -315,11 +363,11 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) {
     CARRELLO: ${JSON.stringify(cartItems)}.
     Rispondi SOLO JSON con campi: offer_made (bool), offer_text (string), suggested_total_price (num), discount_percentage_applied (num), reasoning (string).`;
 
-    const aiResponse = await callGroqAPI(systemPrompt, customerQuery, groqApiKey, 0.2, true);
+    const aiResponse = await callGeminiAPI(systemPrompt, customerQuery, 0.2, true);
     let parsed;
-    try { parsed = JSON.parse(aiResponse); } catch(e) { return res.status(500).json({ error: "Errore AI" }); }
+    try { parsed = parseJsonSafe(aiResponse); } catch (e) { return res.status(500).json({ error: "Errore AI" }); }
 
-    if (parsed.offer_made) {
+    if (parsed.offer_made && db) {
         try {
             const offerRef = await db.collection('vendors').doc(vendorId).collection('ai_assistant').collection('valid_offers').add({
                 ...parsed,
@@ -336,9 +384,9 @@ async function handleProposeDiscountOffer(req, res, groqApiKey) {
 }
 
 // ==================================================================
-// 6. LOGICA ESCALATION AL PROPRIETARIO (Corretta)
+// 6. LOGICA ESCALATION AL PROPRIETARIO
 // ==================================================================
-async function handleEscalateToOwner(req, res, groqApiKey) {
+async function handleEscalateToOwner(req, res) {
     const data = req.body.contesto || req.body;
     const { vendorId, customerUserId, customerName, customerPhone, conversationSummary, additionalNotes, requestId } = data;
 
@@ -346,7 +394,6 @@ async function handleEscalateToOwner(req, res, groqApiKey) {
         if (!vendorId) throw new Error("ID Venditore mancante");
 
         if (requestId) {
-            // Aggiunta note opzionali: percorso corretto
             await db.collection('vendors').doc(vendorId).collection('owner_contact_requests').doc(requestId).update({
                 additionalNotes: additionalNotes || '',
                 request_updated_at: admin.firestore.FieldValue.serverTimestamp()
@@ -356,7 +403,6 @@ async function handleEscalateToOwner(req, res, groqApiKey) {
                 message_to_customer: "Perfetto, ho aggiunto le tue note! Il titolare ha ora tutti i dettagli. A presto!"
             });
         } else {
-            // Creazione nuova richiesta: percorso corretto
             const requestRef = await db.collection('vendors').doc(vendorId).collection('owner_contact_requests').add({
                 vendorId: vendorId,
                 customerUserId: customerUserId || 'guest',
@@ -383,20 +429,19 @@ async function handleEscalateToOwner(req, res, groqApiKey) {
 // ==================================================================
 // 7. LOGICA SINCRONIZZAZIONE INVENTARIO
 // ==================================================================
-async function handleSyncInventory(req, res, groqApiKey) {
+async function handleSyncInventory(req, res) {
     const { vendorData, products, currentMemory } = req.body;
     const systemPrompt = `Sei un esperto analista. Crea un Manuale di Conoscenza JSON basato su PROFILO e PRODOTTI.
     Campi: newInstructions_it (testo fluido), structured_memory (oggetto con: orari, categorie_principali, range_prezzi_display, comprensione_percentuale).`;
 
     const userPrompt = `PROFILO: ${JSON.stringify(vendorData)}\nPRODOTTI: ${JSON.stringify(products)}\nMEMORIA: ${currentMemory}`;
-    const aiResponse = await callGroqAPI(systemPrompt, userPrompt, groqApiKey, 0.3, true);
+    const aiResponse = await callGeminiAPI(systemPrompt, userPrompt, 0.3, true);
 
-    let parsed;
     try {
-        parsed = JSON.parse(aiResponse);
+        const parsed = parseJsonSafe(aiResponse);
         const translatePrompt = `Traduci in: en, fr, de, es, ru, ro, sq, hi, ar, zh. Rispondi solo JSON.`;
-        const translateResp = await callGroqAPI(translatePrompt, parsed.newInstructions_it, groqApiKey, 0.1, true);
-        const translations = JSON.parse(translateResp);
+        const translateResp = await callGeminiAPI(translatePrompt, parsed.newInstructions_it, 0.1, true);
+        const translations = parseJsonSafe(translateResp);
 
         return res.status(200).json({
             newInstructions_it: parsed.newInstructions_it,
@@ -409,9 +454,9 @@ async function handleSyncInventory(req, res, groqApiKey) {
 }
 
 // ==================================================================
-// 8. LOGICA PERSONAL SHOPPER (CARRELLI) - VERSIONE CHEF & MACELLAIO
+// 8. LOGICA PERSONAL SHOPPER (CARRELLI) - CHEF & MACELLAIO (CATALOGO COMPLETO)
 // ==================================================================
-async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
+async function handlePersonalShopperCarrelli(req, res) {
     const { contesto } = req.body;
 
     function convertUnitToGrams(qty, unit) {
@@ -423,6 +468,7 @@ async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
         return null;
     }
 
+    // Invia TUTTI i prodotti disponibili (nessun taglio/slice!), tenendo solo i campi essenziali
     const prodottiLeggeri = (contesto.prodotti || []).map(p => {
         const rawVars = Array.isArray(p.variants) ? p.variants : [];
         const availableVars = rawVars
@@ -438,6 +484,9 @@ async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
             });
 
         if (rawVars.length > 0 && availableVars.length === 0) {
+            return null;
+        }
+        if (rawVars.length === 0 && p.stock !== undefined && p.stock !== null && Number(p.stock) <= 0) {
             return null;
         }
 
@@ -464,7 +513,7 @@ async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
         }
 
         return itemObj;
-    }).filter(Boolean).slice(0, 80);
+    }).filter(Boolean);
 
     const systemPrompt = `Sei un Personal Shopper esperto di gastronomia, macelleria, pescheria e mercato fresco per il negozio "${contesto.store_name}".
     Il tuo obiettivo è consigliare il cliente e comporre spese REALISTICHE, EQUILIBRATE e SENSATE basate sulle porzioni vere.
@@ -512,11 +561,11 @@ async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
     }`;
 
     const promptUtente = `Richiesta Utente: "${contesto.richiestaUtente}". Prodotti Negozio: ${JSON.stringify(prodottiLeggeri)}`;
-    const aiResponse = await callGroqAPI(systemPrompt, promptUtente, groqApiKey, 0.3, true);
+    const aiResponse = await callGeminiAPI(systemPrompt, promptUtente, 0.3, true);
 
     try {
-        return res.status(200).json(JSON.parse(aiResponse));
-    } catch(e) {
+        return res.status(200).json(parseJsonSafe(aiResponse));
+    } catch (e) {
         console.error("Errore parsing JSON in personal shopper:", e, "Risposta grezza:", aiResponse);
         return res.status(500).json({ error: "Errore generazione carrelli" });
     }
@@ -525,7 +574,7 @@ async function handlePersonalShopperCarrelli(req, res, groqApiKey) {
 // ==================================================================
 // 9. LOGICA CONSULENTE AI - CURA DELLA PERSONA (Salone / Barbiere / Estetica)
 // ==================================================================
-async function handleCuraPersonaConsultant(req, res, groqApiKey) {
+async function handleCuraPersonaConsultant(req, res) {
     const { contesto } = req.body;
     if (!contesto) return res.status(400).json({ error: "Contesto mancante" });
 
@@ -534,7 +583,6 @@ async function handleCuraPersonaConsultant(req, res, groqApiKey) {
     const product = contesto.product || {};
     const query = contesto.query || contesto.richiestaUtente || "Ciao! Vorrei sapere se questo prodotto è adatto a me.";
 
-    // Estrae i dettagli del prodotto in modo leggero e pulito
     const prodDetails = {
         nome: product.productName || product.nome || "",
         marca: product.brand || product.marca || "",
@@ -571,11 +619,11 @@ REGOLE FONDAMENTALI:
    }`;
 
     const userPrompt = `Domanda del cliente: "${query}". Cronologia precedente: "${contesto.history || 'Nessuna'}".`;
-    const aiResponse = await callGroqAPI(systemPrompt, userPrompt, groqApiKey, 0.4, true);
+    const aiResponse = await callGeminiAPI(systemPrompt, userPrompt, 0.4, true);
 
     try {
-        return res.status(200).json(JSON.parse(aiResponse));
-    } catch(e) {
+        return res.status(200).json(parseJsonSafe(aiResponse));
+    } catch (e) {
         console.error("Errore parsing JSON consulente cura persona:", e, "Risposta grezza:", aiResponse);
         return res.status(200).json({
             message: "Questo prodotto è una formula professionale selezionata con cura per garantire i massimi risultati. Per cosa vorresti utilizzarlo nello specifico?",
@@ -642,19 +690,20 @@ export default async function handler(req, res) {
         return res.status(429).json({ error: 'Troppe richieste. Attendi qualche secondo prima di riprovare.' });
     }
 
-    const GROQ_API_KEY = process.env.GROQ_API_KEY;
-    if (!GROQ_API_KEY) return res.status(500).json({ error: "API Key mancante" });
+    if (!process.env.GOOGLE_CREDENTIALS) {
+        return res.status(500).json({ error: "GOOGLE_CREDENTIALS mancante su Vercel" });
+    }
 
     try {
         const { action } = req.body;
         switch (action) {
-            case 'teach_ai_collaborator': return await handleTeachAICollaborator(req, res, GROQ_API_KEY);
-            case 'sync_vendor_inventory': return await handleSyncInventory(req, res, GROQ_API_KEY);
-            case 'botanico': return await handleBotanicoClient(req, res, GROQ_API_KEY);
-            case 'propose_discount_offer': return await handleProposeDiscountOffer(req, res, GROQ_API_KEY);
-            case 'escalate_to_owner': return await handleEscalateToOwner(req, res, GROQ_API_KEY);
-            case 'personal_shopper_carrelli': return await handlePersonalShopperCarrelli(req, res, GROQ_API_KEY);
-            case 'cura_persona_consultant': return await handleCuraPersonaConsultant(req, res, GROQ_API_KEY);
+            case 'teach_ai_collaborator': return await handleTeachAICollaborator(req, res);
+            case 'sync_vendor_inventory': return await handleSyncInventory(req, res);
+            case 'botanico': return await handleBotanicoClient(req, res);
+            case 'propose_discount_offer': return await handleProposeDiscountOffer(req, res);
+            case 'escalate_to_owner': return await handleEscalateToOwner(req, res);
+            case 'personal_shopper_carrelli': return await handlePersonalShopperCarrelli(req, res);
+            case 'cura_persona_consultant': return await handleCuraPersonaConsultant(req, res);
             default: return res.status(400).json({ error: 'Azione sconosciuta: ' + action });
         }
     } catch (error) {
@@ -662,3 +711,7 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: error.message });
     }
 }
+
+export const config = {
+    maxDuration: 60
+};
